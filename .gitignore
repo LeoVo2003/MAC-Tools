@@ -1,0 +1,15 @@
+node_modules/
+.env
+downloads/
+data/
+output-latest.json
+errors/
+*.png
+*.zip
+.DS_Store
+portable/
+portable-mac/
+dist/
+release/
+*.tar.gz
+_extract_*/
