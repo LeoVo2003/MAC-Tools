@@ -151,6 +151,7 @@ function showApp(user) {
   setBadge(loginStatus, 'done', 'OK');
   applyRoleUi(user);
   connectEvents();
+  refreshQueue();
 }
 
 async function refreshMe() {
@@ -218,10 +219,12 @@ function connectEvents(jobId) {
     showResult(data);
     setRunBadge('done', 'Done');
     runBtn.disabled = false;
+    if (resumeBtn) resumeBtn.hidden = true;
     clearStepStyles();
     doneThisRun.clear();
     queueHint.textContent = '';
     loadBackups();
+    refreshQueue();
   });
   eventSource.addEventListener('error', (e) => {
     try {
@@ -230,7 +233,12 @@ function connectEvents(jobId) {
       untickCompletedAfterError();
       setRunBadge('error', 'Error');
       runBtn.disabled = false;
+      if (resumeBtn) {
+        resumeBtn.hidden = false;
+        appendLog('↳ Bấm Resume để chạy các bước còn tick (hoặc tick lại rồi Run).');
+      }
       queueHint.textContent = '';
+      refreshQueue();
     } catch {
       /* SSE reconnect */
     }
@@ -238,12 +246,7 @@ function connectEvents(jobId) {
   eventSource.addEventListener('queue', (e) => {
     try {
       const q = JSON.parse(e.data);
-      const max = q.maxConcurrent || 4;
-      if (q.runningCount > 0 || q.pendingCount > 0) {
-        queueHint.textContent = `Đang chạy ${q.runningCount || 0}/${max}${q.pendingCount ? ` · chờ ${q.pendingCount}` : ''}`;
-      } else {
-        queueHint.textContent = '';
-      }
+      renderQueue(q);
     } catch {
       /* ignore */
     }
@@ -307,6 +310,42 @@ for (const name of ['username', 'password']) {
 
 const fillDataBtn = document.getElementById('fillDataBtn');
 const fillDataHint = document.getElementById('fillDataHint');
+const fillFieldStatus = document.getElementById('fillFieldStatus');
+const resumeBtn = document.getElementById('resumeBtn');
+
+function clearFieldWarns() {
+  for (const id of ['fieldWebsiteUrl', 'fieldUsername', 'fieldPassword', 'fieldEmail']) {
+    document.getElementById(id)?.classList.remove('field-warn');
+  }
+}
+
+function markFieldWarn(name, bad) {
+  const map = {
+    websiteUrl: 'fieldWebsiteUrl',
+    username: 'fieldUsername',
+    password: 'fieldPassword',
+    email: 'fieldEmail',
+  };
+  const el = document.getElementById(map[name]);
+  if (!el) return;
+  el.classList.toggle('field-warn', Boolean(bad));
+}
+
+function renderFillStatus(fields = {}, needManual = []) {
+  if (!fillFieldStatus) return;
+  const keys = ['websiteUrl', 'username', 'password', 'email', 'state', 'zip'];
+  fillFieldStatus.hidden = false;
+  fillFieldStatus.innerHTML = keys
+    .map((k) => {
+      const f = fields[k] || {};
+      const ok = f.ok !== false && f.value;
+      const label = k === 'websiteUrl' ? 'Website' : k;
+      return `<span class="fill-chip ${ok ? 'ok' : 'bad'}" title="${f.hint || ''}">${label}: ${ok ? 'OK' : 'thiếu — sửa tay'}</span>`;
+    })
+    .join('');
+  clearFieldWarns();
+  for (const k of needManual) markFieldWarn(k, true);
+}
 
 fillDataBtn?.addEventListener('click', async () => {
   const projectInput = form?.querySelector('[name="wpmProjectUrl"]');
@@ -322,7 +361,9 @@ fillDataBtn?.addEventListener('click', async () => {
   fillDataBtn.disabled = true;
   runBtn.disabled = true;
   fillDataHint.style.color = 'var(--muted)';
-  fillDataHint.textContent = 'Đang lấy data (login WPM + đọc website)…';
+  fillDataHint.textContent = 'Đang lấy data (Main Web + footer) — Chrome ẩn…';
+  if (fillFieldStatus) fillFieldStatus.hidden = true;
+  clearFieldWarns();
   logBox.textContent = '';
   appendLog('=== Fill data ===');
   setRunBadge('running', 'Fill…');
@@ -358,13 +399,14 @@ fillDataBtn?.addEventListener('click', async () => {
 
     const warns = data.warnings || [];
     for (const w of warns) appendLog(`⚠ ${w}`);
+    renderFillStatus(data.fields || {}, data.needManual || []);
 
-    if (!data.email) {
-      fillDataHint.textContent = 'Đã fill một phần — không lấy được email từ footer (điền tay).';
+    if (data.needManual?.length) {
+      fillDataHint.textContent = `Thiếu: ${data.needManual.join(', ')} — sửa tay ô vàng rồi Run.`;
       fillDataHint.style.color = 'var(--warn)';
-      setRunBadge('error', 'Thiếu mail');
+      setRunBadge('error', 'Sửa tay');
     } else if (warns.length) {
-      fillDataHint.textContent = `Đã fill — còn ${warns.length} cảnh báo (xem Log).`;
+      fillDataHint.textContent = `Đã fill — ${warns.length} cảnh báo (xem Log). Có thể Run.`;
       fillDataHint.style.color = 'var(--warn)';
       setRunBadge('done', 'Filled');
     } else {
@@ -382,6 +424,11 @@ fillDataBtn?.addEventListener('click', async () => {
     fillDataBtn.disabled = false;
     runBtn.disabled = false;
   }
+});
+
+resumeBtn?.addEventListener('click', () => {
+  appendLog('↳ Resume = Run lại với các bước còn đang tick (bước xong đã bỏ tick).');
+  form?.requestSubmit();
 });
 
 form?.addEventListener('submit', async (e) => {
@@ -485,7 +532,10 @@ document.querySelectorAll('.tab').forEach((btn) => {
     document.getElementById('tab-run').hidden = tab !== 'run';
     document.getElementById('tab-reports').hidden = tab !== 'reports';
     document.getElementById('tab-backups').hidden = tab !== 'backups';
-    if (tab === 'reports') loadReports();
+    if (tab === 'reports') {
+      loadReports();
+      loadHealth();
+    }
     if (tab === 'backups') loadBackups();
   });
 });
@@ -510,34 +560,144 @@ function runDurationMs(r) {
   return Math.max(0, b - a);
 }
 
+function renderQueue(q) {
+  const max = q?.maxConcurrent || 4;
+  if (q?.runningCount > 0 || q?.pendingCount > 0) {
+    queueHint.textContent = `Đang chạy ${q.runningCount || 0}/${max}${q.pendingCount ? ` · chờ ${q.pendingCount}` : ''}`;
+  } else {
+    queueHint.textContent = '';
+  }
+  const box = document.getElementById('queueList');
+  if (!box) return;
+  const items = q?.queue || [];
+  if (!items.length) {
+    box.innerHTML = '<p class="hint">Trống.</p>';
+    return;
+  }
+  box.innerHTML = '';
+  for (const item of items) {
+    const row = document.createElement('div');
+    row.className = 'queue-row';
+    const short = String(item.id || '').slice(0, 8);
+    row.innerHTML = `
+      <div>
+        <strong>${item.status === 'running' ? '▶ Running' : `#${item.position || '?'} Waiting`}</strong>
+        · ${item.user || '—'}
+        <div class="meta">${short}… ${item.startedAt ? item.startedAt.replace('T', ' ').slice(0, 19) : ''}</div>
+      </div>
+      <button type="button" class="secondary tiny queue-cancel" data-id="${item.id}">Hủy</button>`;
+    box.appendChild(row);
+  }
+  box.querySelectorAll('.queue-cancel').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.getAttribute('data-id');
+      if (!id) return;
+      btn.disabled = true;
+      try {
+        const res = await fetch(`/api/queue/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || res.statusText);
+        appendLog(`⏹ Đã hủy job ${id.slice(0, 8)}… (${data.kind})`);
+        refreshQueue();
+      } catch (err) {
+        appendLog(`❌ Hủy job: ${err.message}`);
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
+async function refreshQueue() {
+  try {
+    const res = await fetch('/api/queue');
+    if (!res.ok) return;
+    renderQueue(await res.json());
+  } catch {
+    /* ignore */
+  }
+}
+
+function reportQuery() {
+  const p = new URLSearchParams();
+  p.set('limit', '200');
+  const user = document.getElementById('filterUser')?.value?.trim();
+  const from = document.getElementById('filterFrom')?.value;
+  const to = document.getElementById('filterTo')?.value;
+  const status = document.getElementById('filterStatus')?.value;
+  if (user) p.set('user', user);
+  if (from) p.set('from', from);
+  if (to) p.set('to', to);
+  if (status) p.set('status', status);
+  return p;
+}
+
 async function loadReports() {
-  const res = await fetch('/api/runs?limit=100');
+  const res = await fetch(`/api/runs?${reportQuery()}`);
   if (!res.ok) return;
   const data = await res.json();
   document.getElementById('statTotal').textContent = data.stats?.total ?? 0;
   document.getElementById('statOk').textContent = data.stats?.success ?? 0;
   document.getElementById('statErr').textContent = data.stats?.error ?? 0;
+  const avgEl = document.getElementById('statAvg');
+  if (avgEl) avgEl.textContent = formatDuration(data.stats?.avgDurationMs);
   const tbody = document.querySelector('#runsTable tbody');
   tbody.innerHTML = '';
   for (const r of data.runs || []) {
     const tr = document.createElement('tr');
-    const note =
+    const noteRaw =
       r.error ||
       r.resultSummary?.username ||
       (r.resultSummary?.accountExists ? 'account exists' : '');
+    const note = String(noteRaw || '—');
     const dur = formatDuration(runDurationMs(r));
+    const started = (r.startedAt || '').replace('T', ' ').slice(0, 19);
+    const [datePart, timePart] = started.includes(' ')
+      ? started.split(' ')
+      : [started, ''];
+    const url = r.websiteUrl || '—';
+    const user = r.toolUser || r.username || '—';
+    const statusClass =
+      r.status === 'success' ? 'done' : r.status === 'error' ? 'error' : 'running';
     tr.innerHTML = `
-      <td>${(r.startedAt || '').replace('T', ' ').slice(0, 19)}</td>
-      <td>${r.toolUser || r.username || '—'}</td>
-      <td class="mono">${r.websiteUrl || '—'}</td>
-      <td class="mono">${dur}</td>
-      <td><span class="badge ${r.status === 'success' ? 'done' : r.status === 'error' ? 'error' : 'running'}">${r.status}</span></td>
-      <td>${String(note).slice(0, 80)}</td>`;
+      <td class="col-time">${datePart}${timePart ? `<br><span class="muted">${timePart}</span>` : ''}</td>
+      <td class="col-user" title="${user}">${user}</td>
+      <td class="col-url mono" title="${url}">${url}</td>
+      <td class="col-dur mono">${dur}</td>
+      <td class="col-status"><span class="badge ${statusClass}">${r.status}</span></td>
+      <td class="col-note" title="${note.replace(/"/g, '&quot;')}">${note}</td>`;
     tbody.appendChild(tr);
   }
 }
 
+async function loadHealth() {
+  const box = document.getElementById('healthBox');
+  if (!box) return;
+  try {
+    const res = await fetch('/api/health');
+    const data = await res.json();
+    const lines = [
+      `ok=${data.ok} · chrome=${data.chrome?.ok ? 'OK' : 'MISSING'} ${data.chrome?.path || data.chrome?.error || ''}`,
+      `downloads≈${data.disk?.mb ?? '?'} MB (${data.disk?.path || ''})`,
+      `queue running=${data.queue?.runningCount || 0} pending=${data.queue?.pendingCount || 0}`,
+    ];
+    for (const a of data.alerts || []) {
+      lines.push(`[${a.level}] ${a.message}`);
+    }
+    if (!(data.alerts || []).length) lines.push('Không có alert.');
+    box.textContent = lines.join('\n');
+  } catch (err) {
+    box.textContent = err.message;
+  }
+}
+
 document.getElementById('refreshReportsBtn')?.addEventListener('click', loadReports);
+document.getElementById('exportCsvBtn')?.addEventListener('click', () => {
+  window.location.href = `/api/runs.csv?${reportQuery()}`;
+});
+document.getElementById('refreshHealthBtn')?.addEventListener('click', loadHealth);
+['filterUser', 'filterFrom', 'filterTo', 'filterStatus'].forEach((id) => {
+  document.getElementById(id)?.addEventListener('change', loadReports);
+});
 
 async function loadBackups() {
   const box = document.getElementById('backupsList');

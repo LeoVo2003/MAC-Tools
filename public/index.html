@@ -62,19 +62,19 @@
             </label>
             <label>
               <span>Website URL</span>
-              <input name="websiteUrl" type="url" required placeholder="Fill data sẽ tự lấy" />
+              <input name="websiteUrl" id="fieldWebsiteUrl" type="url" required placeholder="Fill data sẽ tự lấy" />
             </label>
             <label>
               <span>Username Chủ Tiệm</span>
-              <input name="username" type="text" required autocomplete="off" placeholder="vd muse-admin" />
+              <input name="username" id="fieldUsername" type="text" required autocomplete="off" placeholder="vd muse-admin" />
             </label>
             <label>
               <span>Password Chủ Tiệm</span>
-              <input name="password" type="text" required autocomplete="off" placeholder="vd muse-admin@TX-75001" />
+              <input name="password" id="fieldPassword" type="text" required autocomplete="off" placeholder="vd muse-admin@TX-75001" />
             </label>
             <label>
               <span>Email khách</span>
-              <input name="email" type="email" required placeholder="Lấy từ footer website" />
+              <input name="email" id="fieldEmail" type="email" required placeholder="Lấy từ footer website" />
             </label>
             <label>
               <span>Link tài liệu hướng dẫn</span>
@@ -112,10 +112,18 @@
           <div class="actions">
             <button type="button" id="fillDataBtn" class="secondary">Fill data</button>
             <button type="submit" id="runBtn">Run</button>
+            <button type="button" id="resumeBtn" class="secondary" hidden title="Chạy lại các bước còn đang tick">Resume</button>
             <span id="statusBadge" class="badge idle">Idle</span>
             <span id="queueHint" class="hint"></span>
           </div>
           <p id="fillDataHint" class="hint"></p>
+          <div id="fillFieldStatus" class="fill-status" hidden></div>
+
+          <section class="panel queue-panel" id="queuePanel">
+            <h2>Hàng đợi</h2>
+            <p class="hint" style="margin-top:0">Ai đang chạy / chờ — có thể hủy job của bạn.</p>
+            <div id="queueList" class="queue-list"><p class="hint">Trống.</p></div>
+          </section>
         </form>
 
         <section class="panel">
@@ -166,8 +174,36 @@
             <span class="stat">Total: <strong id="statTotal">0</strong></span>
             <span class="stat ok">OK: <strong id="statOk">0</strong></span>
             <span class="stat err">Error: <strong id="statErr">0</strong></span>
+            <span class="stat">Avg time: <strong id="statAvg">—</strong></span>
           </div>
-          <button type="button" id="refreshReportsBtn" class="secondary tiny">Refresh</button>
+          <div class="filters-row" id="reportFilters">
+            <label>
+              <span>User</span>
+              <input id="filterUser" type="text" placeholder="email / username" />
+            </label>
+            <label>
+              <span>Từ ngày</span>
+              <input id="filterFrom" type="date" />
+            </label>
+            <label>
+              <span>Đến ngày</span>
+              <input id="filterTo" type="date" />
+            </label>
+            <label>
+              <span>Status</span>
+              <select id="filterStatus">
+                <option value="">Tất cả</option>
+                <option value="success">success</option>
+                <option value="error">error</option>
+                <option value="cancelled">cancelled</option>
+                <option value="running">running</option>
+              </select>
+            </label>
+          </div>
+          <div class="steps-toolbar">
+            <button type="button" id="refreshReportsBtn" class="secondary tiny">Refresh</button>
+            <button type="button" id="exportCsvBtn" class="secondary tiny">Export CSV</button>
+          </div>
           <div class="table-wrap">
             <table class="data-table" id="runsTable">
               <thead>
@@ -184,13 +220,22 @@
             </table>
           </div>
         </section>
+        <section class="panel" id="healthPanel">
+          <div class="panel-head">
+            <h2>Health / Alert</h2>
+            <button type="button" id="refreshHealthBtn" class="secondary tiny">Refresh health</button>
+          </div>
+          <pre id="healthBox" class="log log-compact"></pre>
+        </section>
       </div>
 
       <div id="tab-backups" hidden>
         <section class="panel">
-          <h2>Backup files trên server</h2>
-          <p class="hint" style="margin-top:0">File tải từ UpdraftPlus (không zip). Bấm tên file để tải về máy.</p>
-          <button type="button" id="refreshBackupsBtn" class="secondary tiny">Refresh</button>
+          <div class="panel-head">
+            <h2>Backup files trên server</h2>
+            <button type="button" id="refreshBackupsBtn" class="secondary tiny">Refresh</button>
+          </div>
+          <p class="hint panel-desc">File tải từ UpdraftPlus (không zip). Bấm tên file để tải về máy.</p>
           <div id="backupsList" class="backups-list"></div>
         </section>
       </div>

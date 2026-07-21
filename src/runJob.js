@@ -38,11 +38,16 @@ function normalizeSteps(raw) {
  * @param {object} job
  * @param {(msg: string) => void} onLog
  * @param {(payload: { id: string, status: 'start'|'done' }) => void} onStep
+ * @param {{ shouldCancel?: () => boolean, setBrowser?: (b: import('puppeteer').Browser) => void }} [hooks]
  */
-export async function runJob(job, onLog = () => {}, onStep = () => {}) {
+export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {}) {
   const log = (msg) => {
     const line = `[${new Date().toLocaleTimeString('vi-VN')}] ${msg}`;
     onLog(line);
+  };
+
+  const throwIfCancelled = () => {
+    if (hooks.shouldCancel?.()) throw new Error('Job đã bị hủy.');
   };
 
   const mark = (id, status) => {
@@ -91,10 +96,12 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}) {
   }
 
   log(`Bước đã chọn: ${[...enabled].join(', ')}`);
+  throwIfCancelled();
 
   const { browser, page: wpmPage } = await launchBrowser({
     downloadPath: DOWNLOADS_DIR,
   });
+  hooks.setBrowser?.(browser);
 
   let wpPage = null;
   /** Bước đang chạy — để chụp đúng tab khi lỗi */
@@ -107,10 +114,12 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}) {
   };
 
   try {
+    throwIfCancelled();
     // Luôn login + Quick Login (mỗi lần Run mở browser mới)
     currentStep = 'wpm-login';
     log('▶ Login WPM...');
     await loginToWPM(wpmPage, { username: wpmUser, password: wpmPass }, log);
+    throwIfCancelled();
 
     currentStep = 'wpm-quick-login';
     log('▶ Mở project + Quick Login...');
@@ -120,6 +129,7 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}) {
     projectLabel = opened.projectLabel || projectName;
 
     await dismissBlockingAlerts(wpPage, log);
+    throwIfCancelled();
 
     if (enabled.has('backup')) {
       currentStep = 'wp-backup';
@@ -131,6 +141,7 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}) {
     } else {
       log('⏭ Bỏ qua Backup');
     }
+    throwIfCancelled();
 
     let accountExistsOnWeb = false;
 
@@ -153,6 +164,7 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}) {
     } else {
       log('⏭ Bỏ qua tạo user — dùng username/password trên form');
     }
+    throwIfCancelled();
 
     if (enabled.has('syncWpm') && !accountExistsOnWeb) {
       currentStep = 'wpm-sync-account';
@@ -165,6 +177,7 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}) {
     } else if (!enabled.has('syncWpm')) {
       log('⏭ Bỏ qua sync WPM');
     }
+    throwIfCancelled();
 
     if (enabled.has('macCore')) {
       currentStep = 'wp-mac-core';
@@ -177,6 +190,7 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}) {
     } else {
       log('⏭ Bỏ qua Mac Core');
     }
+    throwIfCancelled();
 
     if (enabled.has('macRole')) {
       currentStep = 'wp-mac-role';

@@ -19,6 +19,7 @@ export function createJobQueue({ onLog, onChange, maxConcurrent = 4 } = {}) {
       id: j.id,
       status: 'running',
       user: j.meta?.username,
+      startedAt: j.startedAt || null,
     }));
     return {
       maxConcurrent: limit,
@@ -32,6 +33,7 @@ export function createJobQueue({ onLog, onChange, maxConcurrent = 4 } = {}) {
           status: 'pending',
           position: i + 1,
           user: j.meta?.username,
+          createdAt: j.createdAt || null,
         })),
       ],
     };
@@ -81,7 +83,9 @@ export function createJobQueue({ onLog, onChange, maxConcurrent = 4 } = {}) {
 
     try {
       push('=== Job bắt đầu ===');
+      if (job.cancelled) throw new Error('Job đã bị hủy.');
       const result = await job.run(push, job);
+      if (job.cancelled) throw new Error('Job đã bị hủy.');
       job.result = result;
       job.status = 'success';
       job.finishedAt = new Date().toISOString();
@@ -89,11 +93,16 @@ export function createJobQueue({ onLog, onChange, maxConcurrent = 4 } = {}) {
     } catch (err) {
       const message = err?.message || String(err);
       job.error = message;
-      job.status = 'error';
+      job.status = job.cancelled ? 'cancelled' : 'error';
       job.finishedAt = new Date().toISOString();
-      push(`❌ Lỗi: ${message}`);
-      job.onDone?.({ ok: false, error: message });
+      push(job.cancelled ? `⏹ Đã hủy: ${message}` : `❌ Lỗi: ${message}`);
+      job.onDone?.({ ok: false, error: message, cancelled: Boolean(job.cancelled) });
     } finally {
+      try {
+        await job.browser?.close?.();
+      } catch {
+        /* ignore */
+      }
       active.delete(job.id);
       remember(job);
       onChange?.(snapshot());
@@ -115,10 +124,44 @@ export function createJobQueue({ onLog, onChange, maxConcurrent = 4 } = {}) {
     }
   }
 
+  function cancel(jobId, { byUser } = {}) {
+    const id = String(jobId || '');
+    const pIdx = pending.findIndex((j) => j.id === id);
+    if (pIdx >= 0) {
+      const [job] = pending.splice(pIdx, 1);
+      job.status = 'cancelled';
+      job.cancelled = true;
+      job.error = byUser ? `Hủy bởi ${byUser}` : 'Đã hủy';
+      job.finishedAt = new Date().toISOString();
+      remember(job);
+      onChange?.(snapshot());
+      return { ok: true, kind: 'pending', jobId: id };
+    }
+    const job = active.get(id);
+    if (job) {
+      job.cancelled = true;
+      job.error = byUser ? `Hủy bởi ${byUser}` : 'Đã hủy';
+      try {
+        job.browser?.close?.();
+      } catch {
+        /* ignore */
+      }
+      onChange?.(snapshot());
+      return { ok: true, kind: 'running', jobId: id };
+    }
+    return { ok: false, error: 'Không tìm thấy job.' };
+  }
+
+  function listActiveJobs() {
+    return [...active.values()];
+  }
+
   return {
     enqueue,
     getJob,
     snapshot,
+    cancel,
+    listActiveJobs,
     get active() {
       return active.values().next().value || null;
     },

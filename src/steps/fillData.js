@@ -261,10 +261,35 @@ export async function fillCustomerDataFromUrls(
 
     log(`Username: ${username}`);
     if (site.email) log(`Email: ${site.email}`);
-    else log('⚠ Không lấy được email từ footer.');
+    else log('⚠ Không lấy được email từ footer — điền tay trên form trước khi Run.');
+
+    const fields = {
+      websiteUrl: { ok: Boolean(websiteUrl), value: websiteUrl, hint: websiteUrl ? 'Main Web' : 'Thiếu Main Web URL' },
+      username: { ok: Boolean(username), value: username, hint: username ? 'Từ tên tiệm' : 'Thiếu tên tiệm' },
+      password: {
+        ok: Boolean(password),
+        value: password,
+        hint: password ? `${state}-${zip}` : 'Thiếu State/Zip — sửa tay password',
+      },
+      email: {
+        ok: Boolean(site.email),
+        value: site.email || '',
+        hint: site.email ? 'Footer website' : 'Không thấy email footer — điền tay',
+      },
+      state: { ok: Boolean(state), value: state || '', hint: state ? 'Footer' : 'Thiếu State' },
+      zip: { ok: Boolean(zip), value: zip || '', hint: zip ? (site.zip ? 'Footer' : 'WPM fallback') : 'Thiếu Zip' },
+    };
+
+    const needManual = ['websiteUrl', 'username', 'password', 'email'].filter((k) => !fields[k].ok);
+
+    if (needManual.length) {
+      log(`⚠ Cần sửa tay trên form: ${needManual.join(', ')}`);
+    } else {
+      log('✓ Đủ field — kiểm tra nhanh rồi Run.');
+    }
 
     return {
-      ok: true,
+      ok: needManual.length === 0,
       shopName,
       websiteUrl,
       username,
@@ -273,6 +298,8 @@ export async function fillCustomerDataFromUrls(
       state: state || '',
       zip: zip || '',
       warnings,
+      fields,
+      needManual,
       taskUrl: String(taskUrl || '').trim() || undefined,
       wpmProjectUrl: projectUrl,
     };

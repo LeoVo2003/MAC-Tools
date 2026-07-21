@@ -10,8 +10,16 @@ function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
+function durationOf(row) {
+  if (row.durationMs != null && Number.isFinite(Number(row.durationMs))) return Number(row.durationMs);
+  if (!row.startedAt || !row.finishedAt) return null;
+  const a = Date.parse(row.startedAt);
+  const b = Date.parse(row.finishedAt);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  return Math.max(0, b - a);
+}
+
 /**
- * Ghi 1 dòng JSONL mỗi lần chạy job (nền tảng báo cáo v2).
  * @returns {string} runId
  */
 export function startRun(meta = {}) {
@@ -64,7 +72,7 @@ export function finishRun(id, { status = 'success', error = null, result = null 
   fs.writeFileSync(RUNS_FILE, `${updated.join('\n')}\n`, 'utf-8');
 }
 
-export function listRuns({ limit = 100 } = {}) {
+function readAllRuns() {
   ensureDataDir();
   if (!fs.existsSync(RUNS_FILE)) return [];
   const lines = fs.readFileSync(RUNS_FILE, 'utf-8').split(/\r?\n/).filter(Boolean);
@@ -76,14 +84,81 @@ export function listRuns({ limit = 100 } = {}) {
       /* skip */
     }
   }
-  return rows.slice(-limit).reverse();
+  return rows;
 }
 
-export function runsStats() {
-  const rows = listRuns({ limit: 10000 });
+/**
+ * @param {{ limit?: number, user?: string, from?: string, to?: string, status?: string }} [opts]
+ */
+export function listRuns({ limit = 100, user = '', from = '', to = '', status = '' } = {}) {
+  let rows = readAllRuns();
+  const userQ = String(user || '').trim().toLowerCase();
+  const statusQ = String(status || '').trim().toLowerCase();
+  const fromMs = from ? Date.parse(from) : NaN;
+  const toMs = to ? Date.parse(to) : NaN;
+
+  rows = rows.filter((r) => {
+    if (userQ) {
+      const u = String(r.toolUser || r.username || '').toLowerCase();
+      if (!u.includes(userQ)) return false;
+    }
+    if (statusQ && String(r.status || '').toLowerCase() !== statusQ) return false;
+    const t = r.startedAt ? Date.parse(r.startedAt) : NaN;
+    if (Number.isFinite(fromMs) && Number.isFinite(t) && t < fromMs) return false;
+    if (Number.isFinite(toMs) && Number.isFinite(t) && t > toMs + 24 * 60 * 60 * 1000 - 1) return false;
+    return true;
+  });
+
+  return rows
+    .map((r) => ({ ...r, durationMs: durationOf(r) }))
+    .slice(-Math.min(2000, Math.max(1, Number(limit) || 100)))
+    .reverse();
+}
+
+export function runsStats(rowsInput) {
+  const rows = rowsInput || listRuns({ limit: 10000 });
   const total = rows.length;
   const success = rows.filter((r) => r.status === 'success').length;
   const error = rows.filter((r) => r.status === 'error').length;
   const running = rows.filter((r) => r.status === 'running').length;
-  return { total, success, error, running };
+  const durations = rows.map(durationOf).filter((ms) => ms != null && ms > 0);
+  const avgDurationMs =
+    durations.length > 0 ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : null;
+  return { total, success, error, running, avgDurationMs, sampleDurations: durations.length };
+}
+
+export function runsToCsv(rows) {
+  const esc = (v) => {
+    const s = String(v ?? '');
+    if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
+  const header = [
+    'startedAt',
+    'finishedAt',
+    'durationMs',
+    'toolUser',
+    'websiteUrl',
+    'status',
+    'username',
+    'error',
+  ];
+  const lines = [header.join(',')];
+  for (const r of rows) {
+    lines.push(
+      [
+        r.startedAt,
+        r.finishedAt,
+        durationOf(r) ?? '',
+        r.toolUser || r.username || '',
+        r.websiteUrl || '',
+        r.status || '',
+        r.resultSummary?.username || r.username || '',
+        r.error || '',
+      ]
+        .map(esc)
+        .join(',')
+    );
+  }
+  return `${lines.join('\n')}\n`;
 }

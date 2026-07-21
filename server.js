@@ -12,7 +12,7 @@ import {
   sanitizeCustomerPassword,
   DOWNLOADS_DIR,
 } from './src/utils.js';
-import { startRun, finishRun, listRuns, runsStats } from './src/tracking.js';
+import { startRun, finishRun, listRuns, runsStats, runsToCsv } from './src/tracking.js';
 import {
   ensureKnownUsers,
   loginWithWpm,
@@ -23,6 +23,7 @@ import { sessionMiddleware, requireAuth, requireAdmin, currentPublicUser } from 
 import { createJobQueue } from './src/jobQueue.js';
 import { fillCustomerDataFromUrls } from './src/steps/fillData.js';
 import { listBackupFolders, listBackupFiles, resolveBackupFile } from './src/backupsApi.js';
+import { purgeOldBackups, buildHealthReport, detectStaleJobs } from './src/ops.js';
 
 dotenv.config({ path: getEnvPath() });
 
@@ -69,7 +70,46 @@ export function createApp() {
   app.use(sessionMiddleware());
 
   app.get('/api/health', (_req, res) => {
-    res.json({ ok: true, version: VERSION, queue: queue.snapshot() });
+    const snap = queue.snapshot();
+    const report = buildHealthReport({
+      queueSnapshot: snap,
+      staleMinutes: Number(process.env.JOB_STALE_MINUTES) || 45,
+      diskWarnMb: Number(process.env.DISK_WARN_MB) || 8000,
+    });
+    const staleJobs = detectStaleJobs(
+      queue.listActiveJobs(),
+      Number(process.env.JOB_STALE_MINUTES) || 45
+    );
+    for (const s of staleJobs) {
+      report.alerts.push({
+        level: 'warn',
+        code: 'job_stale',
+        message: `Job ${s.id.slice(0, 8)}… (${s.user || '?'}) chạy ~${s.ageMinutes} phút.`,
+        jobId: s.id,
+      });
+    }
+    report.staleJobs = staleJobs;
+    const ok = report.chrome.ok && !report.alerts.some((a) => a.level === 'error');
+    res.status(ok ? 200 : 503).json({ ok, version: VERSION, ...report });
+  });
+
+  app.get('/api/queue', requireAuth, (_req, res) => {
+    res.json(queue.snapshot());
+  });
+
+  app.post('/api/queue/:jobId/cancel', requireAuth, (req, res) => {
+    const jobId = String(req.params.jobId || '');
+    const job = queue.getJob(jobId);
+    if (!job) return res.status(404).json({ error: 'Không tìm thấy job.' });
+    const isOwner = job.meta?.userId === req.user.id;
+    const isAdmin = req.user.role === 'admin';
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({ error: 'Chỉ hủy job của bạn (hoặc admin).' });
+    }
+    const result = queue.cancel(jobId, { byUser: req.user.username });
+    broadcast('queue', queue.snapshot());
+    if (!result.ok) return res.status(404).json(result);
+    res.json(result);
   });
 
   app.get('/api/me', (req, res) => {
@@ -270,7 +310,13 @@ export function createApp() {
 
         try {
           pushLog('=== Bắt đầu job F User Guide Tool v2 ===');
-          const result = await runJob(jobPayload, pushLog, onStep);
+          const result = await runJob(jobPayload, pushLog, onStep, {
+            shouldCancel: () => Boolean(jobRef.cancelled),
+            setBrowser: (b) => {
+              jobRef.browser = b;
+            },
+          });
+          if (jobRef.cancelled) throw new Error('Job đã bị hủy.');
           finishRun(runId, { status: 'success', result });
           broadcast('result', { ...result, jobId: thisJobId }, { jobId: thisJobId });
           pushLog('=== Hoàn tất ===');
@@ -279,8 +325,9 @@ export function createApp() {
           return result;
         } catch (err) {
           const message = err?.message || String(err);
-          finishRun(runId, { status: 'error', error: message });
-          broadcast('error', { message, jobId: thisJobId }, { jobId: thisJobId });
+          const cancelled = Boolean(jobRef.cancelled) || /đã bị hủy/i.test(message);
+          finishRun(runId, { status: cancelled ? 'cancelled' : 'error', error: message });
+          broadcast('error', { message, jobId: thisJobId, cancelled }, { jobId: thisJobId });
           broadcast('done', { running: false, jobId: thisJobId }, { jobId: thisJobId });
           broadcast('queue', queue.snapshot());
           throw err;
@@ -313,8 +360,31 @@ export function createApp() {
 
   app.get('/api/runs', requireAuth, requireAdmin, (req, res) => {
     const limit = Math.min(500, Number(req.query.limit) || 100);
-    const runs = listRuns({ limit }).slice(0, limit);
-    res.json({ stats: runsStats(), runs });
+    const user = String(req.query.user || '').trim();
+    const from = String(req.query.from || '').trim();
+    const to = String(req.query.to || '').trim();
+    const status = String(req.query.status || '').trim();
+    const runs = listRuns({ limit, user, from, to, status });
+    res.json({ stats: runsStats(runs), runs, filters: { user, from, to, status, limit } });
+  });
+
+  app.get('/api/runs.csv', requireAuth, requireAdmin, (req, res) => {
+    const limit = Math.min(2000, Number(req.query.limit) || 500);
+    const user = String(req.query.user || '').trim();
+    const from = String(req.query.from || '').trim();
+    const to = String(req.query.to || '').trim();
+    const status = String(req.query.status || '').trim();
+    const runs = listRuns({ limit, user, from, to, status });
+    const csv = runsToCsv(runs);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="runs.csv"');
+    res.send(csv);
+  });
+
+  app.post('/api/backups/purge', requireAuth, requireAdmin, (req, res) => {
+    const days = Number(req.body?.days) || Number(process.env.BACKUP_RETENTION_DAYS) || 7;
+    const result = purgeOldBackups(days);
+    res.json({ ok: true, ...result });
   });
 
   app.get('/api/backups', requireAuth, (_req, res) => {
@@ -355,6 +425,28 @@ export function createApp() {
 
 export async function startServer({ openBrowser: shouldOpen } = {}) {
   await ensureKnownUsers();
+
+  const retentionDays = Number(process.env.BACKUP_RETENTION_DAYS) || 7;
+  try {
+    const purged = purgeOldBackups(retentionDays);
+    if (purged.deleted.length) {
+      console.log(`[retention] Đã xóa ${purged.deleted.length} folder backup > ${retentionDays} ngày.`);
+    }
+  } catch (err) {
+    console.warn('[retention]', err?.message || err);
+  }
+  // Chạy lại mỗi 24h
+  setInterval(() => {
+    try {
+      const purged = purgeOldBackups(retentionDays);
+      if (purged.deleted.length) {
+        console.log(`[retention] Đã xóa ${purged.deleted.length} folder backup cũ.`);
+      }
+    } catch (err) {
+      console.warn('[retention]', err?.message || err);
+    }
+  }, 24 * 60 * 60 * 1000).unref?.();
+
   const app = createApp();
 
   const openFlag = process.env.OPEN_BROWSER;
