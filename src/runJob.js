@@ -83,10 +83,11 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}) {
     throw new Error('Thiếu customer.username / password / email.');
   }
 
-  const wpmUser = process.env.WPM_USERNAME;
-  const wpmPass = process.env.WPM_PASSWORD;
-  if (!wpmUser || !wpmPass || wpmUser.includes('your_wpm')) {
-    throw new Error('Chưa cấu hình WPM_USERNAME / WPM_PASSWORD trong file .env');
+  const wpmCreds = job.wpmCredentials || {};
+  const wpmUser = wpmCreds.username || process.env.WPM_USERNAME;
+  const wpmPass = wpmCreds.password || process.env.WPM_PASSWORD;
+  if (!wpmUser || !wpmPass || String(wpmUser).includes('your_wpm')) {
+    throw new Error('Chưa cấu hình tài khoản WPM. Đăng nhập tool → lưu WPM Username/Password.');
   }
 
   log(`Bước đã chọn: ${[...enabled].join(', ')}`);

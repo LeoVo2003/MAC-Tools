@@ -1,6 +1,6 @@
-2.0.0-dev (web edition — in progress)
+2.0.0-dev — web deploy-ready (auth, queue, reports, backups API)
 
-Milestone v1.0 frozen at:
+Milestone v1.0:
   ..\Auto F Package-v1.0-milestone-2026-07-21\
 
-Restore v1: copy that folder, npm install, run F User Guide Tool.bat
+See DEPLOY.md for server setup.

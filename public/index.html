@@ -3,165 +3,218 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>F User Guide Tool</title>
+  <title>F User Guide Tool v2</title>
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
   <div class="wrap">
-    <header>
-      <h1>F User Guide Tool <span style="font-size:0.55em;color:var(--muted);font-weight:500">v2</span></h1>
-      <p class="sub">Nhập thông tin → Run — WPM, backup (tải file), tạo user, Mac Role, (tuỳ) điền Task Output.</p>
+    <header class="topbar">
+      <div>
+        <h1>F User Guide Tool <span class="ver">v2</span></h1>
+        <p class="sub" id="headerSub">F Package — tạo user guide tự động.</p>
+      </div>
+      <div class="topbar-right" id="userBar" hidden>
+        <span id="whoAmI" class="hint"></span>
+        <button type="button" id="logoutBtn" class="secondary tiny">Đăng xuất</button>
+      </div>
     </header>
 
-    <section class="panel creds">
-      <h2>Tài khoản WPM (lưu máy bạn)</h2>
-      <p class="hint" style="margin-top:0;margin-bottom:0.85rem">
-        Mỗi thành viên nhập TK/MK WPM của mình → <strong>Lưu</strong> ghi vào file <code>.env</code> trên máy (không lên git).
+    <!-- LOGIN admin (Ctrl+Shift+A) -->
+    <section class="panel" id="loginPanel" hidden>
+      <h2>Đăng nhập admin</h2>
+      <p class="hint" style="margin-top:0">
+        Team dùng tool <strong>không cần login</strong>. Chỉ admin vào đây (phím <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>A</kbd>).
       </p>
-      <form id="wpmCredForm" class="grid">
+      <form id="loginForm" class="grid">
         <label>
-          <span>WPM Username / Email</span>
-          <input id="wpmUsername" name="wpmUsername" type="text" autocomplete="username" placeholder="email@macusaone.com" />
+          <span>Username</span>
+          <input name="username" id="loginUser" type="text" required autocomplete="username" />
         </label>
         <label>
-          <span>WPM Password</span>
-          <input id="wpmPassword" name="wpmPassword" type="password" autocomplete="current-password" placeholder="••••••••" />
+          <span>Password</span>
+          <input name="password" id="loginPass" type="password" required autocomplete="current-password" />
         </label>
       </form>
       <div class="actions" style="margin-top:0.85rem">
-        <button type="button" id="saveWpmBtn" class="secondary" style="margin-top:0">Lưu vào .env</button>
-        <span id="wpmCredStatus" class="badge idle">Chưa tải</span>
+        <button type="submit" form="loginForm" id="loginBtn">Đăng nhập admin</button>
+        <button type="button" id="cancelLoginBtn" class="secondary" style="margin-top:0">Đóng</button>
+        <span id="loginStatus" class="badge idle">Admin</span>
       </div>
-      <p id="wpmEnvPath" class="hint"></p>
+      <p id="loginError" class="hint" style="color:var(--danger)"></p>
     </section>
 
-    <form id="jobForm" class="panel">
-      <div class="grid">
-        <label>
-          <span>WPM Project URL</span>
-          <input name="wpmProjectUrl" type="url" required placeholder="https://wpm.macusaone.com/projects/627/edit" />
-        </label>
-        <label>
-          <span>Task URL (tuỳ chọn)</span>
-          <input name="taskUrl" type="url" placeholder="https://wpm.macusaone.com/tasks/16694/edit" />
-        </label>
-        <label>
-          <span>Website URL</span>
-          <input name="websiteUrl" type="url" required placeholder="https://domain-khach.com" />
-        </label>
-        <label>
-          <span>Username Chủ Tiệm</span>
-          <input name="username" type="text" required autocomplete="off" placeholder="tias-nails (tự bỏ ' )" />
-        </label>
-        <label>
-          <span>Password Chủ Tiệm</span>
-          <input name="password" type="text" required autocomplete="off" placeholder="tự bỏ dấu nháy ' nếu có" />
-        </label>
-        <label>
-          <span>Email khách</span>
-          <input name="email" type="email" required />
-        </label>
-        <label>
-          <span>Link tài liệu hướng dẫn</span>
-          <input name="docLink" type="url"
-            value="https://docs.google.com/document/d/1pMuhxjAfY4i6jOyk2CcAUYWBp8CdLbJ-7IpQaiYG0wo/edit?usp=sharing" />
-        </label>
+    <div id="appMain" hidden>
+      <nav class="tabs">
+        <button type="button" class="tab active" data-tab="run">Run</button>
+        <button type="button" class="tab" data-tab="reports" data-admin-only hidden>Báo cáo</button>
+        <button type="button" class="tab" data-tab="backups">Backup files</button>
+      </nav>
+
+      <div id="tab-run">
+        <section class="panel creds">
+          <h2>Tài khoản WPM (của bạn)</h2>
+          <p class="hint" style="margin-top:0;margin-bottom:0.85rem">
+            Lưu trên máy / trình duyệt của bạn.
+          </p>
+          <form id="wpmCredForm" class="grid">
+            <label>
+              <span>WPM Username / Email</span>
+              <input id="wpmUsername" name="wpmUsername" type="text" autocomplete="username" placeholder="email@macusaone.com" />
+            </label>
+            <label>
+              <span>WPM Password</span>
+              <input id="wpmPassword" name="wpmPassword" type="password" autocomplete="current-password" placeholder="••••••••" />
+            </label>
+          </form>
+          <div class="actions" style="margin-top:0.85rem">
+            <button type="button" id="saveWpmBtn" class="secondary" style="margin-top:0">Lưu WPM</button>
+            <span id="wpmCredStatus" class="badge idle">Chưa tải</span>
+          </div>
+          <p id="wpmEnvPath" class="hint"></p>
+        </section>
+
+        <form id="jobForm" class="panel">
+          <div class="grid">
+            <label>
+              <span>WPM Project URL</span>
+              <input name="wpmProjectUrl" type="url" required placeholder="https://wpm.macusaone.com/projects/627/edit" />
+            </label>
+            <label>
+              <span>Task URL (tuỳ chọn)</span>
+              <input name="taskUrl" type="url" placeholder="https://wpm.macusaone.com/tasks/16694/edit" />
+            </label>
+            <label>
+              <span>Website URL</span>
+              <input name="websiteUrl" type="url" required placeholder="https://domain-khach.com" />
+            </label>
+            <label>
+              <span>Username Chủ Tiệm</span>
+              <input name="username" type="text" required autocomplete="off" placeholder="tias-nails (tự bỏ ' )" />
+            </label>
+            <label>
+              <span>Password Chủ Tiệm</span>
+              <input name="password" type="text" required autocomplete="off" placeholder="tự bỏ dấu nháy ' nếu có" />
+            </label>
+            <label>
+              <span>Email khách</span>
+              <input name="email" type="email" required />
+            </label>
+            <label>
+              <span>Link tài liệu hướng dẫn</span>
+              <input name="docLink" type="url"
+                value="https://docs.google.com/document/d/1pMuhxjAfY4i6jOyk2CcAUYWBp8CdLbJ-7IpQaiYG0wo/edit?usp=sharing" />
+            </label>
+          </div>
+
+          <div class="checks">
+            <label class="check">
+              <input type="checkbox" name="downloadBackup" />
+              <span>Tải file backup về máy (không zip)</span>
+            </label>
+          </div>
+
+          <fieldset class="steps-box">
+            <legend>Chọn bước chạy</legend>
+            <p class="hint" style="margin-top:0">
+              Login WPM + Quick Login luôn chạy. Tối đa 4 job Chrome chạy cùng lúc (còn lại xếp hàng).
+            </p>
+            <div class="steps-toolbar">
+              <button type="button" id="stepsAllBtn" class="secondary tiny">Tick all</button>
+              <button type="button" id="stepsNoneBtn" class="secondary tiny">Bỏ hết</button>
+            </div>
+            <div class="steps-list" id="stepsList">
+              <label class="check step-item"><input type="checkbox" name="step" value="backup" checked /><span>1. Backup UpdraftPlus</span></label>
+              <label class="check step-item"><input type="checkbox" name="step" value="createUser" checked /><span>2. Tạo tài khoản khách</span></label>
+              <label class="check step-item"><input type="checkbox" name="step" value="syncWpm" checked /><span>3. Sync tài khoản lên WPM</span></label>
+              <label class="check step-item"><input type="checkbox" name="step" value="macCore" checked /><span>4. Mac Core → cài Mac Role</span></label>
+              <label class="check step-item"><input type="checkbox" name="step" value="macRole" checked /><span>5. Mac Role → F Package User</span></label>
+              <label class="check step-item"><input type="checkbox" name="step" value="webInfo" checked /><span>6. Web Info → Dashboard</span></label>
+            </div>
+          </fieldset>
+
+          <div class="actions">
+            <button type="submit" id="runBtn">Run</button>
+            <span id="statusBadge" class="badge idle">Idle</span>
+            <span id="queueHint" class="hint"></span>
+          </div>
+        </form>
+
+        <section class="panel">
+          <h2>Log</h2>
+          <pre id="logBox" class="log"></pre>
+        </section>
+
+        <section class="panel result" id="resultPanel" hidden>
+          <h2>Output fields</h2>
+          <dl class="result-grid">
+            <dt>1. Login Url</dt>
+            <dd>
+              <div class="result-row">
+                <a id="outLogin" class="result-val" href="#" target="_blank" rel="noopener"></a>
+                <button type="button" class="copy-one" data-copy="outLogin" title="Copy"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg></button>
+              </div>
+            </dd>
+            <dt>2. Guide File</dt>
+            <dd>
+              <div class="result-row">
+                <a id="outDoc" class="result-val" href="#" target="_blank" rel="noopener"></a>
+                <button type="button" class="copy-one" data-copy="outDoc" title="Copy"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg></button>
+              </div>
+            </dd>
+            <dt>3. User name</dt>
+            <dd>
+              <div class="result-row">
+                <span id="outUser" class="result-val"></span>
+                <button type="button" class="copy-one" data-copy="outUser" title="Copy"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg></button>
+              </div>
+            </dd>
+            <dt>4. Password</dt>
+            <dd>
+              <div class="result-row">
+                <span id="outPass" class="result-val"></span>
+                <button type="button" class="copy-one" data-copy="outPass" title="Copy"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg></button>
+              </div>
+            </dd>
+          </dl>
+          <button type="button" id="copyBtn" class="secondary">Copy tất cả</button>
+        </section>
       </div>
 
-      <div class="checks">
-        <!-- v2: backup step luôn tải file (không zip) -->
+      <div id="tab-reports" hidden>
+        <section class="panel">
+          <h2>Báo cáo lượt chạy</h2>
+          <div class="stats-row" id="statsRow">
+            <span class="stat">Total: <strong id="statTotal">0</strong></span>
+            <span class="stat ok">OK: <strong id="statOk">0</strong></span>
+            <span class="stat err">Error: <strong id="statErr">0</strong></span>
+          </div>
+          <button type="button" id="refreshReportsBtn" class="secondary tiny">Refresh</button>
+          <div class="table-wrap">
+            <table class="data-table" id="runsTable">
+              <thead>
+                <tr>
+                  <th>Thời gian</th>
+                  <th>User</th>
+                  <th>Website</th>
+                  <th>Status</th>
+                  <th>Note</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
       </div>
 
-      <fieldset class="steps-box">
-        <legend>Chọn bước chạy</legend>
-        <p class="hint" style="margin-top:0">
-          Login WPM + Quick Login luôn chạy. Lỗi giữa chừng → các bước đã xong tự bỏ tick, chỉ còn phần chưa làm — bấm Run lại.
-        </p>
-        <div class="steps-toolbar">
-          <button type="button" id="stepsAllBtn" class="secondary tiny">Tick all</button>
-          <button type="button" id="stepsNoneBtn" class="secondary tiny">Bỏ hết</button>
-        </div>
-        <div class="steps-list" id="stepsList">
-          <label class="check step-item">
-            <input type="checkbox" name="step" value="backup" checked data-step="backup" />
-            <span>1. Backup UpdraftPlus</span>
-          </label>
-          <label class="check step-item">
-            <input type="checkbox" name="step" value="createUser" checked data-step="createUser" />
-            <span>2. Tạo tài khoản khách</span>
-          </label>
-          <label class="check step-item">
-            <input type="checkbox" name="step" value="syncWpm" checked data-step="syncWpm" />
-            <span>3. Sync tài khoản lên WPM</span>
-          </label>
-          <label class="check step-item">
-            <input type="checkbox" name="step" value="macCore" checked data-step="macCore" />
-            <span>4. Mac Core → cài Mac Role</span>
-          </label>
-          <label class="check step-item">
-            <input type="checkbox" name="step" value="macRole" checked data-step="macRole" />
-            <span>5. Mac Role → F Package User</span>
-          </label>
-          <label class="check step-item">
-            <input type="checkbox" name="step" value="webInfo" checked data-step="webInfo" />
-            <span>6. Web Info → Dashboard</span>
-          </label>
-        </div>
-      </fieldset>
-
-      <div class="actions">
-        <button type="submit" id="runBtn">Run</button>
-        <span id="statusBadge" class="badge idle">Idle</span>
+      <div id="tab-backups" hidden>
+        <section class="panel">
+          <h2>Backup files trên server</h2>
+          <p class="hint" style="margin-top:0">File tải từ UpdraftPlus (không zip). Bấm tên file để tải về máy.</p>
+          <button type="button" id="refreshBackupsBtn" class="secondary tiny">Refresh</button>
+          <div id="backupsList" class="backups-list"></div>
+        </section>
       </div>
-    </form>
-
-    <section class="panel">
-      <h2>Log</h2>
-      <pre id="logBox" class="log"></pre>
-    </section>
-
-    <section class="panel result" id="resultPanel" hidden>
-      <h2>Output fields</h2>
-      <dl class="result-grid">
-        <dt>1. Login Url</dt>
-        <dd>
-          <div class="result-row">
-            <a id="outLogin" class="result-val" href="#" target="_blank" rel="noopener"></a>
-            <button type="button" class="copy-one" data-copy="outLogin" title="Copy" aria-label="Copy Login Url">
-              <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
-            </button>
-          </div>
-        </dd>
-        <dt>2. Guide File</dt>
-        <dd>
-          <div class="result-row">
-            <a id="outDoc" class="result-val" href="#" target="_blank" rel="noopener"></a>
-            <button type="button" class="copy-one" data-copy="outDoc" title="Copy" aria-label="Copy Guide File">
-              <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
-            </button>
-          </div>
-        </dd>
-        <dt>3. User name</dt>
-        <dd>
-          <div class="result-row">
-            <span id="outUser" class="result-val"></span>
-            <button type="button" class="copy-one" data-copy="outUser" title="Copy" aria-label="Copy User name">
-              <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
-            </button>
-          </div>
-        </dd>
-        <dt>4. Password</dt>
-        <dd>
-          <div class="result-row">
-            <span id="outPass" class="result-val"></span>
-            <button type="button" class="copy-one" data-copy="outPass" title="Copy" aria-label="Copy Password">
-              <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
-            </button>
-          </div>
-        </dd>
-      </dl>
-      <button type="button" id="copyBtn" class="secondary">Copy tất cả</button>
-    </section>
+    </div>
   </div>
   <script src="/app.js"></script>
 </body>

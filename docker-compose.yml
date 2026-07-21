@@ -1,0 +1,24 @@
+services:
+  fugt:
+    build: .
+    ports:
+      - "3847:3847"
+    environment:
+      NODE_ENV: production
+      OPEN_BROWSER: "false"
+      HEADLESS: "true"
+      CHROME_PATH: /usr/bin/chromium
+      PORT: "3847"
+      SESSION_SECRET: ${SESSION_SECRET:-change-me-session}
+      APP_SECRET: ${APP_SECRET:-change-me-app}
+      ADMIN_USER: ${ADMIN_USER:-admin}
+      ADMIN_PASS: ${ADMIN_PASS:-admin123}
+      DOWNLOAD_DIR: /data/downloads
+    volumes:
+      - fugt_downloads:/data/downloads
+      - fugt_data:/app/data
+    restart: unless-stopped
+
+volumes:
+  fugt_downloads:
+  fugt_data:

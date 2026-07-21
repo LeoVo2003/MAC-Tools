@@ -5,110 +5,145 @@ import fs from 'fs';
 import { exec } from 'child_process';
 import { fileURLToPath } from 'url';
 import { runJob } from './src/runJob.js';
-import {
-  getAppRoot,
-  getEnvPath,
-  getPublicDir,
-  readEnvFile,
-  upsertEnvVars,
-} from './src/envStore.js';
+import { getAppRoot, getEnvPath, getPublicDir } from './src/envStore.js';
 import {
   normalizeWpmProjectUrl,
   sanitizeWpUsername,
   sanitizeCustomerPassword,
+  DOWNLOADS_DIR,
 } from './src/utils.js';
 import { startRun, finishRun, listRuns, runsStats } from './src/tracking.js';
+import {
+  ensureKnownUsers,
+  verifyUser,
+  toPublicUser,
+  findUserByUsername,
+  findUserById,
+  setUserWpmCredentials,
+  getUserWpmCredentials,
+} from './src/userStore.js';
+import { sessionMiddleware, requireAuth, requireAdmin, currentPublicUser } from './src/auth.js';
+import { createJobQueue } from './src/jobQueue.js';
+import { listBackupFolders, listBackupFiles, resolveBackupFile } from './src/backupsApi.js';
 
-// Load .env cạnh exe (hoặc project root)
 dotenv.config({ path: getEnvPath() });
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3847;
+const VERSION = '2.0.0-dev';
 
-/** @type {{ running: boolean, logs: string[], result: object|null, error: string|null }} */
-const state = {
-  running: false,
-  logs: [],
-  result: null,
-  error: null,
-};
+/** SSE clients: Map<res, { jobId?: string }> */
+const clients = new Map();
 
-const clients = new Set();
-
-function broadcast(event, data) {
+function broadcast(event, data, { jobId } = {}) {
   const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-  for (const res of clients) {
-    res.write(payload);
+  for (const [res, meta] of clients) {
+    if (jobId && meta.jobId && meta.jobId !== jobId) continue;
+    try {
+      res.write(payload);
+    } catch {
+      /* ignore */
+    }
   }
 }
 
-function pushLog(line) {
-  state.logs.push(line);
-  if (state.logs.length > 500) state.logs.shift();
-  broadcast('log', { line });
-  console.log(line);
-}
-
-/** Máy Mac: mở URL bằng lệnh open */
 function openBrowser(url) {
   let cmd;
-  if (process.platform === 'win32') {
-    cmd = `start "" "${url}"`;
-  } else if (process.platform === 'darwin') {
-    cmd = `open "${url}"`;
-  } else {
-    cmd = `xdg-open "${url}"`;
-  }
+  if (process.platform === 'win32') cmd = `start "" "${url}"`;
+  else if (process.platform === 'darwin') cmd = `open "${url}"`;
+  else cmd = `xdg-open "${url}"`;
   exec(cmd, () => {});
 }
 
+const queue = createJobQueue({
+  onLog: (jobId, line) => {
+    console.log(line);
+    broadcast('log', { line, jobId }, { jobId });
+  },
+  onChange: (snap) => broadcast('queue', snap),
+  maxConcurrent: Number(process.env.MAX_CONCURRENT_JOBS) || 4,
+});
+
 export function createApp() {
   const app = express();
+  app.set('trust proxy', 1);
   app.use(express.json({ limit: '1mb' }));
-  app.use(express.static(getPublicDir()));
+  app.use(sessionMiddleware());
 
-  app.get('/api/status', (_req, res) => {
-    res.json({
-      running: state.running,
-      logs: state.logs,
-      result: state.result,
-      error: state.error,
+  app.get('/api/health', (_req, res) => {
+    res.json({ ok: true, version: VERSION, queue: queue.snapshot() });
+  });
+
+  app.get('/api/me', (req, res) => {
+    res.json({ user: currentPublicUser(req) });
+  });
+
+  /** Vào tool không cần login → session mặc định = acc team `web`. */
+  app.post('/api/guest', (req, res) => {
+    const existing = req.session?.userId ? findUserById(req.session.userId) : null;
+    if (existing) {
+      return res.json({ ok: true, user: toPublicUser(existing) });
+    }
+    const webName = String(process.env.WEB_USER || 'web').trim();
+    const web = findUserByUsername(webName);
+    if (!web) {
+      return res.status(500).json({ error: `Chưa có user "${webName}". Restart server để seed.` });
+    }
+    req.session.userId = web.id;
+    req.session.username = web.username;
+    res.json({ ok: true, user: toPublicUser(web) });
+  });
+
+  app.post('/api/login', async (req, res) => {
+    const username = String(req.body?.username || '').trim();
+    const password = String(req.body?.password || '');
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Thiếu username/password.' });
+    }
+    try {
+      const user = await verifyUser(username, password);
+      if (!user) return res.status(401).json({ error: 'Sai username hoặc password.' });
+      if (user.role !== 'admin') {
+        return res.status(403).json({
+          error: 'Chỉ đăng nhập admin tại đây. Team dùng tool không cần login.',
+        });
+      }
+      req.session.userId = user.id;
+      req.session.username = user.username;
+      res.json({ ok: true, user: toPublicUser(user) });
+    } catch (err) {
+      res.status(500).json({ error: err?.message || String(err) });
+    }
+  });
+
+  /** Thoát admin → về chế độ team (web). */
+  app.post('/api/logout', (req, res) => {
+    req.session.destroy(() => {
+      res.json({ ok: true });
     });
   });
 
-  /** Trạng thái đăng nhập WPM đã lưu trong .env (không trả password thật). */
-  app.get('/api/wpm-credentials', (_req, res) => {
-    const { map } = readEnvFile();
-    const username = map.WPM_USERNAME || process.env.WPM_USERNAME || '';
-    const password = map.WPM_PASSWORD || process.env.WPM_PASSWORD || '';
-    const configured =
-      Boolean(username) &&
-      Boolean(password) &&
-      !String(username).includes('your_wpm');
+  app.get('/api/wpm-credentials', requireAuth, (req, res) => {
+    const creds = getUserWpmCredentials(req.user.id);
     res.json({
-      username: configured ? username : username.includes('your_wpm') ? '' : username,
-      hasPassword: Boolean(password) && !String(password).includes('your_wpm'),
-      configured,
-      envPath: getEnvPath(),
+      username: creds.configured ? creds.username : '',
+      hasPassword: creds.configured,
+      configured: creds.configured,
+      storage: 'per-user',
     });
   });
 
-  /** Lưu WPM username/password xuống file .env ngay. */
-  app.post('/api/wpm-credentials', (req, res) => {
+  app.post('/api/wpm-credentials', requireAuth, (req, res) => {
     const username = String(req.body?.username || '').trim();
     const password = String(req.body?.password ?? '');
     if (!username || !password) {
       return res.status(400).json({ error: 'Thiếu username hoặc password WPM.' });
     }
     try {
-      const envPath = upsertEnvVars({
-        WPM_USERNAME: username,
-        WPM_PASSWORD: password,
-      });
+      setUserWpmCredentials(req.user.id, username, password);
       res.json({
         ok: true,
-        message: `Đã lưu vào ${envPath}`,
-        envPath,
+        message: 'Đã lưu tài khoản WPM cho user của bạn.',
         username,
       });
     } catch (err) {
@@ -116,23 +151,48 @@ export function createApp() {
     }
   });
 
-  app.get('/api/events', (req, res) => {
+  app.get('/api/status', requireAuth, (req, res) => {
+    const jobId = String(req.query.jobId || '');
+    const job = jobId ? queue.getJob(jobId) : queue.active;
+    res.json({
+      queue: queue.snapshot(),
+      job: job
+        ? {
+            id: job.id,
+            status: job.status,
+            logs: job.logs?.slice(-80) || [],
+            result: job.result,
+            error: job.error,
+          }
+        : null,
+    });
+  });
+
+  app.get('/api/events', requireAuth, (req, res) => {
+    const jobId = String(req.query.jobId || '') || undefined;
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders?.();
 
-    clients.add(res);
-    res.write(`event: hello\ndata: ${JSON.stringify({ ok: true })}\n\n`);
+    clients.set(res, { jobId, userId: req.user.id });
+    res.write(
+      `event: hello\ndata: ${JSON.stringify({ ok: true, jobId: jobId || null, queue: queue.snapshot() })}\n\n`
+    );
 
-    for (const line of state.logs.slice(-80)) {
-      res.write(`event: log\ndata: ${JSON.stringify({ line })}\n\n`);
-    }
-    if (state.result) {
-      res.write(`event: result\ndata: ${JSON.stringify(state.result)}\n\n`);
-    }
-    if (state.error && !state.running) {
-      res.write(`event: error\ndata: ${JSON.stringify({ message: state.error })}\n\n`);
+    if (jobId) {
+      const job = queue.getJob(jobId);
+      if (job) {
+        for (const line of (job.logs || []).slice(-80)) {
+          res.write(`event: log\ndata: ${JSON.stringify({ line, jobId })}\n\n`);
+        }
+        if (job.result) {
+          res.write(`event: result\ndata: ${JSON.stringify({ ...job.result, jobId })}\n\n`);
+        }
+        if (job.error && job.status === 'error') {
+          res.write(`event: error\ndata: ${JSON.stringify({ message: job.error, jobId })}\n\n`);
+        }
+      }
     }
 
     req.on('close', () => {
@@ -140,16 +200,9 @@ export function createApp() {
     });
   });
 
-  app.post('/api/run', async (req, res) => {
-    if (state.running) {
-      return res.status(409).json({ error: 'Đang chạy một job khác. Đợi xong rồi chạy lại.' });
-    }
-
-    // Reload .env trước mỗi job (đồng nghiệp vừa đổi TK)
-    dotenv.config({ path: getEnvPath(), override: true });
-
+  app.post('/api/run', requireAuth, (req, res) => {
     const body = req.body || {};
-    const job = {
+    const jobPayload = {
       wpmProjectUrl: normalizeWpmProjectUrl(String(body.wpmProjectUrl || '').trim()),
       taskUrl: String(body.taskUrl || '').trim(),
       websiteUrl: String(body.websiteUrl || '').trim(),
@@ -159,97 +212,182 @@ export function createApp() {
         email: String(body.email || '').trim(),
       },
       packageTier: body.packageTier || 'F',
-      options: {},
+      options: {
+        downloadBackup: Boolean(body.downloadBackup),
+      },
       docLink: String(body.docLink || '').trim() || undefined,
       steps: Array.isArray(body.steps) ? body.steps.map(String) : undefined,
     };
 
-    if (!job.wpmProjectUrl || !job.websiteUrl) {
+    if (!jobPayload.wpmProjectUrl || !jobPayload.websiteUrl) {
       return res.status(400).json({ error: 'Thiếu wpmProjectUrl hoặc websiteUrl.' });
     }
-    if (!job.customer.username || !job.customer.password || !job.customer.email) {
+    if (
+      !jobPayload.customer.username ||
+      !jobPayload.customer.password ||
+      !jobPayload.customer.email
+    ) {
       return res.status(400).json({ error: 'Thiếu username / password / email khách.' });
     }
 
-    const wpmUser = process.env.WPM_USERNAME || '';
-    const wpmPass = process.env.WPM_PASSWORD || '';
-    if (!wpmUser || !wpmPass || wpmUser.includes('your_wpm')) {
+    const bodyWpmUser = String(body.wpmUsername || '').trim();
+    const bodyWpmPass = String(body.wpmPassword || '');
+    const stored = getUserWpmCredentials(req.user.id);
+    const wpmUser = bodyWpmUser || stored.username;
+    const wpmPass = bodyWpmPass || stored.password;
+    if (!wpmUser || !wpmPass) {
       return res.status(400).json({
-        error: 'Chưa lưu tài khoản WPM. Điền Username/Password WPM phía trên rồi bấm Lưu.',
+        error: 'Chưa có tài khoản WPM. Điền Username/Password WPM rồi bấm Lưu (lưu trên máy bạn).',
       });
     }
+    jobPayload.wpmCredentials = {
+      username: wpmUser,
+      password: wpmPass,
+    };
 
-    state.running = true;
-    state.logs = [];
-    state.result = null;
-    state.error = null;
+    const userMeta = {
+      userId: req.user.id,
+      username: req.user.username,
+    };
 
-    res.json({ ok: true, message: 'Job đã bắt đầu.' });
+    const { jobId, position, queue: qSnap } = queue.enqueue({
+      meta: userMeta,
+      run: async (pushLog, jobRef) => {
+        const thisJobId = jobRef.id;
+        for (const [, meta] of clients) {
+          if (meta.userId === req.user.id && !meta.jobId) {
+            meta.jobId = thisJobId;
+          }
+        }
 
-    const runId = startRun({
-      wpmUser: process.env.WPM_USERNAME || '',
-      wpmProjectUrl: job.wpmProjectUrl,
-      taskUrl: job.taskUrl || '',
-      websiteUrl: job.websiteUrl,
-      username: job.customer.username,
-      steps: job.steps || [],
-      edition: 'v2',
+        const runId = startRun({
+          userId: req.user.id,
+          toolUser: req.user.username,
+          wpmUser: wpmUser,
+          wpmProjectUrl: jobPayload.wpmProjectUrl,
+          taskUrl: jobPayload.taskUrl || '',
+          websiteUrl: jobPayload.websiteUrl,
+          username: jobPayload.customer.username,
+          steps: jobPayload.steps || [],
+          jobId: thisJobId,
+          edition: 'v2',
+        });
+
+        const onStep = (payload) =>
+          broadcast('step', { ...payload, jobId: thisJobId }, { jobId: thisJobId });
+
+        try {
+          pushLog('=== Bắt đầu job F User Guide Tool v2 ===');
+          const result = await runJob(jobPayload, pushLog, onStep);
+          finishRun(runId, { status: 'success', result });
+          broadcast('result', { ...result, jobId: thisJobId }, { jobId: thisJobId });
+          pushLog('=== Hoàn tất ===');
+          broadcast('done', { running: false, jobId: thisJobId }, { jobId: thisJobId });
+          broadcast('queue', queue.snapshot());
+          return result;
+        } catch (err) {
+          const message = err?.message || String(err);
+          finishRun(runId, { status: 'error', error: message });
+          broadcast('error', { message, jobId: thisJobId }, { jobId: thisJobId });
+          broadcast('done', { running: false, jobId: thisJobId }, { jobId: thisJobId });
+          broadcast('queue', queue.snapshot());
+          throw err;
+        }
+      },
+      onDone: () => {
+        broadcast('queue', queue.snapshot());
+      },
     });
 
-    try {
-      pushLog('=== Bắt đầu job F User Guide Tool v2 ===');
-      const onStep = (payload) => broadcast('step', payload);
-      const result = await runJob(job, pushLog, onStep);
-      state.result = result;
-      finishRun(runId, { status: 'success', result });
-      broadcast('result', result);
-      pushLog('=== Hoàn tất ===');
-    } catch (err) {
-      const message = err?.message || String(err);
-      state.error = message;
-      finishRun(runId, { status: 'error', error: message });
-      pushLog(`❌ Lỗi: ${message}`);
-      broadcast('error', { message });
-    } finally {
-      state.running = false;
-      broadcast('done', { running: false });
-    }
+    const maxJobs = Number(process.env.MAX_CONCURRENT_JOBS) || 4;
+    broadcast('queue', qSnap);
+    res.json({
+      ok: true,
+      jobId,
+      position,
+      message:
+        position > maxJobs
+          ? `Đã xếp hàng (vị trí ${position}). Tối đa ${maxJobs} job chạy cùng lúc.`
+          : 'Job đã bắt đầu (hoặc sắp chạy).',
+      queue: qSnap,
+    });
   });
 
-  app.get('/api/output', (_req, res) => {
+  app.get('/api/output', requireAuth, (_req, res) => {
     const file = path.join(getAppRoot(), 'output-latest.json');
     if (!fs.existsSync(file)) return res.status(404).json({ error: 'Chưa có output.' });
     res.sendFile(file);
   });
 
-  app.get('/api/runs', (req, res) => {
+  app.get('/api/runs', requireAuth, requireAdmin, (req, res) => {
     const limit = Math.min(500, Number(req.query.limit) || 100);
-    res.json({ stats: runsStats(), runs: listRuns({ limit }) });
+    const runs = listRuns({ limit }).slice(0, limit);
+    res.json({ stats: runsStats(), runs });
   });
+
+  app.get('/api/backups', requireAuth, (_req, res) => {
+    try {
+      res.json({
+        downloadDir: DOWNLOADS_DIR,
+        folders: listBackupFolders(),
+      });
+    } catch (err) {
+      res.status(500).json({ error: err?.message || String(err) });
+    }
+  });
+
+  app.get('/api/backups/:name/files', requireAuth, (req, res) => {
+    try {
+      res.json({
+        name: req.params.name,
+        files: listBackupFiles(req.params.name),
+      });
+    } catch (err) {
+      res.status(404).json({ error: err?.message || String(err) });
+    }
+  });
+
+  app.get('/api/backups/:name/file', requireAuth, (req, res) => {
+    try {
+      const filePath = resolveBackupFile(req.params.name, req.query.f);
+      res.download(filePath, path.basename(filePath));
+    } catch (err) {
+      res.status(404).json({ error: err?.message || String(err) });
+    }
+  });
+
+  app.use(express.static(getPublicDir()));
 
   return app;
 }
 
-export function startServer({ openBrowser: shouldOpen = true } = {}) {
+export async function startServer({ openBrowser: shouldOpen } = {}) {
+  await ensureKnownUsers();
   const app = createApp();
+
+  const openFlag = process.env.OPEN_BROWSER;
+  const autoOpen =
+    shouldOpen !== undefined
+      ? shouldOpen
+      : openFlag === 'false'
+        ? false
+        : openFlag === 'true'
+          ? true
+          : process.env.NODE_ENV !== 'production';
+
   const server = app.listen(PORT, () => {
     const url = `http://localhost:${PORT}`;
-    console.log(`F User Guide Tool UI: ${url}`);
+    console.log(`F User Guide Tool v2 UI: ${url}`);
     console.log(`Thư mục app: ${getAppRoot()}`);
-    console.log(`File .env: ${getEnvPath()}`);
-    const { map } = readEnvFile();
-    if (!map.WPM_USERNAME || String(map.WPM_USERNAME).includes('your_wpm')) {
-      console.log('⚠ Chưa lưu WPM — mở UI → mục "Tài khoản WPM" → Lưu.');
-    }
-    if (shouldOpen) {
-      setTimeout(() => openBrowser(url), 400);
-    }
+    console.log(`Download dir: ${DOWNLOADS_DIR}`);
+    console.log(`Health: ${url}/api/health`);
+    if (autoOpen) setTimeout(() => openBrowser(url), 400);
   });
+
   server.on('error', (err) => {
     if (err?.code === 'EADDRINUSE') {
-      console.error(`\n[ERROR] Port ${PORT} đang bị chiếm — có thể F User Guide Tool đã chạy.`);
-      console.error(`Mở trình duyệt: http://localhost:${PORT}`);
-      console.error('Hoặc đóng process cũ rồi chạy lại.\n');
+      console.error(`\n[ERROR] Port ${PORT} đang bị chiếm.`);
+      console.error(`Mở: http://localhost:${PORT}\n`);
     } else {
       console.error('[ERROR] Server:', err?.message || err);
     }
@@ -271,5 +409,8 @@ function isMainModule() {
 }
 
 if (isMainModule()) {
-  startServer({ openBrowser: true });
+  startServer().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
 }

@@ -386,12 +386,16 @@ export async function installAndBackupUpdraftPlus(page, options = {}, log) {
   // 1) Chờ backup MỚI thật sự xong (không tin text cũ trên trang)
   await waitUntilNewBackupReady(page, base, beforeSnap, log);
 
-  // Sau backup xong → luôn tải 5 part về folder (không zip)
-  log('Reload trang UpdraftPlus rồi tải file backup MỚI (không zip)...');
-  await page.goto(`${base}/wp-admin/options-general.php?page=updraftplus`, GOTO);
-  await sleepExact(1500);
-  await dismissBlockingAlerts(page, log);
-  await downloadUpdraftBackupParts(page, base, log, beforeSnap, options.projectName);
+  // 2) Tải file về máy — chỉ khi tick option (không zip)
+  if (options.downloadBackup) {
+    log('Reload trang UpdraftPlus rồi tải file backup MỚI (không zip)...');
+    await page.goto(`${base}/wp-admin/options-general.php?page=updraftplus`, GOTO);
+    await sleepExact(1500);
+    await dismissBlockingAlerts(page, log);
+    await downloadUpdraftBackupParts(page, base, log, beforeSnap, options.projectName);
+  } else {
+    log('⏭ Bỏ qua tải file backup về máy (không tick option).');
+  }
 }
 
 /**
