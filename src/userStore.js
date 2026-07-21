@@ -124,14 +124,28 @@ export async function ensureAdminSeed() {
   const data = readAll();
   if (data.users.length > 0) return null;
   const adminUser = String(process.env.ADMIN_USER || 'admin').trim();
-  const adminPass = String(process.env.ADMIN_PASS || 'admin123');
+  const adminPass = resolveSeedPassword('ADMIN_PASS', { label: adminUser });
   const user = await createUser({
     username: adminUser,
     password: adminPass,
     role: 'admin',
   });
-  console.log(`Seed admin user: "${adminUser}" (đổi ADMIN_PASS trên production).`);
+  console.log(`Seed admin user: "${adminUser}".`);
   return user;
+}
+
+/**
+ * Lấy mật khẩu seed từ env. Không hardcode mật khẩu yếu trong repo.
+ * Nếu thiếu / placeholder → tạo ngẫu nhiên và in 1 lần ra console (chỉ lúc seed).
+ */
+function resolveSeedPassword(envKey, { label } = {}) {
+  const v = String(process.env[envKey] || '').trim();
+  if (v && !/^change_me/i.test(v)) return v;
+  const generated = crypto.randomBytes(12).toString('base64url');
+  console.warn(
+    `[security] Chưa đặt ${envKey} hợp lệ trong .env — seed "${label || envKey}" với mật khẩu tạm (chỉ hiện 1 lần):\n  ${generated}\n  Hãy lưu lại và đặt ${envKey} trong .env.`
+  );
+  return generated;
 }
 
 /** Tạo user nếu chưa có (không ghi đè password khi đã tồn tại). */
@@ -146,14 +160,16 @@ export async function ensureUserIfMissing({ username, password, role = 'user' })
 
 /** Seed admin + acc team `web` nếu chưa có. */
 export async function ensureKnownUsers() {
+  const adminName = process.env.ADMIN_USER || 'admin';
   await ensureUserIfMissing({
-    username: process.env.ADMIN_USER || 'admin',
-    password: process.env.ADMIN_PASS || 'admin123',
+    username: adminName,
+    password: resolveSeedPassword('ADMIN_PASS', { label: adminName }),
     role: 'admin',
   });
+  const webName = process.env.WEB_USER || 'web';
   await ensureUserIfMissing({
-    username: process.env.WEB_USER || 'web',
-    password: process.env.WEB_PASS || 'web@123',
+    username: webName,
+    password: resolveSeedPassword('WEB_PASS', { label: webName }),
     role: 'user',
   });
 }
