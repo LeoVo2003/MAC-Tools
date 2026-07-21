@@ -19,28 +19,27 @@
       </div>
     </header>
 
-    <!-- LOGIN admin (Ctrl+Shift+A) -->
-    <section class="panel" id="loginPanel" hidden>
-      <h2>Đăng nhập admin</h2>
-      <p class="hint" style="margin-top:0">
-        Team dùng tool <strong>không cần login</strong>. Chỉ admin vào đây (phím <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>A</kbd>).
+    <!-- LOGIN = WPM -->
+    <section class="panel" id="loginPanel">
+      <h2>Đăng nhập</h2>
+      <p class="hint login-hint">
+        Nhập <strong>email + password WPM</strong>. Lần đầu chưa có user → tool tự tạo và lưu password (dùng khi Run).
       </p>
-      <form id="loginForm" class="grid">
+      <form id="loginForm" class="login-form">
         <label>
-          <span>Username</span>
-          <input name="username" id="loginUser" type="text" required autocomplete="username" />
+          <span>Email WPM</span>
+          <input name="username" id="loginUser" type="email" required autocomplete="username" placeholder="you@macusaone.com" />
         </label>
         <label>
-          <span>Password</span>
-          <input name="password" id="loginPass" type="password" required autocomplete="current-password" />
+          <span>Password WPM</span>
+          <input name="password" id="loginPass" type="password" required autocomplete="current-password" placeholder="Password đăng nhập WPM" />
         </label>
       </form>
-      <div class="actions" style="margin-top:0.85rem">
-        <button type="submit" form="loginForm" id="loginBtn">Đăng nhập admin</button>
-        <button type="button" id="cancelLoginBtn" class="secondary" style="margin-top:0">Đóng</button>
-        <span id="loginStatus" class="badge idle">Admin</span>
+      <div class="actions login-actions">
+        <button type="submit" form="loginForm" id="loginBtn">Đăng nhập</button>
+        <span id="loginStatus" class="badge idle">Guest</span>
       </div>
-      <p id="loginError" class="hint" style="color:var(--danger)"></p>
+      <p id="loginError" class="hint login-error"></p>
     </section>
 
     <div id="appMain" hidden>
@@ -51,28 +50,6 @@
       </nav>
 
       <div id="tab-run">
-        <section class="panel creds">
-          <h2>Tài khoản WPM (của bạn)</h2>
-          <p class="hint" style="margin-top:0;margin-bottom:0.85rem">
-            Lưu trên máy / trình duyệt của bạn.
-          </p>
-          <form id="wpmCredForm" class="grid">
-            <label>
-              <span>WPM Username / Email</span>
-              <input id="wpmUsername" name="wpmUsername" type="text" autocomplete="username" placeholder="email@macusaone.com" />
-            </label>
-            <label>
-              <span>WPM Password</span>
-              <input id="wpmPassword" name="wpmPassword" type="password" autocomplete="current-password" placeholder="••••••••" />
-            </label>
-          </form>
-          <div class="actions" style="margin-top:0.85rem">
-            <button type="button" id="saveWpmBtn" class="secondary" style="margin-top:0">Lưu WPM</button>
-            <span id="wpmCredStatus" class="badge idle">Chưa tải</span>
-          </div>
-          <p id="wpmEnvPath" class="hint"></p>
-        </section>
-
         <form id="jobForm" class="panel">
           <div class="grid">
             <label>
@@ -115,8 +92,8 @@
 
           <fieldset class="steps-box">
             <legend>Chọn bước chạy</legend>
-            <p class="hint" style="margin-top:0">
-              Login WPM + Quick Login luôn chạy. Tối đa 4 job Chrome chạy cùng lúc (còn lại xếp hàng).
+            <p class="hint">
+              Login WPM + Quick Login luôn chạy. Tối đa 4 job Chrome cùng lúc (còn lại xếp hàng).
             </p>
             <div class="steps-toolbar">
               <button type="button" id="stepsAllBtn" class="secondary tiny">Tick all</button>
@@ -196,6 +173,7 @@
                   <th>Thời gian</th>
                   <th>User</th>
                   <th>Website</th>
+                  <th>Total time</th>
                   <th>Status</th>
                   <th>Note</th>
                 </tr>

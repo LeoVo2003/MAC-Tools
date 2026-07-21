@@ -3,7 +3,6 @@ const loginForm = document.getElementById('loginForm');
 const loginBtn = document.getElementById('loginBtn');
 const loginStatus = document.getElementById('loginStatus');
 const loginError = document.getElementById('loginError');
-const cancelLoginBtn = document.getElementById('cancelLoginBtn');
 const appMain = document.getElementById('appMain');
 const userBar = document.getElementById('userBar');
 const whoAmI = document.getElementById('whoAmI');
@@ -23,14 +22,6 @@ const copyBtn = document.getElementById('copyBtn');
 const stepsAllBtn = document.getElementById('stepsAllBtn');
 const stepsNoneBtn = document.getElementById('stepsNoneBtn');
 
-const wpmUsername = document.getElementById('wpmUsername');
-const wpmPassword = document.getElementById('wpmPassword');
-const saveWpmBtn = document.getElementById('saveWpmBtn');
-const wpmCredStatus = document.getElementById('wpmCredStatus');
-const wpmEnvPath = document.getElementById('wpmEnvPath');
-
-const WPM_LS_KEY = 'fugt.wpm.v1';
-
 let currentUser = null;
 let currentJobId = null;
 let eventSource = null;
@@ -48,27 +39,6 @@ function setRunBadge(mode, text) {
 function appendLog(line) {
   logBox.textContent += (logBox.textContent ? '\n' : '') + line;
   logBox.scrollTop = logBox.scrollHeight;
-}
-
-function readLocalWpm() {
-  try {
-    const raw = localStorage.getItem(WPM_LS_KEY);
-    if (!raw) return { username: '', password: '' };
-    const data = JSON.parse(raw);
-    return {
-      username: String(data.username || '').trim(),
-      password: String(data.password || ''),
-    };
-  } catch {
-    return { username: '', password: '' };
-  }
-}
-
-function writeLocalWpm(username, password) {
-  localStorage.setItem(
-    WPM_LS_KEY,
-    JSON.stringify({ username: String(username || '').trim(), password: String(password || '') })
-  );
 }
 
 function stepInputs() {
@@ -150,56 +120,51 @@ function applyRoleUi(user) {
   document.querySelectorAll('[data-admin-only]').forEach((el) => {
     el.hidden = !isAdmin;
   });
-  if (logoutBtn) {
-    logoutBtn.hidden = !isAdmin;
-    logoutBtn.textContent = isAdmin ? 'Về chế độ team' : 'Đăng xuất';
-  }
   const reportsTab = document.querySelector('.tab[data-tab="reports"]');
   if (!isAdmin && reportsTab?.classList.contains('active')) {
     document.querySelector('.tab[data-tab="run"]')?.click();
   }
 }
 
-function showAdminLogin() {
+function showLoggedOut() {
+  currentUser = null;
   loginPanel.hidden = false;
-  loginError.textContent = '';
-  document.getElementById('loginUser')?.focus();
-  loginPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
-
-function hideAdminLogin() {
-  loginPanel.hidden = true;
-  loginError.textContent = '';
+  appMain.hidden = true;
+  userBar.hidden = true;
+  if (logoutBtn) logoutBtn.hidden = true;
+  whoAmI.textContent = '';
+  setBadge(loginStatus, 'idle', 'Guest');
+  if (eventSource) {
+    eventSource.close();
+    eventSource = null;
+  }
 }
 
 function showApp(user) {
   currentUser = user;
-  hideAdminLogin();
+  loginPanel.hidden = true;
   appMain.hidden = false;
   userBar.hidden = false;
+  if (logoutBtn) logoutBtn.hidden = false;
   const isAdmin = user.role === 'admin';
-  whoAmI.textContent = isAdmin ? `${user.username} (admin)` : 'Team · không cần login';
-  setBadge(loginStatus, 'done', isAdmin ? 'Admin' : 'Team');
+  whoAmI.textContent = isAdmin ? `${user.username} (admin)` : user.username;
+  setBadge(loginStatus, 'done', 'OK');
   applyRoleUi(user);
-  loadWpmCredentials();
   connectEvents();
-}
-
-async function enterGuestMode() {
-  const res = await fetch('/api/guest', { method: 'POST' });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Không vào được chế độ team');
-  showApp(data.user);
 }
 
 async function refreshMe() {
   const res = await fetch('/api/me');
   const data = await res.json();
-  if (data.user) {
-    showApp(data.user);
+  const user = data.user;
+  // Session cũ (guest web / admin seed) — bắt login lại bằng WPM
+  if (user && (user.username === 'web' || user.username === 'admin') && !user.wpmConfigured) {
+    await fetch('/api/logout', { method: 'POST' });
+    showLoggedOut();
     return;
   }
-  await enterGuestMode();
+  if (user) showApp(user);
+  else showLoggedOut();
 }
 
 loginForm.addEventListener('submit', async (e) => {
@@ -230,56 +195,9 @@ loginForm.addEventListener('submit', async (e) => {
   }
 });
 
-cancelLoginBtn?.addEventListener('click', hideAdminLogin);
-
 logoutBtn.addEventListener('click', async () => {
   await fetch('/api/logout', { method: 'POST' });
-  await enterGuestMode();
-});
-
-/** Admin login: Ctrl+Shift+A */
-window.addEventListener('keydown', (e) => {
-  if (e.ctrlKey && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
-    e.preventDefault();
-    if (loginPanel.hidden) showAdminLogin();
-    else hideAdminLogin();
-  }
-});
-
-function loadWpmCredentials() {
-  const local = readLocalWpm();
-  if (local.username) wpmUsername.value = local.username;
-  if (local.password) {
-    wpmPassword.value = '';
-    wpmPassword.placeholder = '•••••••• (đã lưu trên máy này — nhập mới nếu muốn đổi)';
-  } else {
-    wpmPassword.placeholder = '••••••••';
-  }
-  const ok = Boolean(local.username && local.password);
-  setBadge(wpmCredStatus, ok ? 'done' : 'error', ok ? 'Đã lưu (máy này)' : 'Chưa lưu');
-  wpmEnvPath.textContent = ok
-    ? 'Đã lưu trên trình duyệt máy bạn.'
-    : 'Điền WPM rồi bấm Lưu.';
-}
-
-saveWpmBtn.addEventListener('click', () => {
-  const username = wpmUsername.value.trim();
-  const password = wpmPassword.value;
-  if (!username) {
-    setBadge(wpmCredStatus, 'error', 'Thiếu user');
-    return;
-  }
-  const local = readLocalWpm();
-  const pass = password || local.password;
-  if (!pass) {
-    setBadge(wpmCredStatus, 'error', 'Nhập password');
-    return;
-  }
-  writeLocalWpm(username, pass);
-  wpmPassword.value = '';
-  wpmPassword.placeholder = '•••••••• (đã lưu trên máy này — nhập mới nếu muốn đổi)';
-  setBadge(wpmCredStatus, 'done', 'Đã lưu (máy này)');
-  wpmEnvPath.textContent = 'Đã lưu WPM trên trình duyệt máy bạn.';
+  showLoggedOut();
 });
 
 function connectEvents(jobId) {
@@ -408,19 +326,6 @@ form?.addEventListener('submit', async (e) => {
   if (userEl) userEl.value = cleanUser;
   if (passEl) passEl.value = cleanPass;
 
-  const localWpm = readLocalWpm();
-  const wpmUser = (wpmUsername.value.trim() || localWpm.username).trim();
-  const wpmPass = wpmPassword.value || localWpm.password;
-  if (!wpmUser || !wpmPass) {
-    appendLog('❌ Chưa có WPM. Điền Username/Password WPM rồi bấm Lưu (lưu trên máy bạn).');
-    setRunBadge('error', 'Error');
-    return;
-  }
-  // Giữ pass trên form trống nhưng đã lưu local — đồng bộ username form vào local nếu đang nhập
-  if (wpmUsername.value.trim() && wpmPassword.value) {
-    writeLocalWpm(wpmUser, wpmPass);
-  }
-
   const payload = {
     wpmProjectUrl: normalizedProject,
     taskUrl: fd.get('taskUrl'),
@@ -432,8 +337,6 @@ form?.addEventListener('submit', async (e) => {
     downloadBackup: fd.get('downloadBackup') === 'on',
     packageTier: 'F',
     steps,
-    wpmUsername: wpmUser,
-    wpmPassword: wpmPass,
   };
 
   logBox.textContent = '';
@@ -508,6 +411,26 @@ document.querySelectorAll('.tab').forEach((btn) => {
   });
 });
 
+function formatDuration(ms) {
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return '—';
+  const totalSec = Math.round(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function runDurationMs(r) {
+  if (r.durationMs != null && Number.isFinite(Number(r.durationMs))) return Number(r.durationMs);
+  if (!r.startedAt || !r.finishedAt) return null;
+  const a = Date.parse(r.startedAt);
+  const b = Date.parse(r.finishedAt);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  return Math.max(0, b - a);
+}
+
 async function loadReports() {
   const res = await fetch('/api/runs?limit=100');
   if (!res.ok) return;
@@ -523,10 +446,12 @@ async function loadReports() {
       r.error ||
       r.resultSummary?.username ||
       (r.resultSummary?.accountExists ? 'account exists' : '');
+    const dur = formatDuration(runDurationMs(r));
     tr.innerHTML = `
       <td>${(r.startedAt || '').replace('T', ' ').slice(0, 19)}</td>
       <td>${r.toolUser || r.username || '—'}</td>
       <td class="mono">${r.websiteUrl || '—'}</td>
+      <td class="mono">${dur}</td>
       <td><span class="badge ${r.status === 'success' ? 'done' : r.status === 'error' ? 'error' : 'running'}">${r.status}</span></td>
       <td>${String(note).slice(0, 80)}</td>`;
     tbody.appendChild(tr);
@@ -578,6 +503,6 @@ document.getElementById('refreshBackupsBtn')?.addEventListener('click', loadBack
 
 refreshMe().catch((err) => {
   console.error(err);
-  appMain.hidden = false;
-  whoAmI.textContent = 'Lỗi kết nối — F5 thử lại';
+  showLoggedOut();
+  loginError.textContent = err.message || 'Lỗi kết nối — F5 thử lại';
 });

@@ -11,8 +11,7 @@ services:
       PORT: "3847"
       SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET}
       APP_SECRET: ${APP_SECRET:?set APP_SECRET}
-      ADMIN_USER: ${ADMIN_USER:-admin}
-      ADMIN_PASS: ${ADMIN_PASS:?set ADMIN_PASS}
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-}
       DOWNLOAD_DIR: /data/downloads
     volumes:
       - fugt_downloads:/data/downloads

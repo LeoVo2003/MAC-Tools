@@ -12,7 +12,7 @@
 ```bash
 git clone <repo> && cd User-Guide
 cp .env.example .env
-# BẮT BUỘC sửa: SESSION_SECRET, APP_SECRET, ADMIN_USER, ADMIN_PASS
+# BẮT BUỘC sửa: SESSION_SECRET, APP_SECRET
 # Production: HEADLESS=true, OPEN_BROWSER=false, NODE_ENV=production
 npm install
 npm start
@@ -22,7 +22,8 @@ npm start
 UI: `http://SERVER_IP:3847`  
 Health: `GET /api/health`
 
-**Không** commit `.env`. Đổi mật khẩu admin ngay sau lần seed đầu. Không đưa mật khẩu vào ticket/chat công khai.
+Login tool = **email + password WPM**. Không cần seed admin riêng.  
+Admin mặc định: `leo.vo@macusaone.com` (thêm email: `ADMIN_EMAILS=a@x.com,b@y.com`).
 
 ## Biến môi trường quan trọng
 
@@ -30,8 +31,8 @@ Health: `GET /api/health`
 |-----|---------|
 | `HEADLESS=true` | Chrome không UI (server) |
 | `OPEN_BROWSER=false` | Không tự mở browser trên server |
-| `SESSION_SECRET` / `APP_SECRET` | Session + mã hóa (đặt chuỗi mạnh) |
-| `ADMIN_USER` / `ADMIN_PASS` | Seed admin lần đầu — mật khẩu mạnh, giữ kín |
+| `SESSION_SECRET` / `APP_SECRET` | Session + mã hóa WPM password |
+| `ADMIN_EMAILS` | Thêm email admin (comma-separated), ngoài leo.vo@… |
 | `CHROME_PATH` | Path Chrome/Chromium nếu không tự tìm |
 | `DOWNLOAD_DIR` | Thư mục lưu file backup |
 | `MAX_CONCURRENT_JOBS` | Số Chrome chạy song song (mặc định `4`) |
@@ -60,14 +61,13 @@ server {
 docker compose up -d --build
 ```
 
-Nhớ mount/inject `.env` an toàn; không build secret vào image.
+Nhớ inject `.env` an toàn; không build secret vào image.
 
 ## Lưu ý vận hành
 
-- Team mở tool là dùng (Run + Backup). Admin: **Ctrl+Shift+A** rồi đăng nhập.
-- WPM lưu trên từng máy (localStorage).
-- Tracking: `data/runs.jsonl` — tab Báo cáo (admin) hoặc `GET /api/runs`.
-- Backup: tick option mới tải; tab **Backup files** hoặc `GET /api/backups`.
+- User login WPM → Run dùng đúng tk đó; không còn form WPM trong Run.
+- Tracking: `data/runs.jsonl` — tab Báo cáo (admin).
+- Backup: tick option mới tải; tab **Backup files**.
 - Deploy từ `main`; test trên `develop`.
 
 ## Local (Windows/Mac)

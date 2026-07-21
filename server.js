@@ -15,11 +15,8 @@ import {
 import { startRun, finishRun, listRuns, runsStats } from './src/tracking.js';
 import {
   ensureKnownUsers,
-  verifyUser,
+  loginWithWpm,
   toPublicUser,
-  findUserByUsername,
-  findUserById,
-  setUserWpmCredentials,
   getUserWpmCredentials,
 } from './src/userStore.js';
 import { sessionMiddleware, requireAuth, requireAdmin, currentPublicUser } from './src/auth.js';
@@ -78,34 +75,24 @@ export function createApp() {
     res.json({ user: currentPublicUser(req) });
   });
 
-  /** Vào tool không cần login → session mặc định = acc team `web`. */
-  app.post('/api/guest', (req, res) => {
-    const existing = req.session?.userId ? findUserById(req.session.userId) : null;
-    if (existing) {
-      return res.json({ ok: true, user: toPublicUser(existing) });
-    }
-    const webName = String(process.env.WEB_USER || 'web').trim();
-    const web = findUserByUsername(webName);
-    if (!web) {
-      return res.status(500).json({ error: `Chưa có user "${webName}". Restart server để seed.` });
-    }
-    req.session.userId = web.id;
-    req.session.username = web.username;
-    res.json({ ok: true, user: toPublicUser(web) });
-  });
-
+  /**
+   * Login = tài khoản WPM (email + password).
+   * Lần đầu tự tạo user trong data/users.json; leo.vo@macusaone.com → admin.
+   */
   app.post('/api/login', async (req, res) => {
     const username = String(req.body?.username || '').trim();
     const password = String(req.body?.password || '');
-    if (!username || !password) {
-      return res.status(400).json({ error: 'Thiếu username/password.' });
+    if (!username) {
+      return res.status(400).json({ error: 'Thiếu email WPM.' });
+    }
+    if (!password) {
+      return res.status(400).json({ error: 'Nhập password WPM — lần đầu tool sẽ lưu lại cho Run.' });
     }
     try {
-      const user = await verifyUser(username, password);
-      if (!user) return res.status(401).json({ error: 'Sai username hoặc password.' });
-      if (user.role !== 'admin') {
-        return res.status(403).json({
-          error: 'Chỉ đăng nhập admin tại đây. Team dùng tool không cần login.',
+      const user = await loginWithWpm(username, password);
+      if (!user) {
+        return res.status(401).json({
+          error: 'Sai password. Đúng email đã từng login thì nhập đúng password đã lưu (hoặc liên hệ admin reset).',
         });
       }
       req.session.userId = user.id;
@@ -116,39 +103,10 @@ export function createApp() {
     }
   });
 
-  /** Thoát admin → về chế độ team (web). */
   app.post('/api/logout', (req, res) => {
     req.session.destroy(() => {
       res.json({ ok: true });
     });
-  });
-
-  app.get('/api/wpm-credentials', requireAuth, (req, res) => {
-    const creds = getUserWpmCredentials(req.user.id);
-    res.json({
-      username: creds.configured ? creds.username : '',
-      hasPassword: creds.configured,
-      configured: creds.configured,
-      storage: 'per-user',
-    });
-  });
-
-  app.post('/api/wpm-credentials', requireAuth, (req, res) => {
-    const username = String(req.body?.username || '').trim();
-    const password = String(req.body?.password ?? '');
-    if (!username || !password) {
-      return res.status(400).json({ error: 'Thiếu username hoặc password WPM.' });
-    }
-    try {
-      setUserWpmCredentials(req.user.id, username, password);
-      res.json({
-        ok: true,
-        message: 'Đã lưu tài khoản WPM cho user của bạn.',
-        username,
-      });
-    } catch (err) {
-      res.status(500).json({ error: err?.message || String(err) });
-    }
   });
 
   app.get('/api/status', requireAuth, (req, res) => {
@@ -230,19 +188,15 @@ export function createApp() {
       return res.status(400).json({ error: 'Thiếu username / password / email khách.' });
     }
 
-    const bodyWpmUser = String(body.wpmUsername || '').trim();
-    const bodyWpmPass = String(body.wpmPassword || '');
     const stored = getUserWpmCredentials(req.user.id);
-    const wpmUser = bodyWpmUser || stored.username;
-    const wpmPass = bodyWpmPass || stored.password;
-    if (!wpmUser || !wpmPass) {
+    if (!stored.configured) {
       return res.status(400).json({
-        error: 'Chưa có tài khoản WPM. Điền Username/Password WPM rồi bấm Lưu (lưu trên máy bạn).',
+        error: 'Chưa có WPM trên tài khoản. Đăng xuất rồi login lại bằng email/password WPM.',
       });
     }
     jobPayload.wpmCredentials = {
-      username: wpmUser,
-      password: wpmPass,
+      username: stored.username,
+      password: stored.password,
     };
 
     const userMeta = {
@@ -263,7 +217,7 @@ export function createApp() {
         const runId = startRun({
           userId: req.user.id,
           toolUser: req.user.username,
-          wpmUser: wpmUser,
+          wpmUser: stored.username,
           wpmProjectUrl: jobPayload.wpmProjectUrl,
           taskUrl: jobPayload.taskUrl || '',
           websiteUrl: jobPayload.websiteUrl,

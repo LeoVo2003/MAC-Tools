@@ -33,15 +33,21 @@ export function finishRun(id, { status = 'success', error = null, result = null 
   ensureDataDir();
   if (!fs.existsSync(RUNS_FILE)) return;
   const lines = fs.readFileSync(RUNS_FILE, 'utf-8').split(/\r?\n/).filter(Boolean);
+  const finishedAt = new Date().toISOString();
   const updated = lines.map((line) => {
     try {
       const row = JSON.parse(line);
       if (row.id !== id) return line;
+      const startMs = row.startedAt ? Date.parse(row.startedAt) : NaN;
+      const endMs = Date.parse(finishedAt);
+      const durationMs =
+        Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, endMs - startMs) : null;
       return JSON.stringify({
         ...row,
         status,
         error: error || null,
-        finishedAt: new Date().toISOString(),
+        finishedAt,
+        durationMs,
         resultSummary: result
           ? {
               project: result.project || '',
@@ -55,7 +61,6 @@ export function finishRun(id, { status = 'success', error = null, result = null 
       return line;
     }
   });
-  // Rewrite file (đủ cho giai đoạn đầu; sau này chuyển SQLite)
   fs.writeFileSync(RUNS_FILE, `${updated.join('\n')}\n`, 'utf-8');
 }
 

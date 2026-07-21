@@ -8,7 +8,7 @@ Công cụ web tự động hóa gói F trên WordPress qua WPM (login project �
 
 ```bash
 cp .env.example .env
-# Điền SECRET + mật khẩu admin (xem bên dưới) — không commit file .env
+# Điền SESSION_SECRET + APP_SECRET (chuỗi mạnh) — không commit file .env
 npm install
 npm start
 ```
@@ -17,40 +17,35 @@ UI: http://localhost:3847 · Health: `GET /api/health`
 
 ## Cách dùng
 
-| Ai | Cách vào |
-|----|----------|
-| Team | Mở URL tool → dùng thẳng (Run + Backup files). Không cần đăng nhập. |
-| Admin | Phím tắt **Ctrl+Shift+A** → đăng nhập admin. Có thêm tab Báo cáo. |
+1. **Đăng nhập** bằng **email + password WPM** (cùng tk đăng nhập WPM).
+2. Lần đầu login → tool tự tạo user, lưu WPM (mã hóa) trên server (`data/users.json`).
+3. Vào **Run** — không cần nhập lại WPM; job dùng tk đang login.
+4. Tab **Backup files** cho mọi user đã login.
+5. Tab **Báo cáo** chỉ hiện với admin.
 
-- **WPM:** mỗi người lưu trên máy/trình duyệt của mình (không ghi đè nhau trên server).
-- **Backup:** tick option trên form nếu muốn tải file về server (không zip).
-- Tối đa vài job Chrome chạy song song trên server (cấu hình `MAX_CONCURRENT_JOBS`).
+**Admin:** email `leo.vo@macusaone.com` luôn là admin (có thể thêm email qua `ADMIN_EMAILS` trong `.env`).
 
-## Bảo mật (bắt buộc khi deploy / public repo)
+## Bảo mật (deploy)
 
-- **Không** ghi mật khẩu admin / secret vào README, issue, chat công khai.
-- Copy `.env.example` → `.env`, đặt:
-  - `SESSION_SECRET`, `APP_SECRET` — chuỗi dài, ngẫu nhiên
-  - `ADMIN_USER` / `ADMIN_PASS` — mật khẩu mạnh, **đổi ngay lần đầu**
-- File `.env` và thư mục `data/` **không commit** (đã có trong `.gitignore`).
-- Production: `NODE_ENV=production`, `HEADLESS=true`, `OPEN_BROWSER=false`, nên chạy sau HTTPS (nginx).
-- Chỉ admin biết phím tắt + mật khẩu admin; không gửi cho cả team.
+- Không ghi mật khẩu / secret vào README hay chat công khai.
+- `.env` và `data/` **không commit**.
+- Production: `NODE_ENV=production`, `HEADLESS=true`, `OPEN_BROWSER=false`, nên HTTPS.
+- `SESSION_SECRET` / `APP_SECRET` phải đặt chuỗi dài, ngẫu nhiên.
 
-Chi tiết deploy VPS / Docker / nginx: **[DEPLOY.md](DEPLOY.md)**.
+Chi tiết VPS / Docker / nginx: **[DEPLOY.md](DEPLOY.md)**.
 
 ## Stack
 
 - Node.js (Express) + Puppeteer (Chrome)
 - Session auth · queue job · SSE log
-- Docker / docker-compose sẵn trong repo
+- User store: `data/users.json` (WPM password mã hóa AES)
 
 ## API nhanh
 
 | Endpoint | Mô tả |
 |----------|--------|
 | `GET /api/health` | Health check |
-| `POST /api/guest` | Session team (mặc định) |
-| `POST /api/login` | Đăng nhập admin |
-| `POST /api/run` | Chạy job |
+| `POST /api/login` | Login bằng email/password WPM |
+| `POST /api/run` | Chạy job (WPM lấy từ session) |
 | `GET /api/runs` | Báo cáo (admin) |
 | `GET /api/backups` | Danh sách backup trên server |

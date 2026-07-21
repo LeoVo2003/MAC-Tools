@@ -7,6 +7,9 @@ import { getAppRoot } from './envStore.js';
 const DATA_DIR = path.join(getAppRoot(), 'data');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 
+/** Email / username luôn là admin (có thể mở rộng bằng ADMIN_EMAILS). */
+const DEFAULT_ADMIN_EMAILS = ['leo.vo@macusaone.com'];
+
 function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 }
@@ -15,7 +18,6 @@ function appSecret() {
   return process.env.APP_SECRET || process.env.SESSION_SECRET || 'dev-change-me-app-secret';
 }
 
-/** Mã hóa nhẹ WPM password at-rest (AES-256-GCM + APP_SECRET). */
 export function encryptSecret(plain) {
   const key = crypto.createHash('sha256').update(appSecret()).digest();
   const iv = crypto.randomBytes(12);
@@ -28,7 +30,7 @@ export function encryptSecret(plain) {
 export function decryptSecret(blob) {
   if (!blob) return '';
   const s = String(blob);
-  if (!s.startsWith('v1:')) return s; // legacy plain (migrate on save)
+  if (!s.startsWith('v1:')) return s;
   const [, ivB64, tagB64, dataB64] = s.split(':');
   const key = crypto.createHash('sha256').update(appSecret()).digest();
   const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(ivB64, 'base64'));
@@ -54,13 +56,18 @@ function writeAll(data) {
   fs.writeFileSync(USERS_FILE, JSON.stringify(data, null, 2), 'utf-8');
 }
 
-export function listUsersPublic() {
-  return readAll().users.map((u) => ({
-    id: u.id,
-    username: u.username,
-    hasWpm: Boolean(u.wpmUsername && u.wpmPasswordEnc),
-    createdAt: u.createdAt,
-  }));
+export function adminEmails() {
+  const fromEnv = String(process.env.ADMIN_EMAILS || '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  const set = new Set([...DEFAULT_ADMIN_EMAILS.map((e) => e.toLowerCase()), ...fromEnv]);
+  return set;
+}
+
+export function isAdminIdentity(username) {
+  const key = String(username || '').trim().toLowerCase();
+  return adminEmails().has(key);
 }
 
 export function findUserByUsername(username) {
@@ -83,20 +90,13 @@ export async function createUser({ username, password, role = 'user' }) {
     username: name,
     passwordHash: await bcrypt.hash(pass, 10),
     role,
-    wpmUsername: '',
-    wpmPasswordEnc: '',
+    wpmUsername: name,
+    wpmPasswordEnc: encryptSecret(pass),
     createdAt: new Date().toISOString(),
   };
   data.users.push(user);
   writeAll(data);
   return user;
-}
-
-export async function verifyUser(username, password) {
-  const user = findUserByUsername(username);
-  if (!user) return null;
-  const ok = await bcrypt.compare(String(password || ''), user.passwordHash);
-  return ok ? user : null;
 }
 
 export function setUserWpmCredentials(userId, wpmUsername, wpmPassword) {
@@ -110,71 +110,88 @@ export function setUserWpmCredentials(userId, wpmUsername, wpmPassword) {
   return user;
 }
 
+async function updateLoginPassword(userId, password) {
+  const data = readAll();
+  const user = data.users.find((u) => u.id === userId);
+  if (!user) throw new Error('User không tồn tại.');
+  user.passwordHash = await bcrypt.hash(String(password), 10);
+  user.updatedAt = new Date().toISOString();
+  writeAll(data);
+  return user;
+}
+
+export function setUserRole(userId, role) {
+  const data = readAll();
+  const user = data.users.find((u) => u.id === userId);
+  if (!user) throw new Error('User không tồn tại.');
+  user.role = role;
+  user.updatedAt = new Date().toISOString();
+  writeAll(data);
+  return user;
+}
+
 export function getUserWpmCredentials(userId) {
   const user = findUserById(userId);
   if (!user) return { username: '', password: '', configured: false };
-  const username = user.wpmUsername || '';
+  const username = user.wpmUsername || user.username || '';
   const password = user.wpmPasswordEnc ? decryptSecret(user.wpmPasswordEnc) : '';
-  const configured = Boolean(username && password && !username.includes('your_wpm'));
+  const configured = Boolean(username && password);
   return { username, password, configured };
 }
 
-/** Seed admin từ ADMIN_USER / ADMIN_PASS nếu chưa có user nào. */
-export async function ensureAdminSeed() {
-  const data = readAll();
-  if (data.users.length > 0) return null;
-  const adminUser = String(process.env.ADMIN_USER || 'admin').trim();
-  const adminPass = resolveSeedPassword('ADMIN_PASS', { label: adminUser });
-  const user = await createUser({
-    username: adminUser,
-    password: adminPass,
-    role: 'admin',
-  });
-  console.log(`Seed admin user: "${adminUser}".`);
-  return user;
-}
-
 /**
- * Lấy mật khẩu seed từ env. Không hardcode mật khẩu yếu trong repo.
- * Nếu thiếu / placeholder → tạo ngẫu nhiên và in 1 lần ra console (chỉ lúc seed).
+ * Login tool = tk/mk WPM.
+ * Lần đầu (email chưa có): tạo user + lưu password — không cần đăng ký trước.
+ * Lần sau: đúng password thì vào; sai → báo lỗi.
+ * Email admin (leo.vo@…) → role admin.
  */
-function resolveSeedPassword(envKey, { label } = {}) {
-  const v = String(process.env[envKey] || '').trim();
-  if (v && !/^change_me/i.test(v)) return v;
-  const generated = crypto.randomBytes(12).toString('base64url');
-  console.warn(
-    `[security] Chưa đặt ${envKey} hợp lệ trong .env — seed "${label || envKey}" với mật khẩu tạm (chỉ hiện 1 lần):\n  ${generated}\n  Hãy lưu lại và đặt ${envKey} trong .env.`
-  );
-  return generated;
-}
-
-/** Tạo user nếu chưa có (không ghi đè password khi đã tồn tại). */
-export async function ensureUserIfMissing({ username, password, role = 'user' }) {
+export async function loginWithWpm(username, password) {
   const name = String(username || '').trim();
-  if (!name) return null;
-  if (findUserByUsername(name)) return null;
-  const user = await createUser({ username: name, password, role });
-  console.log(`Seed user: "${name}" (role=${role})`);
-  return user;
+  const pass = String(password || '');
+  if (!name) throw new Error('Thiếu email WPM.');
+  if (!pass) throw new Error('Nhập password WPM để lưu và dùng khi Run.');
+
+  const wantAdmin = isAdminIdentity(name);
+  let user = findUserByUsername(name);
+
+  // Lần đầu — tạo mới, lưu pass luôn
+  if (!user) {
+    user = await createUser({
+      username: name,
+      password: pass,
+      role: wantAdmin ? 'admin' : 'user',
+    });
+    return findUserById(user.id);
+  }
+
+  // User cũ seed (admin/web) chưa gắn WPM → cho gắn pass mới lần này
+  const legacyNoWpm = !user.wpmPasswordEnc;
+  if (legacyNoWpm) {
+    await updateLoginPassword(user.id, pass);
+    setUserWpmCredentials(user.id, name, pass);
+    if (wantAdmin) setUserRole(user.id, 'admin');
+    else if (user.role === 'admin' && !wantAdmin && name.toLowerCase() !== 'admin') {
+      setUserRole(user.id, 'user');
+    }
+    return findUserById(user.id);
+  }
+
+  const ok = await bcrypt.compare(pass, user.passwordHash);
+  if (!ok) return null;
+
+  await updateLoginPassword(user.id, pass);
+  setUserWpmCredentials(user.id, name, pass);
+  if (wantAdmin && user.role !== 'admin') {
+    setUserRole(user.id, 'admin');
+  }
+  return findUserById(user.id);
 }
 
-/** Seed admin + acc team `web` nếu chưa có. */
+/** Không seed admin/web nữa — user tự tạo khi login WPM. */
 export async function ensureKnownUsers() {
-  const adminName = process.env.ADMIN_USER || 'admin';
-  await ensureUserIfMissing({
-    username: adminName,
-    password: resolveSeedPassword('ADMIN_PASS', { label: adminName }),
-    role: 'admin',
-  });
-  const webName = process.env.WEB_USER || 'web';
-  await ensureUserIfMissing({
-    username: webName,
-    password: resolveSeedPassword('WEB_PASS', { label: webName }),
-    role: 'user',
-  });
+  ensureDataDir();
 }
 
-/** Public view (không lộ hash / secret). */
 export function toPublicUser(user) {
   if (!user) return null;
   const wpm = getUserWpmCredentials(user.id);
@@ -183,6 +200,6 @@ export function toPublicUser(user) {
     username: user.username,
     role: user.role || 'user',
     wpmConfigured: wpm.configured,
-    wpmUsername: wpm.configured ? wpm.username : '',
+    wpmUsername: wpm.configured ? wpm.username : user.username,
   };
 }

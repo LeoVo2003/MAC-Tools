@@ -16,6 +16,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -80,7 +84,45 @@ label span {
   display: block;
   font-size: 0.8rem;
   color: var(--muted);
-  margin-bottom: 0.3rem;
+  margin-bottom: 0.45rem;
+  line-height: 1.35;
+}
+
+/* Chỉ label ô nhập (grid / login) xếp dọc — không đụng checkbox */
+.grid > label,
+.login-form > label {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  max-width: 420px;
+  margin-top: 1rem;
+}
+
+#loginPanel > .hint,
+#loginPanel > .login-hint {
+  margin: 0 0 1.15rem;
+  line-height: 1.5;
+}
+
+.login-actions {
+  margin-top: 1.15rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.login-error {
+  margin-top: 0.65rem;
+  color: var(--danger);
+  min-height: 1.2em;
 }
 
 input[type="url"],
@@ -104,51 +146,115 @@ input:focus {
 .checks {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  margin: 1rem 0 1.15rem;
+  gap: 0.55rem;
+  margin: 1.15rem 0 1.25rem;
 }
 
 .check {
   display: flex;
+  flex-direction: row;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.65rem;
   font-size: 0.9rem;
+  cursor: pointer;
+  margin: 0;
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.check input[type="checkbox"] {
+  width: 1.05rem;
+  height: 1.05rem;
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: var(--accent);
   cursor: pointer;
 }
 
-.steps-box {
-  margin: 0 0 1.15rem;
-  padding: 0.9rem 1rem 1rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+.check > span {
+  display: inline;
+  margin: 0;
+  font-size: inherit;
+  color: inherit;
+  line-height: 1.35;
+}
+
+.check:hover {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: var(--border);
+}
+
+.checks .check {
+  border-color: var(--border);
   background: #12181f;
 }
 
+.checks .check:hover {
+  border-color: rgba(61, 154, 106, 0.45);
+  background: rgba(61, 154, 106, 0.06);
+}
+
+.steps-box {
+  margin: 0 0 1.25rem;
+  padding: 1rem 1.1rem 1.1rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: linear-gradient(180deg, #151c24 0%, #12181f 100%);
+}
+
 .steps-box legend {
-  padding: 0 0.35rem;
-  font-size: 0.8rem;
+  padding: 0 0.4rem;
+  font-size: 0.78rem;
   font-weight: 600;
-  color: var(--muted);
+  color: var(--accent-hover);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
+}
+
+.steps-box > .hint {
+  margin: 0 0 0.85rem;
+  line-height: 1.45;
 }
 
 .steps-toolbar {
   display: flex;
   gap: 0.5rem;
-  margin: 0.55rem 0 0.75rem;
+  margin: 0 0 0.85rem;
 }
 
 button.tiny {
   margin-top: 0;
-  padding: 0.35rem 0.7rem;
-  font-size: 0.8rem;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.78rem;
 }
 
 .steps-list {
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
+  gap: 0.4rem;
+}
+
+.step-item {
+  border: 1px solid var(--border);
+  background: rgba(18, 24, 31, 0.85);
+}
+
+.step-item:hover {
+  border-color: rgba(61, 154, 106, 0.4);
+  background: rgba(61, 154, 106, 0.07);
+}
+
+.step-item:has(input:checked) {
+  border-color: rgba(61, 154, 106, 0.35);
+  background: rgba(61, 154, 106, 0.08);
+}
+
+.step-item.done {
+  opacity: 0.72;
 }
 
 .step-item.done span {
@@ -156,8 +262,15 @@ button.tiny {
   text-decoration: line-through;
 }
 
+.step-item.running {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(61, 154, 106, 0.25);
+}
+
 .step-item.running span {
-  color: var(--accent);
+  color: var(--accent-hover);
+  text-decoration: none;
+  font-weight: 600;
 }
 
 .hint {
