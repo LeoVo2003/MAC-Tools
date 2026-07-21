@@ -277,9 +277,9 @@ function stripApostrophes(raw) {
 }
 
 function sanitizeWpUsername(raw) {
-  let s = stripApostrophes(raw).trim();
+  let s = stripApostrophes(raw).trim().toLowerCase();
   s = s.replace(/\s+/g, '-');
-  s = s.replace(/[^a-zA-Z0-9._\-@]/g, '');
+  s = s.replace(/[^a-z0-9._\-@]/g, '');
   return s.replace(/-+/g, '-').replace(/^\-+|\-+$/g, '');
 }
 
@@ -304,6 +304,85 @@ for (const name of ['username', 'password']) {
   el.addEventListener('blur', apply);
   el.addEventListener('change', apply);
 }
+
+const fillDataBtn = document.getElementById('fillDataBtn');
+const fillDataHint = document.getElementById('fillDataHint');
+
+fillDataBtn?.addEventListener('click', async () => {
+  const projectInput = form?.querySelector('[name="wpmProjectUrl"]');
+  const taskInput = form?.querySelector('[name="taskUrl"]');
+  const wpmProjectUrl = normalizeWpmProjectUrl(projectInput?.value || '');
+  if (projectInput && wpmProjectUrl) projectInput.value = wpmProjectUrl;
+  if (!wpmProjectUrl) {
+    fillDataHint.textContent = 'Nhập WPM Project URL trước.';
+    fillDataHint.style.color = 'var(--danger)';
+    return;
+  }
+
+  fillDataBtn.disabled = true;
+  runBtn.disabled = true;
+  fillDataHint.style.color = 'var(--muted)';
+  fillDataHint.textContent = 'Đang lấy data (login WPM + đọc website)…';
+  logBox.textContent = '';
+  appendLog('=== Fill data ===');
+  setRunBadge('running', 'Fill…');
+
+  try {
+    const res = await fetch('/api/fill-data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        wpmProjectUrl,
+        taskUrl: (taskInput?.value || '').trim(),
+      }),
+    });
+    const data = await res.json();
+    for (const line of data.logs || []) appendLog(line);
+
+    if (!res.ok) {
+      appendLog(`❌ ${data.error || res.statusText}`);
+      fillDataHint.textContent = data.error || 'Fill data thất bại';
+      fillDataHint.style.color = 'var(--danger)';
+      setRunBadge('error', 'Error');
+      return;
+    }
+
+    const setVal = (name, val) => {
+      const el = form.querySelector(`[name="${name}"]`);
+      if (el && val != null) el.value = val;
+    };
+    setVal('websiteUrl', data.websiteUrl || '');
+    setVal('username', data.username || '');
+    setVal('password', data.password || '');
+    setVal('email', data.email || '');
+
+    const warns = data.warnings || [];
+    for (const w of warns) appendLog(`⚠ ${w}`);
+
+    if (!data.email) {
+      fillDataHint.textContent = 'Đã fill một phần — không lấy được email từ footer (điền tay).';
+      fillDataHint.style.color = 'var(--warn)';
+      setRunBadge('error', 'Thiếu mail');
+    } else if (warns.length) {
+      fillDataHint.textContent = `Đã fill — còn ${warns.length} cảnh báo (xem Log).`;
+      fillDataHint.style.color = 'var(--warn)';
+      setRunBadge('done', 'Filled');
+    } else {
+      fillDataHint.textContent = 'Đã fill xong — kiểm tra rồi bấm Run.';
+      fillDataHint.style.color = 'var(--accent)';
+      setRunBadge('done', 'Filled');
+    }
+    appendLog('=== Fill data xong ===');
+  } catch (err) {
+    appendLog(`❌ ${err.message}`);
+    fillDataHint.textContent = err.message;
+    fillDataHint.style.color = 'var(--danger)';
+    setRunBadge('error', 'Error');
+  } finally {
+    fillDataBtn.disabled = false;
+    runBtn.disabled = false;
+  }
+});
 
 form?.addEventListener('submit', async (e) => {
   e.preventDefault();

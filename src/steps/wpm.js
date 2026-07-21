@@ -115,6 +115,210 @@ export async function readProjectZipcode(page) {
   });
 }
 
+/** Mở tab Website Information trên trang project. */
+export async function openWebsiteInformationTab(page, projectUrl, log = () => {}) {
+  const u = new URL(projectUrl);
+  u.searchParams.set('tab', 'tab-web-info');
+  const candidates = [
+    u.toString(),
+    `${String(projectUrl).replace(/\/$/, '')}?tab=tab-web-info`,
+    projectUrl,
+  ];
+
+  for (const url of candidates) {
+    await page.goto(url, GOTO);
+    await sleep(400);
+    await page.evaluate(() => {
+      const tab =
+        document.querySelector(
+          'a[href="#tab-web-info"], a[href*="tab-web-info"], [data-bs-target="#tab-web-info"], [data-toggle="tab"][href="#tab-web-info"]'
+        ) ||
+        Array.from(document.querySelectorAll('a, button')).find((el) =>
+          /website information|web info/i.test((el.textContent || '').trim())
+        );
+      tab?.click();
+    });
+    await sleep(300);
+    const ok = await page.evaluate(() => {
+      const pane = document.querySelector('#tab-web-info');
+      return (
+        !!document.querySelector('#web-info, #websContainer, .web-item, [id^="web_"]') ||
+        (pane && pane.classList.contains('active')) ||
+        /website information|web:/i.test(document.body?.innerText || '')
+      );
+    });
+    if (ok) {
+      log?.('Đã mở tab Website Information.');
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Tìm web được tick **Main Web**.
+ * Fallback: Web live (không staging) → URL không *.macmar.us → web đầu.
+ * @returns {Promise<{ id: string, index: number, url: string, reason: string } | null>}
+ */
+export async function resolveMainWeb(page, log = () => {}) {
+  // Expand mọi web card để thấy checkbox Main Web
+  await page.evaluate(() => {
+    const headers = document.querySelectorAll(
+      '#websContainer [id^="web_"] > .card-header, #websContainer .web-item > .card-header, #tab-web-info [id^="web_"] > .card-header, #websContainer .card-header'
+    );
+    headers.forEach((h) => {
+      try {
+        h.click();
+      } catch {
+        /* ignore */
+      }
+    });
+  });
+  await sleepExact(700);
+
+  const pick = await page.evaluate(() => {
+    const toOrigin = (raw) => {
+      let s = String(raw || '').trim();
+      if (!s) return '';
+      if (!/^https?:\/\//i.test(s)) s = `https://${s}`;
+      try {
+        return new URL(s).origin;
+      } catch {
+        return '';
+      }
+    };
+    const isStaging = (url) => /macmar\.us|\.macusaone\.|staging|preview/i.test(url || '');
+
+    const cards = Array.from(
+      document.querySelectorAll(
+        '#websContainer [id^="web_"], #websContainer .web-item, #tab-web-info [id^="web_"]'
+      )
+    );
+
+    const infos = cards.map((card, index) => {
+      let mainChecked = false;
+      let liveChecked = false;
+      for (const cb of card.querySelectorAll('input[type="checkbox"]')) {
+        const lab =
+          cb.closest('label') ||
+          (cb.id ? document.querySelector(`label[for="${CSS.escape(cb.id)}"]`) : null) ||
+          cb.parentElement;
+        const t = (lab?.textContent || '').replace(/\s+/g, ' ').trim();
+        if (/main\s*web/i.test(t)) mainChecked = Boolean(cb.checked);
+        if (/web\s*live/i.test(t)) liveChecked = Boolean(cb.checked);
+      }
+
+      let url = '';
+      const named =
+        card.querySelector(
+          'input[name*="web_url" i], input[id*="web_url" i], input[id*="webUrl" i], input[name*="webUrl" i]'
+        ) ||
+        Array.from(card.querySelectorAll('input')).find((inp) => {
+          const v = (inp.value || '').trim();
+          return /^https?:\/\//i.test(v) && !/wpm\.macusaone/i.test(v);
+        });
+      if (named) url = named.value;
+      if (!url) {
+        const domainInp = card.querySelector(
+          'input[name*="domain" i], input[id*="domain" i], input[data-label*="domain" i]'
+        );
+        if (domainInp?.value) url = domainInp.value.trim();
+      }
+      if (!url) {
+        const m = (card.innerText || '').match(/Web:\s*(https?:\/\/[^\s]+)/i);
+        if (m) url = m[1].replace(/[),.;]+$/, '');
+      }
+
+      return {
+        index,
+        id: card.id || `web_${index}`,
+        url: toOrigin(url),
+        mainChecked,
+        liveChecked,
+        staging: isStaging(toOrigin(url)),
+      };
+    });
+
+    const withUrl = infos.filter((x) => x.url);
+    const chosen =
+      withUrl.find((x) => x.mainChecked) ||
+      withUrl.find((x) => x.liveChecked && !x.staging) ||
+      withUrl.find((x) => !x.staging) ||
+      withUrl[0] ||
+      null;
+
+    if (!chosen) return null;
+    let reason = 'first web (fallback)';
+    if (chosen.mainChecked) reason = 'Main Web ✓';
+    else if (chosen.liveChecked && !chosen.staging) reason = 'Web live (fallback)';
+    else if (!chosen.staging) reason = 'non-staging URL (fallback)';
+    return { ...chosen, reason };
+  });
+
+  if (pick) {
+    log(`Main Web: ${pick.url} (${pick.reason}, id=${pick.id})`);
+  } else {
+    log('⚠ Không tìm thấy web nào trên Website Information.');
+  }
+  return pick;
+}
+
+/** Expand đúng card web (theo id). */
+export async function expandWebCard(page, webId) {
+  await page.evaluate((id) => {
+    const card =
+      document.getElementById(id) ||
+      document.querySelector(`#${CSS.escape(String(id))}`) ||
+      document.querySelector(`#websContainer [id="${id}"]`);
+    if (!card) return;
+    const header = card.querySelector('.card-header') || card;
+    header.click();
+  }, webId);
+  await sleepExact(400);
+}
+
+/**
+ * Bấm Quick Login trên đúng card Main Web (không lấy subdomain).
+ * @returns {Promise<boolean>}
+ */
+export async function clickMainWebQuickLogin(page, webId, log = () => {}) {
+  const clicked = await page.evaluate((id) => {
+    const card =
+      document.getElementById(id) ||
+      document.querySelector(`#websContainer [id="${id}"]`);
+    if (!card) return false;
+    const scope = card.querySelector('.card-header') || card;
+    const candidates = Array.from(scope.querySelectorAll('a, button, [role="button"], span.btn, i'));
+    const score = (el) => {
+      const meta = `${el.getAttribute('title') || ''} ${el.getAttribute('aria-label') || ''} ${el.className || ''} ${el.id || ''}`;
+      if (/quick\s*login|auto.?login/i.test(meta)) return 100;
+      if (/login|sign-in|wp-admin/i.test(meta)) return 80;
+      if (/fa-sign|fa-external|logout|arrow/i.test(meta)) return 60;
+      return 0;
+    };
+    let best = null;
+    let bestScore = 0;
+    for (const el of candidates) {
+      const s = score(el);
+      if (s > bestScore) {
+        bestScore = s;
+        best = el.closest('a, button, [role="button"]') || el;
+      }
+    }
+    // Fallback: nút icon cuối trên header (thường là login hồng)
+    if (!best) {
+      const btns = Array.from(scope.querySelectorAll('a.btn, button.btn, a[class*="btn"], button'));
+      best = btns[btns.length - 1] || null;
+    }
+    if (!best) return false;
+    best.click();
+    return true;
+  }, webId);
+
+  if (clicked) log(`Đã bấm Quick Login trên Main Web (${webId}).`);
+  return clicked;
+}
+
 /**
  * Mở project + Quick Login.
  * @returns {{ wpPage: import('puppeteer').Page, projectName: string, projectLabel: string }}
@@ -177,30 +381,49 @@ export async function openProjectAndQuickLogin(browser, page, projectUrl, log) {
   const projectLabel = [projectZip, projectName].filter(Boolean).join(' ').trim();
   if (projectLabel) log(`Project: ${projectLabel}`);
 
+  // Website Information → Main Web → Quick Login (không dùng subdomain)
+  const projectEditUrl = cleanUrl;
+  const tabOk = await openWebsiteInformationTab(page, projectEditUrl, log);
+  if (!tabOk) {
+    throw new Error('Không mở được tab Website Information để chọn Main Web.');
+  }
+  const mainWeb = await resolveMainWeb(page, log);
+  if (!mainWeb?.id) {
+    throw new Error('Không tìm thấy Main Web trên Website Information.');
+  }
+  await expandWebCard(page, mainWeb.id);
+
   const pagesBefore = await browser.pages();
 
-  log('Bấm Quick Login...');
-  let clicked = false;
-  try {
-    await clickByText(page, 'Quick Login', { timeout: 6000 });
-    clicked = true;
-  } catch {
+  log('Bấm Quick Login trên Main Web...');
+  let clicked = await clickMainWebQuickLogin(page, mainWeb.id, log);
+  if (!clicked) {
     try {
-      await clickFirst(page, [
-        'a[href*="quick"]',
-        'button[data-action*="quick"]',
-        'a.quick-login',
-        '[class*="quick-login"]',
-        'a[href*="auto-login"]',
-      ], { timeout: 4000 });
+      await clickByText(page, 'Quick Login', { timeout: 4000 });
       clicked = true;
+      log('⚠ Fallback: Quick Login theo text (không chắc đúng Main Web).');
     } catch {
-      /* fallthrough */
+      try {
+        await clickFirst(
+          page,
+          [
+            'a[href*="quick"]',
+            'button[data-action*="quick"]',
+            'a.quick-login',
+            '[class*="quick-login"]',
+            'a[href*="auto-login"]',
+          ],
+          { timeout: 3000 }
+        );
+        clicked = true;
+      } catch {
+        /* fallthrough */
+      }
     }
   }
 
   if (!clicked) {
-    throw new Error('Không tìm thấy nút Quick Login trên trang project WPM.');
+    throw new Error('Không tìm thấy nút Quick Login trên Main Web.');
   }
 
   let wpPage = page;
@@ -228,8 +451,13 @@ export async function openProjectAndQuickLogin(browser, page, projectUrl, log) {
     await sleep(800);
   }
 
-  log(`Đã vào WordPress: ${wpPage.url()}`);
-  return { wpPage, projectName, projectLabel };
+  log(`Đã vào WordPress (Main Web ${mainWeb.url}): ${wpPage.url()}`);
+  return {
+    wpPage,
+    projectName,
+    projectLabel,
+    mainWebUrl: mainWeb.url,
+  };
 }
 
 /**
@@ -240,75 +468,29 @@ export async function openProjectAndQuickLogin(browser, page, projectUrl, log) {
  * → Submit/Save nếu có → verify username hiện trên form
  */
 export async function syncAccountToWPM(page, projectUrl, account, log) {
-  log('Quay lại WPM → tab Website Information...');
+  log('Quay lại WPM → tab Website Information (Main Web)...');
   await page.bringToFront().catch(() => {});
 
-  const u = new URL(projectUrl);
-  u.searchParams.set('tab', 'tab-web-info');
-  const candidates = [
-    u.toString(),
-    `${projectUrl.replace(/\/$/, '')}?tab=tab-web-info`,
-    projectUrl,
-  ];
-
-  let landed = false;
-  for (const url of candidates) {
-    await page.goto(url, GOTO);
-    await sleep(400);
-
-    await page.evaluate(() => {
-      const tab =
-        document.querySelector(
-          'a[href="#tab-web-info"], a[href*="tab-web-info"], [data-bs-target="#tab-web-info"], [data-toggle="tab"][href="#tab-web-info"]'
-        ) ||
-        Array.from(document.querySelectorAll('a, button')).find((el) =>
-          /website information|web info/i.test((el.textContent || '').trim())
-        );
-      tab?.click();
-    });
-    await sleep(250);
-
-    const ok = await page.evaluate(() => {
-      const pane = document.querySelector('#tab-web-info');
-      return (
-        !!document.querySelector('#web-info, #websContainer, .web-item') ||
-        (pane && pane.classList.contains('active')) ||
-        /website information|web:/i.test(document.body?.innerText || '')
-      );
-    });
-    if (ok) {
-      landed = true;
-      break;
-    }
-  }
-
+  const landed = await openWebsiteInformationTab(page, projectUrl, log);
   if (!landed) {
     throw new Error('Không mở được tab Website Information trên WPM.');
   }
 
-  log('Mở card header Web...');
-  const openedWeb = await page.evaluate(() => {
-    const header =
-      document.querySelector('#web_0 .card-header, .web-item .card-header, #websContainer .card-header') ||
-      Array.from(
-        document.querySelectorAll(
-          '.card-header[data-toggle="collapse"], .card-header[data-bs-toggle="collapse"]'
-        )
-      )[0];
-    if (!header) return false;
-    header.click();
-    return true;
-  });
-  if (!openedWeb) {
-    throw new Error('Không tìm thấy card-header Web để expand.');
+  const mainWeb = await resolveMainWeb(page, log);
+  if (!mainWeb?.id) {
+    throw new Error('Không tìm thấy Main Web để sync tài khoản.');
   }
-  await sleepExact(500);
 
-  log('Mở endpoint đầu tiên...');
-  const openedEndpoint = await page.evaluate(() => {
+  log(`Mở card Main Web (${mainWeb.url})...`);
+  await expandWebCard(page, mainWeb.id);
+  await sleepExact(400);
+
+  log('Mở endpoint đầu tiên trên Main Web...');
+  const openedEndpoint = await page.evaluate((webId) => {
     const root =
-      document.querySelector('#webContent_0.show, #webContent_0.collapse.show, #webContent_0') ||
-      document.querySelector('#web_0, .web-item');
+      document.getElementById(webId) ||
+      document.querySelector(`#websContainer [id="${webId}"]`) ||
+      document.querySelector('#websContainer .web-item');
 
     const endpointHeader =
       root?.querySelector(
@@ -335,7 +517,7 @@ export async function syncAccountToWPM(page, projectUrl, account, log) {
     }
     target.click();
     return true;
-  });
+  }, mainWeb.id);
   if (!openedEndpoint) {
     log('⚠ Không rõ endpoint header — thử Add Account trực tiếp trong web content.');
   }
@@ -643,35 +825,22 @@ export async function syncAccountToWPM(page, projectUrl, account, log) {
   let verified = await checkUserOnWpm();
   if (!verified) {
     log('Chưa thấy username trên form sau Submit — reload tab Website Information kiểm tra...');
-    const u = new URL(projectUrl);
-    u.searchParams.set('tab', 'tab-web-info');
-    await page.goto(u.toString(), GOTO);
-    await sleepExact(800);
-    await page.evaluate(() => {
-      const tab =
-        document.querySelector(
-          'a[href="#tab-web-info"], a[href*="tab-web-info"], [data-bs-target="#tab-web-info"]'
-        ) ||
-        Array.from(document.querySelectorAll('a, button')).find((el) =>
-          /website information/i.test((el.textContent || '').trim())
-        );
-      tab?.click();
-    });
+    await openWebsiteInformationTab(page, projectUrl, log);
     await sleepExact(400);
-    // Mở Web + Endpoint để account hiện lại
-    await page.evaluate(() => {
-      document
-        .querySelector('#web_0 .card-header, .web-item .card-header, #websContainer .card-header')
-        ?.click();
-    });
-    await sleepExact(400);
-    await page.evaluate(() => {
-      const root =
-        document.querySelector('#webContent_0, #web_0, .web-item') || document.body;
-      const headers = Array.from(root.querySelectorAll('.card-header'));
-      (headers[1] || headers[0])?.click();
-    });
-    await sleepExact(600);
+    const again = await resolveMainWeb(page, log);
+    if (again?.id) {
+      await expandWebCard(page, again.id);
+      await sleepExact(400);
+      await page.evaluate((webId) => {
+        const root =
+          document.getElementById(webId) ||
+          document.querySelector(`#websContainer [id="${webId}"]`) ||
+          document.body;
+        const headers = Array.from(root.querySelectorAll('.card-header'));
+        (headers[1] || headers[0])?.click();
+      }, again.id);
+      await sleepExact(600);
+    }
     verified = await checkUserOnWpm();
   }
 

@@ -1,11 +1,13 @@
 import { sleep, sleepExact, GOTO, clickByText, clickFirst } from '../utils.js';
 
 /**
- * Điền field theo label text trên trang task edit (Output fields).
- * Hỗ trợ input + textarea, React/Vue-friendly.
+ * Tìm input/textarea theo label — trả về true nếu điền được, false nếu không có field.
+ * Không throw khi thiếu field (task thường ≠ userguide).
  */
-async function fillByLabel(page, labelNeedle, value) {
+async function fillByLabelIfPresent(page, labelNeedle, value) {
   const want = String(value ?? '');
+  if (!want) return false;
+
   const found = await page.evaluate(
     (needle, val) => {
       const norm = (s) =>
@@ -21,18 +23,14 @@ async function fillByLabel(page, labelNeedle, value) {
       );
 
       for (const lab of labels) {
-        // Chỉ lấy node gần như là label (ít con)
         if (lab.children?.length > 4) continue;
         const t = norm(lab.textContent);
         if (!t) continue;
-        // Exact hoặc bắt đầu bằng (Login Url, User name, …)
         if (t !== target && !t.startsWith(target) && t !== `${target}:`) continue;
 
         let input =
           lab.control ||
-          (lab.getAttribute('for')
-            ? document.getElementById(lab.getAttribute('for'))
-            : null);
+          (lab.getAttribute('for') ? document.getElementById(lab.getAttribute('for')) : null);
 
         if (!input) {
           const row =
@@ -42,7 +40,6 @@ async function fillByLabel(page, labelNeedle, value) {
           input = row?.querySelector('input:not([type="hidden"]), textarea');
         }
         if (!input) {
-          // next sibling
           let n = lab.nextElementSibling;
           while (n && !input) {
             if (n.matches?.('input, textarea')) input = n;
@@ -60,8 +57,6 @@ async function fillByLabel(page, labelNeedle, value) {
         input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
         return {
           ok: true,
-          tag: input.tagName,
-          name: input.name || input.id || '',
           value: input.value,
         };
       }
@@ -71,91 +66,72 @@ async function fillByLabel(page, labelNeedle, value) {
     want
   );
 
-  if (!found?.ok) {
-    // Fallback: type thật nếu tìm được handle
-    const handle = await page.evaluateHandle((needle) => {
-      const norm = (s) =>
-        String(s || '')
-          .replace(/\s+/g, ' ')
-          .replace(/\*/g, '')
-          .trim()
-          .toLowerCase();
-      const target = norm(needle);
-      for (const lab of document.querySelectorAll('label, .form-label, .col-form-label')) {
-        const t = norm(lab.textContent);
-        if (t !== target && !t.startsWith(target)) continue;
-        const row =
-          lab.closest('.form-group, .mb-3, .row, tr') || lab.parentElement;
-        return row?.querySelector('input:not([type="hidden"]), textarea') || null;
-      }
-      return null;
-    }, labelNeedle);
+  if (found?.ok && found.value === want) return true;
 
-    const el = handle.asElement();
-    if (!el) {
-      await handle.dispose().catch(() => {});
-      throw new Error(`Không tìm thấy field "${labelNeedle}" trên task.`);
+  // Fallback type thật nếu có handle
+  const handle = await page.evaluateHandle((needle) => {
+    const norm = (s) =>
+      String(s || '')
+        .replace(/\s+/g, ' ')
+        .replace(/\*/g, '')
+        .trim()
+        .toLowerCase();
+    const target = norm(needle);
+    for (const lab of document.querySelectorAll('label, .form-label, .col-form-label')) {
+      const t = norm(lab.textContent);
+      if (t !== target && !t.startsWith(target)) continue;
+      const row = lab.closest('.form-group, .mb-3, .row, tr') || lab.parentElement;
+      return row?.querySelector('input:not([type="hidden"]), textarea') || null;
     }
-    await el.click({ clickCount: 3 });
-    await el.type(want, { delay: 8 });
-    await handle.dispose().catch(() => {});
-    return;
-  }
+    return null;
+  }, labelNeedle);
 
-  if (found.value !== want) {
-    // set lại bằng type nếu React nuốt value
-    const handle = await page.evaluateHandle((needle) => {
-      const norm = (s) =>
-        String(s || '')
-          .replace(/\s+/g, ' ')
-          .replace(/\*/g, '')
-          .trim()
-          .toLowerCase();
-      const target = norm(needle);
-      for (const lab of document.querySelectorAll('label, .form-label, .col-form-label')) {
-        const t = norm(lab.textContent);
-        if (t !== target && !t.startsWith(target)) continue;
-        const row =
-          lab.closest('.form-group, .mb-3, .row, tr') || lab.parentElement;
-        return row?.querySelector('input:not([type="hidden"]), textarea') || null;
-      }
-      return null;
-    }, labelNeedle);
-    const el = handle.asElement();
-    if (el) {
-      await el.click({ clickCount: 3 });
-      await page.keyboard.press('Backspace');
-      await el.type(want, { delay: 8 });
-    }
+  const el = handle.asElement();
+  if (!el) {
     await handle.dispose().catch(() => {});
+    return false;
   }
+  await el.click({ clickCount: 3 });
+  await page.keyboard.press('Backspace').catch(() => {});
+  await el.type(want, { delay: 8 });
+  await handle.dispose().catch(() => {});
+  return true;
+}
+
+async function tryFill(page, labels, value, log, displayName) {
+  for (const label of labels) {
+    const ok = await fillByLabelIfPresent(page, label, value);
+    if (ok) {
+      log(`  ${displayName} ✓`);
+      return true;
+    }
+  }
+  log(`  ⏭ ${displayName} — không có field, bỏ qua`);
+  return false;
 }
 
 /**
- * Sau khi xong pipeline: mở task URL → điền Output fields → Save.
- * @param {import('puppeteer').Page} page — tab WPM đã login
- * @param {string} taskUrl
- * @param {{ loginUrl: string, guideFile: string, username: string, password: string, note?: string }} output
+ * Sau pipeline: mở task URL → điền Output fields nếu có → Save.
+ * Task thường (không userguide) có thể thiếu field → skip, AM lấy output trên UI tool.
  */
 export async function fillTaskOutputFields(page, taskUrl, output, log) {
   if (!taskUrl) {
     log('⏭ Không có Task URL — bỏ qua điền Output fields.');
-    return;
+    return { filled: 0, skipped: true };
   }
 
-  log(`▶ Điền Output fields trên task: ${taskUrl}`);
+  log(`▶ Điền Output fields trên task (có field mới điền): ${taskUrl}`);
   await page.bringToFront().catch(() => {});
   await page.goto(taskUrl, GOTO);
   await sleepExact(800);
 
-  // Chờ section Output fields hoặc field Login Url
   await page
     .waitForFunction(
       () => {
         const body = document.body?.innerText || '';
-        return /output fields/i.test(body) || /login\s*url/i.test(body);
+        return /output fields|login\s*url|guide\s*file|customer requirement/i.test(body);
       },
-      { timeout: 20000 }
+      { timeout: 15000 }
     )
     .catch(() => {});
 
@@ -163,37 +139,30 @@ export async function fillTaskOutputFields(page, taskUrl, output, log) {
   const guideFile = output.guideFile || output.docLink || '';
   const username = output.username || '';
   const password = output.password || '';
-  const note = output.note || (password ? `password: ${password}` : 'password:');
+  const note = output.note || '';
 
-  await fillByLabel(page, 'Login Url', loginUrl);
-  log(`  Login Url ✓`);
-  await sleep(200);
-
-  await fillByLabel(page, 'Guide File', guideFile);
-  log(`  Guide File ✓`);
-  await sleep(200);
-
-  // Label trên form: "User name"
-  try {
-    await fillByLabel(page, 'User name', username);
-  } catch {
-    await fillByLabel(page, 'Username', username);
-  }
-  log(`  User name ✓`);
-  await sleep(200);
-
-  await fillByLabel(page, 'Password', password);
-  log(`  Password ✓`);
-  await sleep(200);
-
-  try {
-    await fillByLabel(page, 'Note', note);
-    log(`  Note ✓`);
-  } catch {
-    log('⚠ Không tìm thấy Note — bỏ qua.');
+  let filled = 0;
+  if (await tryFill(page, ['Login Url'], loginUrl, log, 'Login Url')) filled += 1;
+  await sleep(150);
+  if (await tryFill(page, ['Guide File'], guideFile, log, 'Guide File')) filled += 1;
+  await sleep(150);
+  if (await tryFill(page, ['User name', 'Username'], username, log, 'User name')) filled += 1;
+  await sleep(150);
+  if (await tryFill(page, ['Password'], password, log, 'Password')) filled += 1;
+  await sleep(150);
+  if (note) {
+    if (await tryFill(page, ['Note'], note, log, 'Note')) filled += 1;
+  } else {
+    log('  ⏭ Note — không có nội dung, bỏ qua');
   }
 
-  // Save / Update / Done
+  if (filled === 0) {
+    log(
+      '⏭ Task không có Output fields (userguide) — bỏ qua Save. AM lấy Login/User/Pass trên UI tool.'
+    );
+    return { filled: 0, skipped: true };
+  }
+
   let saved = false;
   for (const text of ['Save', 'Update', 'Submit', 'Done']) {
     try {
@@ -224,10 +193,12 @@ export async function fillTaskOutputFields(page, taskUrl, output, log) {
     }
   }
   if (!saved) {
-    throw new Error('Đã điền Output fields nhưng không tìm thấy nút Save/Update.');
+    log('⚠ Đã điền một số field nhưng không tìm thấy Save — AM kiểm tra task / lấy output trên UI.');
+    return { filled, saved: false };
   }
 
   await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
   await sleep(500);
-  log('Đã điền xong Output fields trên task.');
+  log(`Đã điền ${filled} Output field(s) trên task.`);
+  return { filled, saved: true };
 }

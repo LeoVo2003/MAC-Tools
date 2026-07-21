@@ -74,12 +74,12 @@ export function stripApostrophes(raw) {
 }
 
 /**
- * Username WP-safe: bỏ nháy + ký tự lạ (giữ a-z 0-9 . _ - @ và khoảng trắng → -).
+ * Username WP-safe: bỏ nháy + ký tự lạ, luôn viết thường.
  */
 export function sanitizeWpUsername(raw) {
-  let s = stripApostrophes(raw).trim();
+  let s = stripApostrophes(raw).trim().toLowerCase();
   s = s.replace(/\s+/g, '-');
-  s = s.replace(/[^a-zA-Z0-9._\-@]/g, '');
+  s = s.replace(/[^a-z0-9._\-@]/g, '');
   s = s.replace(/-+/g, '-').replace(/^\-+|\-+$/g, '');
   return s;
 }

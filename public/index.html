@@ -62,19 +62,19 @@
             </label>
             <label>
               <span>Website URL</span>
-              <input name="websiteUrl" type="url" required placeholder="https://domain-khach.com" />
+              <input name="websiteUrl" type="url" required placeholder="Fill data sẽ tự lấy" />
             </label>
             <label>
               <span>Username Chủ Tiệm</span>
-              <input name="username" type="text" required autocomplete="off" placeholder="tias-nails (tự bỏ ' )" />
+              <input name="username" type="text" required autocomplete="off" placeholder="vd muse-admin" />
             </label>
             <label>
               <span>Password Chủ Tiệm</span>
-              <input name="password" type="text" required autocomplete="off" placeholder="tự bỏ dấu nháy ' nếu có" />
+              <input name="password" type="text" required autocomplete="off" placeholder="vd muse-admin@TX-75001" />
             </label>
             <label>
               <span>Email khách</span>
-              <input name="email" type="email" required />
+              <input name="email" type="email" required placeholder="Lấy từ footer website" />
             </label>
             <label>
               <span>Link tài liệu hướng dẫn</span>
@@ -110,10 +110,12 @@
           </fieldset>
 
           <div class="actions">
+            <button type="button" id="fillDataBtn" class="secondary">Fill data</button>
             <button type="submit" id="runBtn">Run</button>
             <span id="statusBadge" class="badge idle">Idle</span>
             <span id="queueHint" class="hint"></span>
           </div>
+          <p id="fillDataHint" class="hint"></p>
         </form>
 
         <section class="panel">

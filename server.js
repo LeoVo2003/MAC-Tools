@@ -21,6 +21,7 @@ import {
 } from './src/userStore.js';
 import { sessionMiddleware, requireAuth, requireAdmin, currentPublicUser } from './src/auth.js';
 import { createJobQueue } from './src/jobQueue.js';
+import { fillCustomerDataFromUrls } from './src/steps/fillData.js';
 import { listBackupFolders, listBackupFiles, resolveBackupFile } from './src/backupsApi.js';
 
 dotenv.config({ path: getEnvPath() });
@@ -107,6 +108,43 @@ export function createApp() {
     req.session.destroy(() => {
       res.json({ ok: true });
     });
+  });
+
+  /** Fill data ngầm: Project (+ Task) → website/username/password/email. */
+  app.post('/api/fill-data', requireAuth, async (req, res) => {
+    const body = req.body || {};
+    const wpmProjectUrl = normalizeWpmProjectUrl(String(body.wpmProjectUrl || '').trim());
+    const taskUrl = String(body.taskUrl || '').trim();
+    if (!wpmProjectUrl) {
+      return res.status(400).json({ error: 'Thiếu WPM Project URL.' });
+    }
+    const stored = getUserWpmCredentials(req.user.id);
+    if (!stored.configured) {
+      return res.status(400).json({
+        error: 'Chưa có WPM trên tài khoản. Đăng xuất rồi login lại bằng email/password WPM.',
+      });
+    }
+
+    const logs = [];
+    try {
+      const data = await fillCustomerDataFromUrls(
+        {
+          wpmProjectUrl,
+          taskUrl,
+          wpmCredentials: { username: stored.username, password: stored.password },
+        },
+        (line) => {
+          logs.push(line);
+          console.log(line);
+        }
+      );
+      res.json({ ...data, logs });
+    } catch (err) {
+      res.status(500).json({
+        error: err?.message || String(err),
+        logs,
+      });
+    }
   });
 
   app.get('/api/status', requireAuth, (req, res) => {

@@ -31,10 +31,12 @@ export function findChromePath() {
 
 /**
  * Launch system Chrome with stealth — tránh navigator.webdriver lộ như Playwright CDP.
+ * @param {{ downloadPath?: string, headless?: boolean }} [opts]
  */
-export async function launchBrowser({ downloadPath } = {}) {
+export async function launchBrowser({ downloadPath, headless: headlessOpt } = {}) {
   const executablePath = findChromePath();
-  const headless = process.env.HEADLESS === 'true';
+  const headless =
+    headlessOpt !== undefined ? Boolean(headlessOpt) : process.env.HEADLESS === 'true';
   const userDataDir = process.env.CHROME_USER_DATA_DIR || undefined;
 
   const args = [

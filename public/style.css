@@ -310,12 +310,20 @@ button.secondary {
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text);
-  margin-top: 0.75rem;
+  margin-top: 0;
+}
+
+.actions button.secondary {
+  margin-top: 0;
 }
 
 button.secondary:hover:not(:disabled) {
   border-color: var(--accent);
   background: rgba(61, 154, 106, 0.12);
+}
+
+#fillDataHint {
+  margin-top: 0.65rem;
 }
 
 .badge {
