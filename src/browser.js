@@ -47,6 +47,16 @@ export async function launchBrowser({ downloadPath, headless: headlessOpt } = {}
     '--window-size=1440,900',
   ];
 
+  // Docker/Linux chạy Chromium thường là root → bắt buộc --no-sandbox
+  // (crbug.com/638180). --disable-dev-shm-usage tránh crash /dev/shm nhỏ.
+  const needNoSandbox =
+    process.env.CHROME_NO_SANDBOX === 'true' ||
+    process.platform === 'linux' ||
+    (typeof process.getuid === 'function' && process.getuid() === 0);
+  if (needNoSandbox) {
+    args.push('--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu');
+  }
+
   const browser = await puppeteer.launch({
     executablePath,
     headless: headless ? 'new' : false,

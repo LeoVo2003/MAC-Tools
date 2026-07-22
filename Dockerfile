@@ -20,6 +20,7 @@ ENV NODE_ENV=production \
     OPEN_BROWSER=false \
     HEADLESS=true \
     CHROME_PATH=/usr/bin/chromium \
+    CHROME_NO_SANDBOX=true \
     PORT=3847 \
     DOWNLOAD_DIR=/data/downloads
 
