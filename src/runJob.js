@@ -69,9 +69,12 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
     options = {},
     docLink,
     steps: rawSteps,
+    webTargetMode: rawWebTargetMode,
   } = job;
 
   const wpmProjectUrl = normalizeWpmProjectUrl(rawProjectUrl);
+  const webTargetMode = rawWebTargetMode === 'website' ? 'website' : 'main';
+  const targetOpts = { webTargetMode, preferUrl: websiteUrl };
 
   const enabled = normalizeSteps(rawSteps);
   if (enabled.size === 0) {
@@ -96,6 +99,11 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
   }
 
   log(`Bước đã chọn: ${[...enabled].join(', ')}`);
+  if (webTargetMode === 'website') {
+    log(`⚠ Target web = khớp Website URL (${websiteUrl}) — không ép Main Web.`);
+  } else {
+    log('Target web = Main Web (mặc định).');
+  }
   throwIfCancelled();
 
   const { browser, page: wpmPage } = await launchBrowser({
@@ -123,7 +131,7 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
 
     currentStep = 'wpm-quick-login';
     log('▶ Mở project + Quick Login...');
-    const opened = await openProjectAndQuickLogin(browser, wpmPage, wpmProjectUrl, log);
+    const opened = await openProjectAndQuickLogin(browser, wpmPage, wpmProjectUrl, log, targetOpts);
     wpPage = opened.wpPage;
     const projectName = opened.projectName || '';
     projectLabel = opened.projectLabel || projectName;
@@ -170,7 +178,7 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
       currentStep = 'wpm-sync-account';
       mark('syncWpm', 'start');
       log('▶ Sync tài khoản lên WPM...');
-      await syncAccountToWPM(wpmPage, wpmProjectUrl, account, log);
+      await syncAccountToWPM(wpmPage, wpmProjectUrl, account, log, targetOpts);
       mark('syncWpm', 'done');
     } else if (enabled.has('syncWpm') && accountExistsOnWeb) {
       /* đã log ở trên */
@@ -218,44 +226,45 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
       docLink ||
       'https://docs.google.com/document/d/1pMuhxjAfY4i6jOyk2CcAUYWBp8CdLbJ-7IpQaiYG0wo/edit?usp=sharing';
 
-    const existsMsg = 'Đã tồn tại tài khoản trên web';
+    const loginUrl = `${websiteUrl.replace(/\/$/, '')}/mac-login`;
+    const existsPassNote =
+      'Đã tồn tại TK trên web — không khởi tạo mới, không có password mới';
+
     const output = accountExistsOnWeb
       ? {
           project: projectLabel,
-          loginUrl: '',
-          guideFile: '',
-          docLink: '',
-          username: existsMsg,
-          password: '',
-          note: existsMsg,
+          loginUrl,
+          guideFile: finalDoc,
+          docLink: finalDoc,
+          username: account.username || customer.username || '',
+          password: existsPassNote,
           accountExists: true,
-          notice: existsMsg,
+          notice: existsPassNote,
           taskUrl,
           finishedAt: new Date().toISOString(),
         }
       : {
           project: projectLabel,
-          loginUrl: `${websiteUrl.replace(/\/$/, '')}/mac-login`,
+          loginUrl,
           guideFile: finalDoc,
           docLink: finalDoc,
           username: account.username,
           password: account.password,
-          note: `password: ${account.password}`,
           accountExists: false,
           taskUrl,
           finishedAt: new Date().toISOString(),
         };
 
     if (accountExistsOnWeb) {
-      log(`▶ Output: ${existsMsg}`);
+      log(`▶ Output: TK đã có trên web — username=${output.username || '—'}; ${existsPassNote}`);
     }
 
     const outPath = path.join(ROOT, 'output-latest.json');
     fs.writeFileSync(outPath, JSON.stringify(output, null, 2), 'utf-8');
     log('▶ Đã lưu output-latest.json');
 
-    // Có Task URL → điền Output fields (trừ khi account đã tồn tại / output rỗng)
-    if (taskUrl && !accountExistsOnWeb && output.loginUrl && output.username) {
+    // Có Task URL → điền Output fields (kể cả khi TK đã tồn tại: vẫn có login + user)
+    if (taskUrl && output.loginUrl && output.username) {
       currentStep = 'wpm-fill-task';
       mark('fillTask', 'start');
       await fillTaskOutputFields(wpmPage, taskUrl, output, log);
@@ -263,7 +272,7 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
     } else if (!taskUrl) {
       log('⏭ Không có Task URL — bỏ qua điền Output fields.');
     } else {
-      log('⏭ Bỏ qua điền Task Output fields (account đã tồn tại / thiếu output).');
+      log('⏭ Bỏ qua điền Task Output fields (thiếu loginUrl / username).');
     }
 
     log('▶ Xong.');

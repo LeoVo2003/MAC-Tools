@@ -155,28 +155,23 @@ export async function openWebsiteInformationTab(page, projectUrl, log = () => {}
   return false;
 }
 
-/**
- * Tìm web được tick **Main Web**.
- * Fallback: Web live (không staging) → URL không *.macmar.us → web đầu.
- * @returns {Promise<{ id: string, index: number, url: string, reason: string } | null>}
- */
-export async function resolveMainWeb(page, log = () => {}) {
-  // Expand mọi web card để thấy checkbox Main Web
-  await page.evaluate(() => {
-    const headers = document.querySelectorAll(
-      '#websContainer [id^="web_"] > .card-header, #websContainer .web-item > .card-header, #tab-web-info [id^="web_"] > .card-header, #websContainer .card-header'
-    );
-    headers.forEach((h) => {
-      try {
-        h.click();
-      } catch {
-        /* ignore */
-      }
-    });
-  });
-  await sleepExact(700);
+function toOriginUrl(raw) {
+  let s = String(raw || '').trim();
+  if (!s) return '';
+  if (!/^https?:\/\//i.test(s)) s = `https://${s}`;
+  try {
+    return new URL(s).origin;
+  } catch {
+    return '';
+  }
+}
 
-  const pick = await page.evaluate(() => {
+/**
+ * Đọc danh sách web card — KHÔNG click/mở bất kỳ card nào.
+ * URL từ header "Web: https://…"; checkbox Main Web/Live đọc trong DOM (kể cả đang collapse).
+ */
+async function listWebsiteCards(page) {
+  return page.evaluate(() => {
     const toOrigin = (raw) => {
       let s = String(raw || '').trim();
       if (!s) return '';
@@ -195,86 +190,222 @@ export async function resolveMainWeb(page, log = () => {}) {
       )
     );
 
-    const infos = cards.map((card, index) => {
-      let mainChecked = false;
-      let liveChecked = false;
-      for (const cb of card.querySelectorAll('input[type="checkbox"]')) {
-        const lab =
-          cb.closest('label') ||
-          (cb.id ? document.querySelector(`label[for="${CSS.escape(cb.id)}"]`) : null) ||
-          cb.parentElement;
-        const t = (lab?.textContent || '').replace(/\s+/g, ' ').trim();
-        if (/main\s*web/i.test(t)) mainChecked = Boolean(cb.checked);
-        if (/web\s*live/i.test(t)) liveChecked = Boolean(cb.checked);
-      }
+    return cards
+      .map((card, index) => {
+        const header = card.querySelector('.card-header') || card;
+        const headerText = (header.innerText || header.textContent || '').replace(/\s+/g, ' ');
 
-      let url = '';
-      const named =
-        card.querySelector(
-          'input[name*="web_url" i], input[id*="web_url" i], input[id*="webUrl" i], input[name*="webUrl" i]'
-        ) ||
-        Array.from(card.querySelectorAll('input')).find((inp) => {
-          const v = (inp.value || '').trim();
-          return /^https?:\/\//i.test(v) && !/wpm\.macusaone/i.test(v);
-        });
-      if (named) url = named.value;
-      if (!url) {
-        const domainInp = card.querySelector(
-          'input[name*="domain" i], input[id*="domain" i], input[data-label*="domain" i]'
-        );
-        if (domainInp?.value) url = domainInp.value.trim();
-      }
-      if (!url) {
-        const m = (card.innerText || '').match(/Web:\s*(https?:\/\/[^\s]+)/i);
+        let url = '';
+        const m = headerText.match(/Web:\s*(https?:\/\/[^\s]+)/i);
         if (m) url = m[1].replace(/[),.;]+$/, '');
+
+        // Input URL có thể nằm trong body collapsed — vẫn query được trong DOM
+        if (!url) {
+          const named = card.querySelector(
+            'input[name*="web_url" i], input[id*="web_url" i], input[id*="webUrl" i], input[name*="webUrl" i]'
+          );
+          if (named?.value) url = named.value;
+        }
+        if (!url) {
+          const domainInp = card.querySelector(
+            'input[name*="domain" i], input[id*="domain" i]'
+          );
+          if (domainInp?.value) url = domainInp.value.trim();
+        }
+
+        let mainChecked = false;
+        let liveChecked = false;
+        for (const cb of card.querySelectorAll('input[type="checkbox"]')) {
+          const lab =
+            cb.closest('label') ||
+            (cb.id ? document.querySelector(`label[for="${CSS.escape(cb.id)}"]`) : null) ||
+            cb.parentElement;
+          const t = (lab?.textContent || '').replace(/\s+/g, ' ').trim();
+          if (/main\s*web/i.test(t)) mainChecked = Boolean(cb.checked);
+          if (/web\s*live/i.test(t)) liveChecked = Boolean(cb.checked);
+        }
+
+        const origin = toOrigin(url);
+        return {
+          index,
+          id: card.id || `web_${index}`,
+          url: origin,
+          staging: isStaging(origin),
+          mainChecked,
+          liveChecked,
+        };
+      })
+      .filter((x) => x.url);
+  });
+}
+
+/**
+ * Chọn web target trên Website Information.
+ * - mode `main` (mặc định): tick Main Web → Web live → non-staging → web đầu.
+ * - mode `website`: khớp origin `preferUrl`; không khớp → lỗi (không fallback Main Web).
+ * @param {import('puppeteer').Page} page
+ * @param {{ mode?: 'main'|'website', preferUrl?: string }} [opts]
+ * @returns {Promise<{ id: string, index: number, url: string, reason: string, isMainWeb: boolean, staging: boolean } | null>}
+ */
+export async function resolveTargetWeb(page, opts = {}, log = () => {}) {
+  const mode = opts.mode === 'website' ? 'website' : 'main';
+  const preferUrl = toOriginUrl(opts.preferUrl);
+  const withUrl = await listWebsiteCards(page);
+
+  if (!withUrl.length) {
+    log('⚠ Không tìm thấy web nào trên Website Information.');
+    return null;
+  }
+
+  log(`Có ${withUrl.length} web trên WPM: ${withUrl.map((w) => w.url).join(' | ')}`);
+
+  let chosen = null;
+  let reason = '';
+
+  if (mode === 'website') {
+    if (preferUrl) {
+      chosen = withUrl.find((x) => x.url === preferUrl) || null;
+      if (!chosen) {
+        const list = withUrl.map((x) => x.url).join(', ');
+        throw new Error(
+          `Không tìm thấy web khớp Website URL (${preferUrl}). Các web trên WPM: ${list}. Không fallback Main Web.`
+        );
       }
-
-      return {
-        index,
-        id: card.id || `web_${index}`,
-        url: toOrigin(url),
-        mainChecked,
-        liveChecked,
-        staging: isStaging(toOrigin(url)),
-      };
-    });
-
-    const withUrl = infos.filter((x) => x.url);
-    const chosen =
+      reason = 'khớp ô Website';
+    } else {
+      const staging = withUrl.filter((x) => x.staging);
+      if (staging.length === 1) {
+        chosen = staging[0];
+        reason = 'staging duy nhất (chưa có ô Website)';
+      } else if (staging.length > 1) {
+        throw new Error(
+          `Có ${staging.length} web staging — nhập Website URL (subdomain test) rồi chọn Target = Khớp ô Website.`
+        );
+      } else {
+        throw new Error(
+          'Mode Website cần ô Website URL (subdomain). Không có web staging để tự chọn — không fallback Main Web.'
+        );
+      }
+    }
+  } else {
+    chosen =
       withUrl.find((x) => x.mainChecked) ||
       withUrl.find((x) => x.liveChecked && !x.staging) ||
       withUrl.find((x) => !x.staging) ||
       withUrl[0] ||
       null;
-
     if (!chosen) return null;
-    let reason = 'first web (fallback)';
+    reason = 'first web (fallback)';
     if (chosen.mainChecked) reason = 'Main Web ✓';
     else if (chosen.liveChecked && !chosen.staging) reason = 'Web live (fallback)';
     else if (!chosen.staging) reason = 'non-staging URL (fallback)';
-    return { ...chosen, reason };
-  });
-
-  if (pick) {
-    log(`Main Web: ${pick.url} (${pick.reason}, id=${pick.id})`);
-  } else {
-    log('⚠ Không tìm thấy web nào trên Website Information.');
   }
+
+  const isMainWeb = Boolean(chosen.mainChecked);
+  const pick = { ...chosen, reason, isMainWeb };
+  const label = mode === 'website' ? 'Target web' : 'Main Web';
+  log(
+    `${label}: ${pick.url} (${pick.reason}, id=${pick.id}${isMainWeb ? ', Main Web ✓' : ', không phải Main Web'})`
+  );
   return pick;
 }
 
-/** Expand đúng card web (theo id). */
-export async function expandWebCard(page, webId) {
+/**
+ * Alias: luôn chọn Main Web (rule cũ).
+ */
+export async function resolveMainWeb(page, log = () => {}) {
+  return resolveTargetWeb(page, { mode: 'main' }, log);
+}
+
+/** true nếu card đang mở (body/collapse visible). */
+async function isWebCardExpanded(page, webId) {
+  return page.evaluate((id) => {
+    const card =
+      document.getElementById(id) ||
+      document.querySelector(`#websContainer [id="${id}"]`);
+    if (!card) return false;
+    const toggle = card.querySelector(
+      '.card-header [aria-expanded], .card-header [data-toggle="collapse"], .card-header [data-bs-toggle="collapse"]'
+    );
+    if (toggle?.getAttribute('aria-expanded') === 'true') return true;
+    if (toggle?.getAttribute('aria-expanded') === 'false') return false;
+    const body =
+      card.querySelector('.collapse.show, .card-body:not(.collapse)') ||
+      card.querySelector('.collapse, .card-body');
+    if (body) {
+      const st = window.getComputedStyle(body);
+      const r = body.getBoundingClientRect();
+      if (st.display === 'none' || r.height < 24) return false;
+      return true;
+    }
+    // Có Endpoint / Web Type visible → đang mở
+    const t = card.innerText || '';
+    return /endpoint\s*\d+|web type|add account/i.test(t) && t.length > 120;
+  }, webId);
+}
+
+/** Mở hoặc đóng đúng 1 web card (không đụng card khác). */
+async function setWebCardExpanded(page, webId, wantOpen) {
+  const open = await isWebCardExpanded(page, webId);
+  if (open === wantOpen) return;
   await page.evaluate((id) => {
     const card =
       document.getElementById(id) ||
-      document.querySelector(`#${CSS.escape(String(id))}`) ||
       document.querySelector(`#websContainer [id="${id}"]`);
     if (!card) return;
-    const header = card.querySelector('.card-header') || card;
+    const header =
+      card.querySelector(
+        '.card-header [data-toggle="collapse"], .card-header [data-bs-toggle="collapse"], .card-header [aria-expanded]'
+      ) ||
+      card.querySelector('.card-header') ||
+      card;
     header.click();
   }, webId);
-  await sleepExact(400);
+  await sleepExact(450);
+}
+
+/**
+ * Chỉ mở ĐÚNG 1 web card target — card khác nếu đang mở thì đóng, còn lại không đụng.
+ */
+export async function focusOnlyWebCard(page, webId, log = () => {}) {
+  const ids = await page.evaluate(() =>
+    Array.from(
+      document.querySelectorAll(
+        '#websContainer [id^="web_"], #websContainer .web-item[id], #tab-web-info [id^="web_"]'
+      )
+    )
+      .map((el) => el.id)
+      .filter(Boolean)
+  );
+
+  for (const id of ids) {
+    if (id === webId) continue;
+    const open = await isWebCardExpanded(page, id);
+    if (open) {
+      log(`Đóng web card đang mở nhầm (${id}).`);
+      await setWebCardExpanded(page, id, false);
+    }
+  }
+
+  // Chỉ mở card target (nếu đang đóng)
+  const already = await isWebCardExpanded(page, webId);
+  if (!already) {
+    log(`Mở card target ${webId}...`);
+    await setWebCardExpanded(page, webId, true);
+  } else {
+    log(`Card target ${webId} đã mở sẵn.`);
+  }
+
+  const ok = await isWebCardExpanded(page, webId);
+  if (!ok) {
+    await setWebCardExpanded(page, webId, true);
+  }
+  log(`Chỉ thao tác trên card ${webId} — không mở web khác.`);
+}
+
+/** Expand đúng card web (theo id). Prefer focusOnlyWebCard khi có nhiều web. */
+export async function expandWebCard(page, webId) {
+  await setWebCardExpanded(page, webId, true);
 }
 
 /**
@@ -321,9 +452,12 @@ export async function clickMainWebQuickLogin(page, webId, log = () => {}) {
 
 /**
  * Mở project + Quick Login.
- * @returns {{ wpPage: import('puppeteer').Page, projectName: string, projectLabel: string }}
+ * @param {object} [targetOpts]
+ * @param {'main'|'website'} [targetOpts.webTargetMode]
+ * @param {string} [targetOpts.preferUrl] Website URL khi mode=website
+ * @returns {{ wpPage: import('puppeteer').Page, projectName: string, projectLabel: string, mainWebUrl: string, webTargetMode: string, isMainWeb: boolean }}
  */
-export async function openProjectAndQuickLogin(browser, page, projectUrl, log) {
+export async function openProjectAndQuickLogin(browser, page, projectUrl, log, targetOpts = {}) {
   // Bỏ ?tab=web-info — Name chỉ có ở Project Information
   const cleanUrl = (() => {
     try {
@@ -335,6 +469,9 @@ export async function openProjectAndQuickLogin(browser, page, projectUrl, log) {
       return String(projectUrl).split('?')[0];
     }
   })();
+
+  const webTargetMode = targetOpts.webTargetMode === 'website' ? 'website' : 'main';
+  const preferUrl = targetOpts.preferUrl || '';
 
   log(`Mở project: ${cleanUrl}`);
   await page.goto(cleanUrl, GOTO);
@@ -381,49 +518,38 @@ export async function openProjectAndQuickLogin(browser, page, projectUrl, log) {
   const projectLabel = [projectZip, projectName].filter(Boolean).join(' ').trim();
   if (projectLabel) log(`Project: ${projectLabel}`);
 
-  // Website Information → Main Web → Quick Login (không dùng subdomain)
+  // Website Information → Target web → Quick Login
   const projectEditUrl = cleanUrl;
   const tabOk = await openWebsiteInformationTab(page, projectEditUrl, log);
   if (!tabOk) {
-    throw new Error('Không mở được tab Website Information để chọn Main Web.');
+    throw new Error('Không mở được tab Website Information để chọn web target.');
   }
-  const mainWeb = await resolveMainWeb(page, log);
-  if (!mainWeb?.id) {
-    throw new Error('Không tìm thấy Main Web trên Website Information.');
+  const targetWeb = await resolveTargetWeb(
+    page,
+    { mode: webTargetMode, preferUrl },
+    log
+  );
+  if (!targetWeb?.id) {
+    throw new Error(
+      webTargetMode === 'website'
+        ? 'Không tìm thấy web khớp Website URL trên Website Information.'
+        : 'Không tìm thấy Main Web trên Website Information.'
+    );
   }
-  await expandWebCard(page, mainWeb.id);
+  if (webTargetMode === 'website' && !targetWeb.isMainWeb) {
+    log(`⚠ CẢNH BÁO: đang Quick Login NON-Main Web (${targetWeb.url}) — không phải site live Main Web.`);
+  }
+  await focusOnlyWebCard(page, targetWeb.id, log);
 
   const pagesBefore = await browser.pages();
 
-  log('Bấm Quick Login trên Main Web...');
-  let clicked = await clickMainWebQuickLogin(page, mainWeb.id, log);
-  if (!clicked) {
-    try {
-      await clickByText(page, 'Quick Login', { timeout: 4000 });
-      clicked = true;
-      log('⚠ Fallback: Quick Login theo text (không chắc đúng Main Web).');
-    } catch {
-      try {
-        await clickFirst(
-          page,
-          [
-            'a[href*="quick"]',
-            'button[data-action*="quick"]',
-            'a.quick-login',
-            '[class*="quick-login"]',
-            'a[href*="auto-login"]',
-          ],
-          { timeout: 3000 }
-        );
-        clicked = true;
-      } catch {
-        /* fallthrough */
-      }
-    }
-  }
+  log(`Bấm Quick Login CHỈ trên card ${targetWeb.url}...`);
+  let clicked = await clickMainWebQuickLogin(page, targetWeb.id, log);
 
   if (!clicked) {
-    throw new Error('Không tìm thấy nút Quick Login trên Main Web.');
+    throw new Error(
+      `Không tìm thấy nút Quick Login trên card ${targetWeb.url} (không fallback sang web khác).`
+    );
   }
 
   let wpPage = page;
@@ -451,12 +577,14 @@ export async function openProjectAndQuickLogin(browser, page, projectUrl, log) {
     await sleep(800);
   }
 
-  log(`Đã vào WordPress (Main Web ${mainWeb.url}): ${wpPage.url()}`);
+  log(`Đã vào WordPress (${targetWeb.url}): ${wpPage.url()}`);
   return {
     wpPage,
     projectName,
     projectLabel,
-    mainWebUrl: mainWeb.url,
+    mainWebUrl: targetWeb.url,
+    webTargetMode,
+    isMainWeb: Boolean(targetWeb.isMainWeb),
   };
 }
 
@@ -466,9 +594,19 @@ export async function openProjectAndQuickLogin(browser, page, projectUrl, log) {
  * → mở Web card → endpoint đầu
  * → Add Account → điền username/password, Role=Editor, Notes="chủ tiệm"
  * → Submit/Save nếu có → verify username hiện trên form
+ * @param {object} [targetOpts]
+ * @param {'main'|'website'} [targetOpts.webTargetMode]
+ * @param {string} [targetOpts.preferUrl]
  */
-export async function syncAccountToWPM(page, projectUrl, account, log) {
-  log('Quay lại WPM → tab Website Information (Main Web)...');
+export async function syncAccountToWPM(page, projectUrl, account, log, targetOpts = {}) {
+  const webTargetMode = targetOpts.webTargetMode === 'website' ? 'website' : 'main';
+  const preferUrl = targetOpts.preferUrl || '';
+
+  log(
+    webTargetMode === 'website'
+      ? 'Quay lại WPM → tab Website Information (khớp Website URL)...'
+      : 'Quay lại WPM → tab Website Information (Main Web)...'
+  );
   await page.bringToFront().catch(() => {});
 
   const landed = await openWebsiteInformationTab(page, projectUrl, log);
@@ -476,244 +614,467 @@ export async function syncAccountToWPM(page, projectUrl, account, log) {
     throw new Error('Không mở được tab Website Information trên WPM.');
   }
 
-  const mainWeb = await resolveMainWeb(page, log);
-  if (!mainWeb?.id) {
-    throw new Error('Không tìm thấy Main Web để sync tài khoản.');
+  const targetWeb = await resolveTargetWeb(page, { mode: webTargetMode, preferUrl }, log);
+  if (!targetWeb?.id) {
+    throw new Error(
+      webTargetMode === 'website'
+        ? 'Không tìm thấy web khớp Website URL để sync tài khoản.'
+        : 'Không tìm thấy Main Web để sync tài khoản.'
+    );
   }
 
-  log(`Mở card Main Web (${mainWeb.url})...`);
-  await expandWebCard(page, mainWeb.id);
+  log(`Focus đúng card target (${targetWeb.url}) — đóng web khác...`);
+  await focusOnlyWebCard(page, targetWeb.id, log);
   await sleepExact(400);
 
-  log('Mở endpoint đầu tiên trên Main Web...');
-  const openedEndpoint = await page.evaluate((webId) => {
+  log('Mở Endpoint 1 trên target web...');
+  let endpointReady = false;
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    const clickInfo = await page.evaluate((webId) => {
+      const root =
+        document.getElementById(webId) ||
+        document.querySelector(`#websContainer [id="${webId}"]`);
+      if (!root) return { ok: false, reason: 'no-root' };
+
+      const visible = (el) => {
+        if (!el) return false;
+        const st = window.getComputedStyle(el);
+        if (st.display === 'none' || st.visibility === 'hidden') return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      };
+
+      const hasAddAccount = () =>
+        Array.from(root.querySelectorAll('a, button, span, div[role="button"]')).some((el) => {
+          const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+          return /^add account\s*\+?$/i.test(t) && visible(el);
+        });
+
+      if (hasAddAccount()) {
+        return { ok: true, alreadyOpen: true, header: 'already-open' };
+      }
+
+      const all = Array.from(
+        root.querySelectorAll(
+          'a, button, span, div, h1, h2, h3, h4, h5, .card-header, [data-toggle], [data-bs-toggle], [role="button"]'
+        )
+      );
+      const scored = all
+        .map((el) => {
+          const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+          if (t.length > 80) return null;
+          let score = 0;
+          if (/^endpoint\s*1\b/i.test(t)) score = 100;
+          else if (/^endpoint\s*\d+/i.test(t)) score = 90;
+          else if (/endpoint\s*\d+/i.test(t) && t.length < 40) score = 80;
+          else if (/^int\s*\d+/i.test(t)) score = 70;
+          else if (/\bendpoint\b/i.test(t) && t.length < 40) score = 50;
+          if (!score) return null;
+          score -= Math.min((el.children?.length || 0) * 2, 20);
+          return { el, score, t };
+        })
+        .filter(Boolean)
+        .sort((a, b) => b.score - a.score);
+
+      const hit = scored[0];
+      if (!hit) return { ok: false, reason: 'no-endpoint-label' };
+
+      const mark = `afp-endpoint-${Date.now()}`;
+      const clickEl =
+        hit.el.closest('.card-header, [data-toggle="collapse"], [data-bs-toggle="collapse"]') ||
+        hit.el;
+      clickEl.setAttribute('data-afp-endpoint', mark);
+      clickEl.scrollIntoView?.({ block: 'center' });
+      return { ok: true, alreadyOpen: false, mark, header: hit.t.slice(0, 60) };
+    }, targetWeb.id);
+
+    if (!clickInfo?.ok) {
+      log(`⚠ Lần ${attempt}: không thấy label Endpoint (${clickInfo?.reason || '?'})`);
+      await sleepExact(400);
+      continue;
+    }
+
+    if (clickInfo.alreadyOpen) {
+      log('Endpoint đã mở — thấy nút Add Account.');
+      endpointReady = true;
+      break;
+    }
+
+    log(`Click "${clickInfo.header}" (lần ${attempt})...`);
+    try {
+      const sel = `[data-afp-endpoint="${clickInfo.mark}"]`;
+      await page.waitForSelector(sel, { visible: true, timeout: 3000 });
+      await page.click(sel);
+    } catch {
+      await page.evaluate((mark) => {
+        document.querySelector(`[data-afp-endpoint="${mark}"]`)?.click();
+      }, clickInfo.mark);
+    }
+    await sleepExact(1000);
+
+    const openOk = await page.evaluate((webId) => {
+      const root =
+        document.getElementById(webId) ||
+        document.querySelector(`#websContainer [id="${webId}"]`);
+      if (!root) return false;
+      const visible = (el) => {
+        if (!el) return false;
+        const st = window.getComputedStyle(el);
+        if (st.display === 'none' || st.visibility === 'hidden') return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      };
+      return Array.from(root.querySelectorAll('a, button, span, div[role="button"]')).some((el) => {
+        const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        return /^add account\s*\+?$/i.test(t) && visible(el);
+      });
+    }, targetWeb.id);
+
+    if (openOk) {
+      log('✓ Endpoint đã mở — thấy Add Account.');
+      endpointReady = true;
+      break;
+    }
+    log(`⚠ Lần ${attempt}: click Endpoint nhưng chưa thấy Add Account — thử lại...`);
+  }
+
+  if (!endpointReady) {
+    throw new Error(
+      'Không mở được Endpoint 1 (không thấy nút Add Account). Mở tay Endpoint 1 trong card subdomain rồi Resume Sync.'
+    );
+  }
+
+  const countBefore = await page.evaluate((webId) => {
     const root =
       document.getElementById(webId) ||
       document.querySelector(`#websContainer [id="${webId}"]`) ||
-      document.querySelector('#websContainer .web-item');
-
-    const endpointHeader =
-      root?.querySelector(
-        '.endpoint .card-header, .endpoint-item .card-header, [id*="endpoint"] .card-header, .card-header[data-target*="endpoint"], .card-header[data-bs-target*="endpoint"]'
-      ) ||
-      Array.from(
-        root?.querySelectorAll('.card-header, [data-toggle="collapse"], [role="button"]') || []
-      ).find(
-        (el) =>
-          /endpoint|server|host|ftp|sftp|ssh/i.test(el.textContent || '') ||
-          el !== root.querySelector('.card-header')
-      );
-
-    const headers = Array.from(
-      root?.querySelectorAll(
-        '.card-header[data-toggle="collapse"], .card-header[data-bs-toggle="collapse"], .card-header'
-      ) || []
-    );
-    const target = endpointHeader || headers[1] || headers[0];
-    if (!target) return false;
-    if (headers.length > 1 && target === headers[0]) {
-      headers[1].click();
-      return true;
-    }
-    target.click();
-    return true;
-  }, mainWeb.id);
-  if (!openedEndpoint) {
-    log('⚠ Không rõ endpoint header — thử Add Account trực tiếp trong web content.');
-  }
-  await sleepExact(500);
-
-  // Đếm theo label "Username" — password WPM hay là type=text
-  const countBefore = await page.evaluate(() =>
-    Array.from(document.querySelectorAll('label, .form-label, span, div, p')).filter((el) => {
-      if ((el.children?.length || 0) > 3) return false;
-      const t = (el.childNodes?.[0]?.textContent || el.textContent || '')
-        .replace(/\s+/g, ' ')
-        .trim();
-      return /^username\s*\*?$/i.test(t);
-    }).length
-  );
-  log(`Add Account... (đang có ~${countBefore} account)`);
-
-  const added = await page.evaluate(() => {
-    const btns = Array.from(document.querySelectorAll('a, button, span, div[role="button"]'));
-    const hit = btns.find((el) => {
-      const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
-      return /^add account\s*\+?$/i.test(t);
-    });
-    if (hit) {
-      hit.scrollIntoView?.({ block: 'center' });
-      hit.click();
-      return true;
-    }
-    return false;
-  });
-  if (!added) {
-    throw new Error('Không tìm thấy nút Add Account trên WPM.');
-  }
-
-  let appeared = false;
-  const waitUntil = Date.now() + 12000;
-  while (Date.now() < waitUntil) {
-    const info = await page.evaluate((before) => {
-      const labelCount = Array.from(
-        document.querySelectorAll('label, .form-label, span, div, p')
-      ).filter((el) => {
-        if ((el.children?.length || 0) > 3) return false;
+      document.body;
+    const visible = (el) => {
+      const st = window.getComputedStyle(el);
+      if (st.display === 'none' || st.visibility === 'hidden') return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+    return Array.from(root.querySelectorAll('label, .form-label, span, div, p, strong')).filter(
+      (el) => {
+        if (!visible(el)) return false;
         const t = (el.childNodes?.[0]?.textContent || el.textContent || '')
           .replace(/\s+/g, ' ')
           .trim();
-        return /^username\s*\*?$/i.test(t);
+        return /^username\s*\*?$/i.test(t) && t.length < 24;
+      }
+    ).length;
+  }, targetWeb.id);
+  log(`Add Account... (đang có ~${countBefore} account visible trong Endpoint)`);
+
+  const added = await page.evaluate((webId) => {
+    const root =
+      document.getElementById(webId) ||
+      document.querySelector(`#websContainer [id="${webId}"]`) ||
+      document.body;
+    const visible = (el) => {
+      if (!el) return false;
+      const st = window.getComputedStyle(el);
+      if (st.display === 'none' || st.visibility === 'hidden') return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+    const hit = Array.from(root.querySelectorAll('a, button, span, div[role="button"]')).find(
+      (el) => {
+        const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        return /^add account\s*\+?$/i.test(t) && visible(el);
+      }
+    );
+    if (!hit) return { ok: false };
+    const mark = `afp-add-acc-${Date.now()}`;
+    hit.setAttribute('data-afp-add-account', mark);
+    hit.scrollIntoView?.({ block: 'center' });
+    return { ok: true, mark };
+  }, targetWeb.id);
+
+  if (!added?.ok) {
+    throw new Error('Endpoint đã mở nhưng không thấy nút Add Account visible.');
+  }
+  try {
+    await page.click(`[data-afp-add-account="${added.mark}"]`);
+  } catch {
+    await page.evaluate((mark) => {
+      document.querySelector(`[data-afp-add-account="${mark}"]`)?.click();
+    }, added.mark);
+  }
+
+  let appeared = false;
+  const waitUntil = Date.now() + 15000;
+  while (Date.now() < waitUntil) {
+    const info = await page.evaluate((webId, before) => {
+      const root =
+        document.getElementById(webId) ||
+        document.querySelector(`#websContainer [id="${webId}"]`) ||
+        document.body;
+
+      const visibleInput = (el) => {
+        if (!el || el.disabled) return false;
+        if (el.type === 'hidden' || el.type === 'checkbox' || el.type === 'radio') return false;
+        const st = window.getComputedStyle(el);
+        if (st.display === 'none' || st.visibility === 'hidden') return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      };
+
+      const labelCount = Array.from(
+        root.querySelectorAll('label, .form-label, span, div, p, strong')
+      ).filter((el) => {
+        const st = window.getComputedStyle(el);
+        if (st.display === 'none' || st.visibility === 'hidden') return false;
+        const r = el.getBoundingClientRect();
+        if (r.width <= 0 || r.height <= 0) return false;
+        const t = (el.childNodes?.[0]?.textContent || el.textContent || '')
+          .replace(/\s+/g, ' ')
+          .trim();
+        return /^username\s*\*?$/i.test(t) && t.length < 24;
       }).length;
 
-      const blocks = Array.from(
-        document.querySelectorAll('.card, [class*="account"], .border, section, div')
-      ).filter((el) => {
-        const t = el.innerText || '';
-        if (t.length > 2500) return false;
-        return (
-          /username/i.test(t) &&
-          /role/i.test(t) &&
-          (/password/i.test(t) || /account notes/i.test(t)) &&
-          /quick login|generate|copy/i.test(t)
-        );
-      });
-      const deepest = blocks.filter(
-        (el) => !blocks.some((other) => other !== el && el.contains(other))
+      const inputs = Array.from(root.querySelectorAll('input')).filter(visibleInput);
+      const emptyText = inputs.filter(
+        (el) => el.type !== 'password' && !String(el.value || '').trim()
       );
 
-      const emptyUser = deepest.some((b) => {
-        const inputs = Array.from(b.querySelectorAll('input')).filter(
-          (el) =>
-            el.offsetParent !== null &&
-            el.type !== 'hidden' &&
-            el.type !== 'checkbox' &&
-            el.type !== 'radio'
-        );
-        // Username thường là input text đầu tiên trong block
-        const userInp = inputs.find((el) => el.type !== 'password') || inputs[0];
-        return userInp && !String(userInp.value || '').trim();
-      });
+      let emptyNearUser = false;
+      for (const lab of root.querySelectorAll('label, .form-label, span, div, p, strong')) {
+        const t = (lab.textContent || '').replace(/\s+/g, ' ').trim();
+        if (!/^username/i.test(t) || t.length > 30) continue;
+        const r = lab.getBoundingClientRect();
+        if (r.width <= 0 || r.height <= 0) continue;
+        const scope =
+          lab.closest('.mb-3, .form-group, .col, .row, .form-floating, div') || lab.parentElement;
+        const inp = scope && Array.from(scope.querySelectorAll('input')).find(visibleInput);
+        if (inp && !String(inp.value || '').trim()) {
+          emptyNearUser = true;
+          break;
+        }
+      }
 
-      return { labelCount, emptyUser, grew: labelCount > before };
-    }, countBefore);
+      return {
+        labelCount,
+        emptyText: emptyText.length,
+        emptyNearUser,
+        grew: labelCount > before,
+        inputCount: inputs.length,
+      };
+    }, targetWeb.id, countBefore);
 
-    if (info.grew || info.emptyUser) {
+    if ((info.emptyNearUser || info.grew || info.emptyText > 0) && info.inputCount > 0) {
       appeared = true;
       log(
         info.grew
-          ? `Đã thêm account mới (${countBefore} → ${info.labelCount}).`
-          : 'Thấy ô Username trống — điền vào đó.'
+          ? `Đã thêm account mới (${countBefore} → ${info.labelCount}, inputs=${info.inputCount}).`
+          : `Thấy form account trống (emptyNearUser=${info.emptyNearUser}, emptyInputs=${info.emptyText}, inputs=${info.inputCount}).`
       );
       break;
     }
-    await sleepExact(250);
+    await sleepExact(300);
   }
   if (!appeared) {
-    throw new Error('Bấm Add Account rồi nhưng không thấy form account mới.');
-  }
-  await sleepExact(500);
-
-  log('Điền Username, Password, Role=Editor, Notes="chủ tiệm"...');
-
-  const fieldIds = await page.evaluate(() => {
-    const mark = (el, key) => {
-      if (!el) return null;
-      const id = `afp-wpm-${key}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-      el.setAttribute('data-afp', id);
-      el.scrollIntoView?.({ block: 'center' });
-      return id;
-    };
-
-    const pickNearLabel = (root, labelRe, opts = {}) => {
-      const nodes = Array.from(
-        root.querySelectorAll('label, .form-label, span, div, p, strong')
-      );
-      const lab = nodes.find((el) => {
-        if ((el.children?.length || 0) > 2) return false;
-        const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
-        return labelRe.test(t) && t.length < 40;
-      });
-      const scope = lab?.closest('.mb-3, .form-group, .col, .row, .form-floating, div') || root;
-      const inputs = Array.from(scope.querySelectorAll('input, textarea, select')).filter(
-        (el) => el.offsetParent !== null
-      );
-      if (opts.select) return inputs.find((el) => el.tagName === 'SELECT');
-      if (opts.textarea) {
-        return (
-          inputs.find((el) => el.tagName === 'TEXTAREA') ||
-          inputs.find((el) => /note/i.test(el.placeholder || ''))
-        );
-      }
-      if (opts.password) {
-        return (
-          inputs.find((el) => el.type === 'password') ||
-          inputs.find((el) => el.tagName === 'INPUT' && el.type !== 'checkbox')
-        );
-      }
-      return inputs.find(
-        (el) => el.tagName === 'INPUT' && el.type !== 'checkbox' && el.type !== 'password'
-      );
-    };
-
-    const candidates = Array.from(
-      document.querySelectorAll('.card, [class*="account"], .border, section, div')
-    ).filter((el) => {
-      const t = el.innerText || '';
-      if (t.length > 2500) return false;
-      return (
-        /username/i.test(t) &&
-        /role/i.test(t) &&
-        (/password/i.test(t) || /account notes/i.test(t)) &&
-        /quick login|generate|copy/i.test(t)
-      );
-    });
-    const blocks = candidates.filter(
-      (el) => !candidates.some((other) => other !== el && el.contains(other))
+    throw new Error(
+      'Bấm Add Account rồi nhưng chưa thấy ô Username/Password visible trong Endpoint. Kiểm tra Endpoint 1 đã mở chưa.'
     );
+  }
+  await sleepExact(600);
 
-    let block =
-      blocks.find((b) => {
-        const u = pickNearLabel(b, /^username\s*\*?$/i);
-        return u && !String(u.value || '').trim();
-      }) || blocks[blocks.length - 1];
+  log('Điền Username, Password, Role=Editor, Notes="chủ tiệm" — CHỈ account mới...');
 
-    if (!block) {
-      const addBtn = Array.from(document.querySelectorAll('a, button, span')).find((el) =>
-        /^add account/i.test((el.textContent || '').trim())
+  const fieldIds = await page.evaluate(
+    (webId, wantUser) => {
+      const root =
+        document.getElementById(webId) ||
+        document.querySelector(`#websContainer [id="${webId}"]`) ||
+        document.body;
+
+      const visibleInput = (el) => {
+        if (!el || el.disabled) return false;
+        if (el.type === 'hidden' || el.type === 'checkbox' || el.type === 'radio') return false;
+        const st = window.getComputedStyle(el);
+        if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) === 0) return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      };
+
+      const mark = (el, key) => {
+        if (!el) return null;
+        const id = `afp-wpm-${key}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        el.setAttribute('data-afp', id);
+        el.scrollIntoView?.({ block: 'center' });
+        return id;
+      };
+
+      const labelText = (el) =>
+        (el.childNodes?.[0]?.textContent || el.textContent || '').replace(/\s+/g, ' ').trim();
+
+      const findInBlock = (block, labelRe, opts = {}) => {
+        const labs = Array.from(
+          block.querySelectorAll('label, .form-label, span, div, p, strong, small')
+        ).filter((el) => {
+          const t = labelText(el);
+          return labelRe.test(t) && t.length < 48;
+        });
+        for (const lab of labs) {
+          let scope =
+            lab.closest(
+              '.mb-3, .form-group, .col-md-6, .col-md-4, .col, .row, .form-floating, .input-group'
+            ) || lab.parentElement;
+          for (let i = 0; i < 4 && scope && block.contains(scope); i += 1) {
+            const fields = Array.from(scope.querySelectorAll('input, textarea, select')).filter(visibleInput);
+            let hit = null;
+            if (opts.select) hit = fields.find((el) => el.tagName === 'SELECT');
+            else if (opts.textarea) {
+              hit =
+                fields.find((el) => el.tagName === 'TEXTAREA') ||
+                fields.find((el) => /note/i.test(`${el.name || ''} ${el.id || ''} ${el.placeholder || ''}`));
+            } else if (opts.password) {
+              hit =
+                fields.find((el) => el.type === 'password') ||
+                fields.find((el) => /pass/i.test(`${el.name || ''} ${el.id || ''} ${el.placeholder || ''}`)) ||
+                fields.find((el) => el.tagName === 'INPUT' && el.type !== 'checkbox');
+            } else {
+              hit =
+                fields.find((el) => /user/i.test(`${el.name || ''} ${el.id || ''} ${el.placeholder || ''}`)) ||
+                fields.find((el) => el.tagName === 'INPUT' && el.type !== 'password');
+            }
+            if (hit && block.contains(hit)) return hit;
+            scope = scope.parentElement;
+          }
+        }
+        return null;
+      };
+
+      const readPair = (block) => {
+        const inputs = Array.from(block.querySelectorAll('input')).filter(visibleInput);
+        const userEl =
+          findInBlock(block, /^username/i) ||
+          inputs.find((el) => /user/i.test(`${el.name || ''} ${el.id || ''}`)) ||
+          inputs.find((el) => el.type !== 'password') ||
+          null;
+        let passEl =
+          findInBlock(block, /^password/i, { password: true }) ||
+          inputs.find((el) => /pass/i.test(`${el.name || ''} ${el.id || ''}`) || el.type === 'password');
+        if (passEl && passEl === userEl) passEl = inputs.find((el) => el !== userEl) || null;
+        if (!passEl && userEl) {
+          const idx = inputs.indexOf(userEl);
+          if (idx >= 0) passEl = inputs[idx + 1] || null;
+        }
+        return {
+          userEl,
+          passEl,
+          userVal: String(userEl?.value || '').trim(),
+          passVal: String(passEl?.value || '').trim(),
+        };
+      };
+
+      const candidates = Array.from(
+        root.querySelectorAll('.card, [class*="account"], .border, .row, section, div')
+      ).filter((el) => {
+        if (!root.contains(el)) return false;
+        const t = el.innerText || '';
+        if (t.length < 20 || t.length > 3500) return false;
+        return /username/i.test(t) && (/password/i.test(t) || /account notes|role/i.test(t));
+      });
+      const blocks = candidates.filter(
+        (el) => !candidates.some((other) => other !== el && el.contains(other))
       );
-      block = addBtn?.parentElement || document.body;
-    }
 
-    const usernameEl = pickNearLabel(block, /^username\s*\*?$/i);
-    let passwordEl = pickNearLabel(block, /^password\s*\*?$/i, { password: true });
-    // Password WPM thường type=text — nếu pick nhầm username thì lấy input thứ 2
-    if (passwordEl && passwordEl === usernameEl) {
-      const inputs = Array.from(block.querySelectorAll('input')).filter(
-        (el) => el.offsetParent !== null && el.type !== 'checkbox' && el.type !== 'hidden'
-      );
-      passwordEl = inputs.find((el) => el !== usernameEl) || passwordEl;
-    }
-    const notesEl = pickNearLabel(block, /account notes/i, { textarea: true });
-    let roleEl = pickNearLabel(block, /^role$/i, { select: true });
-    if (!roleEl) {
-      roleEl = Array.from(block.querySelectorAll('select')).find((el) =>
-        Array.from(el.options || []).some((o) => /editor|admin|tech/i.test(o.text || ''))
-      );
-    }
+      const want = String(wantUser || '').trim().toLowerCase();
+      let best = null;
+      let bestScore = -1e9;
+      const scored = [];
+      for (let i = 0; i < blocks.length; i += 1) {
+        const b = blocks[i];
+        const { userVal, passVal } = readPair(b);
+        let score = i * 2;
+        if (!passVal) score += 80;
+        if (!userVal) score += 50;
+        if (want && userVal.toLowerCase() === want) score += 60;
+        if (passVal) score -= 200;
+        if (/^mac-admin$|^mac-tech$/i.test(userVal)) score -= 300;
+        if (userVal && want && userVal.toLowerCase() !== want && passVal) score -= 150;
+        scored.push({ i, userVal, passFilled: Boolean(passVal), score });
+        if (score > bestScore) {
+          bestScore = score;
+          best = b;
+        }
+      }
 
-    return {
-      username: mark(usernameEl, 'user'),
-      password: mark(passwordEl, 'pass'),
-      notes: mark(notesEl, 'notes'),
-      role: mark(roleEl, 'role'),
-      blockCount: blocks.length,
-    };
-  });
+      if (!best || bestScore < 0) {
+        return {
+          username: null,
+          password: null,
+          notes: null,
+          role: null,
+          blockCount: blocks.length,
+          error: 'Không chọn được account mới — không sửa account cũ. scores=' + JSON.stringify(scored),
+        };
+      }
+
+      const prefer = best;
+      const pair = readPair(prefer);
+      if (pair.passVal && pair.userVal && want && pair.userVal.toLowerCase() !== want) {
+        return {
+          username: null,
+          password: null,
+          notes: null,
+          role: null,
+          blockCount: blocks.length,
+          error: 'Block chọn nhầm account cũ (' + pair.userVal + '). Không ghi đè.',
+        };
+      }
+
+      const usernameEl = pair.userEl;
+      const passwordEl = pair.passEl;
+      const notesEl =
+        findInBlock(prefer, /account notes/i, { textarea: true }) ||
+        findInBlock(prefer, /^notes/i, { textarea: true }) ||
+        Array.from(prefer.querySelectorAll('textarea')).find(visibleInput);
+      const roleEl =
+        findInBlock(prefer, /^role$/i, { select: true }) ||
+        Array.from(prefer.querySelectorAll('select')).find((el) =>
+          Array.from(el.options || []).some((o) => /editor|admin|tech/i.test(o.text || ''))
+        );
+
+      return {
+        username: mark(usernameEl, 'user'),
+        password: mark(passwordEl, 'pass'),
+        notes: mark(notesEl, 'notes'),
+        role: mark(roleEl, 'role'),
+        blockCount: blocks.length,
+        debug: {
+          hasUser: !!usernameEl,
+          hasPass: !!passwordEl,
+          userVal: pair.userVal.slice(0, 40),
+          passEmpty: !pair.passVal,
+          score: bestScore,
+        },
+      };
+    },
+    targetWeb.id,
+    account.username
+  );
+
+  if (fieldIds.error) {
+    throw new Error(fieldIds.error);
+  }
+
+  if (fieldIds.error) {
+    throw new Error(fieldIds.error);
+  }
 
   if (!fieldIds.username || !fieldIds.password) {
     throw new Error(
-      `Không tìm thấy ô Username/Password của account mới (user=${!!fieldIds.username}, pass=${!!fieldIds.password}, blocks=${fieldIds.blockCount}).`
+      `Không tìm thấy ô Username/Password của account mới (user=${!!fieldIds.username}, pass=${!!fieldIds.password}, blocks=${fieldIds.blockCount}, passEmpty=${fieldIds.debug?.passEmpty}). Không sửa account cũ.`
+    );
+  }
+
+  if (fieldIds.debug) {
+    log(
+      `Account block chọn: user="${fieldIds.debug.userVal || '(trống)'}", passEmpty=${fieldIds.debug.passEmpty}, score=${fieldIds.debug.score}`
     );
   }
 
@@ -723,12 +1084,94 @@ export async function syncAccountToWPM(page, projectUrl, account, log) {
     throw new Error('Không gắn được handle Username/Password trên WPM.');
   }
 
+  // Chặn ghi đè account cũ (mac-admin…)
+  const guard = await page.evaluate(
+    (userSel, passSel, want) => {
+      const u = document.querySelector(`[data-afp="${userSel}"]`);
+      const p = document.querySelector(`[data-afp="${passSel}"]`);
+      const userVal = String(u?.value || '').trim();
+      const passVal = String(p?.value || '').trim();
+      const wantL = String(want || '').trim().toLowerCase();
+      if (/^mac-admin$|^mac-tech$/i.test(userVal) && passVal) {
+        return { ok: false, reason: `Đang trỏ vào account cũ ${userVal} — dừng.` };
+      }
+      if (userVal && wantL && userVal.toLowerCase() !== wantL && passVal) {
+        return { ok: false, reason: `Đang trỏ vào account khác (${userVal}) đã có password — dừng.` };
+      }
+      return { ok: true, userVal, passEmpty: !passVal };
+    },
+    fieldIds.username,
+    fieldIds.password,
+    account.username
+  );
+  if (!guard.ok) {
+    throw new Error(guard.reason);
+  }
+
   await fillNative(page, userHandle, account.username);
   await fillNative(page, passHandle, account.password);
 
+  // Notes "chủ tiệm" — bắt buộc trong cùng block account mới
+  let notesOk = false;
   if (fieldIds.notes) {
     const notesHandle = await page.$(`[data-afp="${fieldIds.notes}"]`);
-    if (notesHandle) await fillNative(page, notesHandle, 'chủ tiệm');
+    if (notesHandle) {
+      await fillNative(page, notesHandle, 'chủ tiệm');
+      notesOk = true;
+    }
+  }
+  if (!notesOk) {
+    const notesMark = await page.evaluate((userSel) => {
+      const u = document.querySelector(`[data-afp="${userSel}"]`);
+      if (!u) return null;
+      const block =
+        u.closest('.card, [class*="account"], .border') ||
+        u.closest('.row') ||
+        u.parentElement?.parentElement?.parentElement;
+      if (!block) return null;
+      const visible = (el) => {
+        if (!el) return false;
+        const st = window.getComputedStyle(el);
+        if (st.display === 'none' || st.visibility === 'hidden') return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      };
+      const fields = Array.from(block.querySelectorAll('textarea, input:not([type="hidden"])')).filter(
+        visible
+      );
+      let notes =
+        fields.find((el) => el.tagName === 'TEXTAREA') ||
+        fields.find((el) =>
+          /note/i.test(`${el.name || ''} ${el.id || ''} ${el.placeholder || ''}`)
+        );
+      if (!notes) {
+        // Label "Account Notes"
+        for (const lab of block.querySelectorAll('label, span, div, p, small')) {
+          const t = (lab.textContent || '').replace(/\s+/g, ' ').trim();
+          if (!/account\s*notes|^notes$/i.test(t) || t.length > 40) continue;
+          const scope = lab.closest('.mb-3, .form-group, .col, div') || lab.parentElement;
+          notes = scope?.querySelector('textarea, input:not([type="hidden"])');
+          if (notes && visible(notes)) break;
+        }
+      }
+      if (!notes) return null;
+      const id = `afp-wpm-notes-fb-${Date.now()}`;
+      notes.setAttribute('data-afp', id);
+      notes.scrollIntoView?.({ block: 'center' });
+      return id;
+    }, fieldIds.username);
+    if (notesMark) {
+      const notesHandle = await page.$(`[data-afp="${notesMark}"]`);
+      if (notesHandle) {
+        await fillNative(page, notesHandle, 'chủ tiệm');
+        notesOk = true;
+      }
+    }
+  }
+  if (!notesOk) {
+    log('⚠ Không tìm thấy ô Account Notes trong account mới — cần điền tay "chủ tiệm".');
+  } else {
+    log('Đã điền Account Notes = "chủ tiệm".');
   }
 
   let roleOk = false;
@@ -765,7 +1208,7 @@ export async function syncAccountToWPM(page, projectUrl, account, log) {
       }, fieldIds.role);
     }
   }
-  log(`Đã điền form (role=${roleOk}, notes=${!!fieldIds.notes}). Lưu...`);
+  log(`Đã điền form (role=${roleOk}, notes=${notesOk}). Lưu...`);
 
   // Đọc lại value vừa type (trước Submit) — xác nhận điền được
   const typedOk = await page.evaluate(
@@ -827,9 +1270,9 @@ export async function syncAccountToWPM(page, projectUrl, account, log) {
     log('Chưa thấy username trên form sau Submit — reload tab Website Information kiểm tra...');
     await openWebsiteInformationTab(page, projectUrl, log);
     await sleepExact(400);
-    const again = await resolveMainWeb(page, log);
+    const again = await resolveTargetWeb(page, { mode: webTargetMode, preferUrl }, log);
     if (again?.id) {
-      await expandWebCard(page, again.id);
+      await focusOnlyWebCard(page, again.id, log);
       await sleepExact(400);
       await page.evaluate((webId) => {
         const root =

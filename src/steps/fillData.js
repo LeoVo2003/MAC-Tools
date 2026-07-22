@@ -6,7 +6,7 @@ import {
   sleepExact,
   GOTO,
 } from '../utils.js';
-import { loginToWPM, readProjectName, readProjectZipcode, openWebsiteInformationTab, resolveMainWeb } from './wpm.js';
+import { loginToWPM, readProjectName, readProjectZipcode, openWebsiteInformationTab, resolveTargetWeb } from './wpm.js';
 
 const US_STATES = new Set(
   'AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC'
@@ -14,9 +14,31 @@ const US_STATES = new Set(
 );
 
 /**
- * Từ đầu tên tiệm → username-admin (viết thường)
- * "Muse Nails Lounge" → "muse-admin"
+ * Từ Website URL → username-admin (viết thường).
+ * https://abc.com → abc-admin
+ * https://www.musenaillounge.com/ → musenaillounge-admin
+ * Bỏ https/http, www., và đuôi .com
  */
+export function usernameFromWebsiteUrl(websiteUrl) {
+  let host = '';
+  const raw = String(websiteUrl || '').trim();
+  if (!raw) return '';
+  try {
+    const withProto = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    host = new URL(withProto).hostname;
+  } catch {
+    host = raw.replace(/^https?:\/\//i, '').split(/[/?#]/)[0] || '';
+  }
+  host = host.toLowerCase().replace(/^www\./, '');
+  if (host.endsWith('.com')) host = host.slice(0, -4);
+  // Bỏ dấu chấm còn lại nếu muốn slug liền? Giữ dấu chấm (subdomain). WP cho phép.
+  const base = sanitizeWpUsername(host.replace(/[^a-zA-Z0-9._\-]/g, ''));
+  if (!base) return '';
+  if (/-admin$/i.test(base)) return base.toLowerCase();
+  return `${base}-admin`;
+}
+
+/** @deprecated Dùng usernameFromWebsiteUrl — giữ tạm. */
 export function usernameFromShopName(shopName) {
   const first = String(shopName || '')
     .trim()
@@ -28,7 +50,7 @@ export function usernameFromShopName(shopName) {
   return `${base}-admin`;
 }
 
-/** Password: username@STATE-zip — chỉ State in hoa. vd muse-admin@TX-75001 */
+/** Password: username@STATE-zip — chỉ State in hoa. vd abc-admin@TX-75001 */
 export function buildCustomerPassword(username, state, zip) {
   const user = String(username || '')
     .trim()
@@ -154,10 +176,16 @@ export async function scrapeSiteFooterContact(page, websiteUrl, log) {
 
 /**
  * Login WPM → đọc project → scrape website footer → build username/password/email.
+ * @param {object} opts
+ * @param {string} opts.wpmProjectUrl
+ * @param {string} [opts.taskUrl]
+ * @param {{ username: string, password: string }} opts.wpmCredentials
+ * @param {'main'|'website'} [opts.webTargetMode]
+ * @param {string} [opts.websiteUrl] Prefer URL khi mode=website (admin đã điền subdomain)
  * @returns {Promise<object>}
  */
 export async function fillCustomerDataFromUrls(
-  { wpmProjectUrl, taskUrl, wpmCredentials },
+  { wpmProjectUrl, taskUrl, wpmCredentials, webTargetMode: rawMode, websiteUrl: preferWebsite },
   onLog = () => {}
 ) {
   const log = (msg) => onLog(`[${new Date().toLocaleTimeString('vi-VN')}] ${msg}`);
@@ -166,6 +194,9 @@ export async function fillCustomerDataFromUrls(
   if (!wpmCredentials?.username || !wpmCredentials?.password) {
     throw new Error('Thiếu credentials WPM (login tool bằng email/password WPM).');
   }
+
+  const webTargetMode = rawMode === 'website' ? 'website' : 'main';
+  const preferUrl = normalizeHttpUrl(preferWebsite);
 
   const { browser, page } = await launchBrowser({ headless: true });
   const warnings = [];
@@ -215,15 +246,23 @@ export async function fillCustomerDataFromUrls(
     }
     log(`Tên tiệm: ${shopName}`);
 
-    log('Chọn Main Web trên Website Information...');
+    log(
+      webTargetMode === 'website'
+        ? 'Chọn web khớp Website URL trên Website Information...'
+        : 'Chọn Main Web trên Website Information...'
+    );
     const tabOk = await openWebsiteInformationTab(page, cleanUrl, log);
     if (!tabOk) {
       throw new Error('Không mở được tab Website Information.');
     }
-    const mainWeb = await resolveMainWeb(page, log);
-    let websiteUrl = normalizeHttpUrl(mainWeb?.url || '');
+    const targetWeb = await resolveTargetWeb(
+      page,
+      { mode: webTargetMode, preferUrl },
+      log
+    );
+    let websiteUrl = normalizeHttpUrl(targetWeb?.url || '');
 
-    if (!websiteUrl && taskUrl) {
+    if (!websiteUrl && webTargetMode === 'main' && taskUrl) {
       log('Chưa có Main Web URL — thử Task URL...');
       await page.goto(String(taskUrl).trim(), GOTO).catch(() => {});
       await sleepExact(800);
@@ -231,12 +270,22 @@ export async function fillCustomerDataFromUrls(
       websiteUrl = normalizeHttpUrl(fromTask);
     }
     if (!websiteUrl) {
-      throw new Error('Không đọc được Main Web URL trên WPM (tick Main Web trên Website Information).');
+      throw new Error(
+        webTargetMode === 'website'
+          ? 'Không đọc được Website URL khớp trên WPM (nhập subdomain vào ô Website rồi Fill lại).'
+          : 'Không đọc được Main Web URL trên WPM (tick Main Web trên Website Information).'
+      );
     }
-    log(`Website (Main Web): ${websiteUrl}`);
+    if (webTargetMode === 'website' && !targetWeb?.isMainWeb) {
+      log(`⚠ Fill đang dùng NON-Main Web: ${websiteUrl}`);
+      warnings.push(`Target web không phải Main Web: ${websiteUrl}`);
+    } else {
+      log(`Website (${webTargetMode === 'website' ? 'target' : 'Main Web'}): ${websiteUrl}`);
+    }
 
-    const username = usernameFromShopName(shopName);
-    if (!username) throw new Error('Không tạo được username từ tên tiệm.');
+    const username = usernameFromWebsiteUrl(websiteUrl);
+    if (!username) throw new Error('Không tạo được username từ Website URL (cần domain hợp lệ).');
+    log(`Username từ domain: ${username}`);
 
     const site = await scrapeSiteFooterContact(page, websiteUrl, log);
     warnings.push(...(site.warnings || []));
@@ -263,13 +312,26 @@ export async function fillCustomerDataFromUrls(
     if (site.email) log(`Email: ${site.email}`);
     else log('⚠ Không lấy được email từ footer — điền tay trên form trước khi Run.');
 
+    const urlHint =
+      webTargetMode === 'website'
+        ? targetWeb?.isMainWeb
+          ? 'Khớp Website (đúng Main Web)'
+          : 'Khớp Website (subdomain / non-Main)'
+        : websiteUrl
+          ? 'Main Web'
+          : 'Thiếu Main Web URL';
+
     const fields = {
-      websiteUrl: { ok: Boolean(websiteUrl), value: websiteUrl, hint: websiteUrl ? 'Main Web' : 'Thiếu Main Web URL' },
-      username: { ok: Boolean(username), value: username, hint: username ? 'Từ tên tiệm' : 'Thiếu tên tiệm' },
+      websiteUrl: { ok: Boolean(websiteUrl), value: websiteUrl, hint: urlHint },
+      username: {
+        ok: Boolean(username),
+        value: username,
+        hint: username ? 'Từ domain (bỏ https + .com) + -admin' : 'Thiếu Website URL',
+      },
       password: {
         ok: Boolean(password),
         value: password,
-        hint: password ? `${state}-${zip}` : 'Thiếu State/Zip — sửa tay password',
+        hint: password ? `${username}@${state}-${zip}` : 'Thiếu State/Zip — sửa tay password',
       },
       email: {
         ok: Boolean(site.email),
@@ -300,6 +362,8 @@ export async function fillCustomerDataFromUrls(
       warnings,
       fields,
       needManual,
+      webTargetMode,
+      isMainWeb: Boolean(targetWeb?.isMainWeb),
       taskUrl: String(taskUrl || '').trim() || undefined,
       wpmProjectUrl: projectUrl,
     };

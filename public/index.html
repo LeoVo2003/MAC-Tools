@@ -60,17 +60,21 @@
               <span>Task URL (tuỳ chọn)</span>
               <input name="taskUrl" type="url" placeholder="https://wpm.macusaone.com/tasks/16694/edit" />
             </label>
+            <div class="fill-data-row">
+              <button type="button" id="fillDataBtn" class="secondary">Fill data</button>
+              <p id="fillDataHint" class="hint"></p>
+            </div>
             <label>
               <span>Website URL</span>
               <input name="websiteUrl" id="fieldWebsiteUrl" type="url" required placeholder="Fill data sẽ tự lấy" />
             </label>
             <label>
               <span>Username Chủ Tiệm</span>
-              <input name="username" id="fieldUsername" type="text" required autocomplete="off" placeholder="vd muse-admin" />
+              <input name="username" id="fieldUsername" type="text" required autocomplete="off" placeholder="vd abc-admin (từ domain)" />
             </label>
             <label>
               <span>Password Chủ Tiệm</span>
-              <input name="password" id="fieldPassword" type="text" required autocomplete="off" placeholder="vd muse-admin@TX-75001" />
+              <input name="password" id="fieldPassword" type="text" required autocomplete="off" placeholder="vd abc-admin@TX-75001" />
             </label>
             <label>
               <span>Email khách</span>
@@ -88,6 +92,26 @@
               <input type="checkbox" name="downloadBackup" />
               <span>Tải file backup về máy (không zip)</span>
             </label>
+          </div>
+
+          <div class="web-target" data-admin-only hidden>
+            <div class="panel-head" style="margin-bottom:0.35rem">
+              <h2 style="margin:0;font-size:0.85rem">Target web</h2>
+            </div>
+            <p class="hint panel-desc">Admin: test subdomain → điền ô Website = subdomain → chọn “Khớp ô Website”. User thường luôn Main Web.</p>
+            <div class="web-target-options">
+              <label class="check">
+                <input type="radio" name="webTargetMode" value="main" checked />
+                <span>Main Web (an toàn)</span>
+              </label>
+              <label class="check">
+                <input type="radio" name="webTargetMode" value="website" />
+                <span>Khớp ô Website (subdomain test)</span>
+              </label>
+            </div>
+            <p id="webTargetWarn" class="web-target-warn" hidden>
+              Đang chạy NON-Main Web — Quick Login / Fill / Sync theo ô Website, không đụng Main Web live.
+            </p>
           </div>
 
           <fieldset class="steps-box">
@@ -110,18 +134,17 @@
           </fieldset>
 
           <div class="actions">
-            <button type="button" id="fillDataBtn" class="secondary">Fill data</button>
             <button type="submit" id="runBtn">Run</button>
+            <button type="button" id="cancelBtn" class="danger" hidden title="Dừng job đang chạy / đang chờ">Hủy</button>
             <button type="button" id="resumeBtn" class="secondary" hidden title="Chạy lại các bước còn đang tick">Resume</button>
             <span id="statusBadge" class="badge idle">Idle</span>
             <span id="queueHint" class="hint"></span>
           </div>
-          <p id="fillDataHint" class="hint"></p>
           <div id="fillFieldStatus" class="fill-status" hidden></div>
 
           <section class="panel queue-panel" id="queuePanel">
             <h2>Hàng đợi</h2>
-            <p class="hint" style="margin-top:0">Ai đang chạy / chờ — có thể hủy job của bạn.</p>
+            <p class="hint">Job đang chạy / chờ — bấm Hủy để dừng.</p>
             <div id="queueList" class="queue-list"><p class="hint">Trống.</p></div>
           </section>
         </form>

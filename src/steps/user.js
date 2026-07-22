@@ -60,26 +60,26 @@ async function readCreateUserError(page) {
 
 /**
  * Kiểm tra email đã có user trên WP (Users → search).
- * @returns {Promise<boolean>}
+ * @returns {Promise<{ found: boolean, username: string }>}
  */
 export async function emailAlreadyRegistered(page, email, log = () => {}) {
   const base = originOf(page.url());
   const emailClean = String(email || '').trim();
-  if (!emailClean) return false;
+  if (!emailClean) return { found: false, username: '' };
 
   const url = `${base}/wp-admin/users.php?s=${encodeURIComponent(emailClean)}`;
   log(`Kiểm tra email đã có user chưa: ${emailClean}`);
   await page.goto(url, GOTO);
   await sleep(500);
 
-  const found = await page.evaluate((needle) => {
+  const hit = await page.evaluate((needle) => {
     const want = String(needle || '')
       .trim()
       .toLowerCase();
-    if (!want) return false;
+    if (!want) return { found: false, username: '' };
 
     const noItems = document.querySelector('#the-list tr.no-items');
-    if (noItems) return false;
+    if (noItems) return { found: false, username: '' };
 
     const rows = Array.from(document.querySelectorAll('#the-list > tr'));
     for (const row of rows) {
@@ -91,15 +91,20 @@ export async function emailAlreadyRegistered(page, email, log = () => {}) {
         .replace(/^mailto:/i, '')
         .trim()
         .toLowerCase();
-      if (mail === want) return true;
-
       const blob = (row.innerText || '').toLowerCase();
-      if (blob.includes(want)) return true;
+      const match = mail === want || blob.includes(want);
+      if (!match) continue;
+
+      const userEl =
+        row.querySelector('td.username a, td.column-username a, .username strong a, .column-username strong a') ||
+        row.querySelector('td.username strong, td.column-username strong, .username a');
+      const username = (userEl?.textContent || '').trim();
+      return { found: true, username };
     }
-    return false;
+    return { found: false, username: '' };
   }, emailClean);
 
-  return found;
+  return hit;
 }
 
 async function fillAndSubmitNewUser(page, { username, password, emailClean }, log) {
@@ -236,13 +241,17 @@ export async function createCustomerAccount(page, customer, log) {
     log(`Password format: đã bỏ dấu nháy '`);
   }
 
-  // Email đã có TK → bỏ tạo user + bỏ sync WPM
-  if (await emailAlreadyRegistered(page, emailClean, log)) {
+  // Email đã có TK → bỏ tạo user + bỏ sync WPM; vẫn trả username trên web
+  const existing = await emailAlreadyRegistered(page, emailClean, log);
+  if (existing.found) {
+    const existingUser = existing.username || username;
     log(
-      `⏭ Email đã có tài khoản trên WP (${emailClean}) — bỏ qua tạo user và sync WPM.`
+      `⏭ Email đã có tài khoản trên WP (${emailClean}` +
+        (existingUser ? ` → user "${existingUser}"` : '') +
+        ') — bỏ qua tạo user và sync WPM.'
     );
     return {
-      username: '',
+      username: existingUser,
       password: '',
       email: emailClean,
       skipped: true,
@@ -299,8 +308,10 @@ export async function createCustomerAccount(page, customer, log) {
       )
     ) {
       log(`⏭ WP báo email/user đã tồn tại — bỏ qua tạo user và sync WPM.`);
+      // Thử lấy username thật trên Users list
+      const again = await emailAlreadyRegistered(page, emailClean, log);
       return {
-        username: '',
+        username: again.username || username,
         password: '',
         email: emailClean,
         skipped: true,

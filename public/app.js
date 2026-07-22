@@ -10,6 +10,7 @@ const logoutBtn = document.getElementById('logoutBtn');
 
 const form = document.getElementById('jobForm');
 const runBtn = document.getElementById('runBtn');
+const cancelBtn = document.getElementById('cancelBtn');
 const logBox = document.getElementById('logBox');
 const statusBadge = document.getElementById('statusBadge');
 const queueHint = document.getElementById('queueHint');
@@ -26,6 +27,32 @@ let currentUser = null;
 let currentJobId = null;
 let eventSource = null;
 const doneThisRun = new Set();
+
+function setCancelVisible(show) {
+  if (!cancelBtn) return;
+  cancelBtn.hidden = !show;
+  if (!show) cancelBtn.disabled = false;
+}
+
+async function cancelCurrentJob() {
+  const id = currentJobId;
+  if (!id) {
+    appendLog('⚠ Không có job đang chạy để hủy.');
+    return;
+  }
+  if (cancelBtn) cancelBtn.disabled = true;
+  try {
+    const res = await fetch(`/api/queue/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || res.statusText);
+    appendLog(`⏹ Đã gửi hủy job ${id.slice(0, 8)}… (${data.kind})`);
+    setRunBadge('error', 'Cancelling…');
+    refreshQueue();
+  } catch (err) {
+    appendLog(`❌ Hủy job: ${err.message}`);
+    if (cancelBtn) cancelBtn.disabled = false;
+  }
+}
 
 function setBadge(el, mode, text) {
   el.className = `badge ${mode}`;
@@ -98,21 +125,19 @@ stepsNoneBtn?.addEventListener('click', () => setAllSteps(false));
 function showResult(result) {
   resultPanel.hidden = false;
   const guide = result.guideFile || result.docLink || '';
-  if (result.accountExists) {
-    outLogin.textContent = '';
-    outLogin.removeAttribute('href');
-    outDoc.textContent = '';
-    outDoc.removeAttribute('href');
-    outUser.textContent = result.notice || result.username || 'Đã tồn tại tài khoản trên web';
-    outPass.textContent = '';
-  } else {
-    outLogin.textContent = result.loginUrl || '';
-    outLogin.href = result.loginUrl || '#';
-    outDoc.textContent = guide;
-    outDoc.href = guide || '#';
-    outUser.textContent = result.username || '';
-    outPass.textContent = result.password || '';
-  }
+  const login = result.loginUrl || '';
+  outLogin.textContent = login;
+  if (login) outLogin.href = login;
+  else outLogin.removeAttribute('href');
+  outDoc.textContent = guide;
+  if (guide) outDoc.href = guide;
+  else outDoc.removeAttribute('href');
+  outUser.textContent = result.username || '';
+  outPass.textContent =
+    result.password ||
+    (result.accountExists
+      ? 'Đã tồn tại TK trên web — không khởi tạo mới, không có password mới'
+      : '');
 }
 
 function applyRoleUi(user) {
@@ -124,6 +149,11 @@ function applyRoleUi(user) {
   if (!isAdmin && reportsTab?.classList.contains('active')) {
     document.querySelector('.tab[data-tab="run"]')?.click();
   }
+  if (!isAdmin) {
+    const mainRadio = form?.querySelector('input[name="webTargetMode"][value="main"]');
+    if (mainRadio) mainRadio.checked = true;
+  }
+  updateWebTargetWarn();
 }
 
 function showLoggedOut() {
@@ -219,6 +249,8 @@ function connectEvents(jobId) {
     showResult(data);
     setRunBadge('done', 'Done');
     runBtn.disabled = false;
+    setCancelVisible(false);
+    currentJobId = null;
     if (resumeBtn) resumeBtn.hidden = true;
     clearStepStyles();
     doneThisRun.clear();
@@ -229,13 +261,20 @@ function connectEvents(jobId) {
   eventSource.addEventListener('error', (e) => {
     try {
       const data = JSON.parse(e.data);
-      appendLog(`❌ ${data.message}`);
-      untickCompletedAfterError();
-      setRunBadge('error', 'Error');
+      const cancelled = Boolean(data.cancelled) || /đã bị hủy|hủy bởi/i.test(data.message || '');
+      appendLog(cancelled ? `⏹ ${data.message}` : `❌ ${data.message}`);
+      if (!cancelled) untickCompletedAfterError();
+      setRunBadge(cancelled ? 'idle' : 'error', cancelled ? 'Cancelled' : 'Error');
       runBtn.disabled = false;
+      setCancelVisible(false);
+      currentJobId = null;
       if (resumeBtn) {
-        resumeBtn.hidden = false;
-        appendLog('↳ Bấm Resume để chạy các bước còn tick (hoặc tick lại rồi Run).');
+        if (cancelled) {
+          resumeBtn.hidden = true;
+        } else {
+          resumeBtn.hidden = false;
+          appendLog('↳ Bấm Resume để chạy các bước còn tick (hoặc tick lại rồi Run).');
+        }
       }
       queueHint.textContent = '';
       refreshQueue();
@@ -253,6 +292,7 @@ function connectEvents(jobId) {
   });
   eventSource.addEventListener('done', () => {
     runBtn.disabled = false;
+    setCancelVisible(false);
   });
 }
 
@@ -312,6 +352,23 @@ const fillDataBtn = document.getElementById('fillDataBtn');
 const fillDataHint = document.getElementById('fillDataHint');
 const fillFieldStatus = document.getElementById('fillFieldStatus');
 const resumeBtn = document.getElementById('resumeBtn');
+const webTargetWarn = document.getElementById('webTargetWarn');
+
+function getWebTargetMode() {
+  if (currentUser?.role !== 'admin') return 'main';
+  const checked = form?.querySelector('input[name="webTargetMode"]:checked');
+  return checked?.value === 'website' ? 'website' : 'main';
+}
+
+function updateWebTargetWarn() {
+  if (!webTargetWarn) return;
+  const mode = getWebTargetMode();
+  webTargetWarn.hidden = mode !== 'website';
+}
+
+form?.querySelectorAll('input[name="webTargetMode"]').forEach((el) => {
+  el.addEventListener('change', updateWebTargetWarn);
+});
 
 function clearFieldWarns() {
   for (const id of ['fieldWebsiteUrl', 'fieldUsername', 'fieldPassword', 'fieldEmail']) {
@@ -350,6 +407,7 @@ function renderFillStatus(fields = {}, needManual = []) {
 fillDataBtn?.addEventListener('click', async () => {
   const projectInput = form?.querySelector('[name="wpmProjectUrl"]');
   const taskInput = form?.querySelector('[name="taskUrl"]');
+  const websiteInput = form?.querySelector('[name="websiteUrl"]');
   const wpmProjectUrl = normalizeWpmProjectUrl(projectInput?.value || '');
   if (projectInput && wpmProjectUrl) projectInput.value = wpmProjectUrl;
   if (!wpmProjectUrl) {
@@ -358,14 +416,29 @@ fillDataBtn?.addEventListener('click', async () => {
     return;
   }
 
+  const webTargetMode = getWebTargetMode();
+  const websiteUrl = (websiteInput?.value || '').trim();
+  if (webTargetMode === 'website' && !websiteUrl) {
+    fillDataHint.textContent = 'Mode Website: điền ô Website (subdomain) trước rồi Fill.';
+    fillDataHint.style.color = 'var(--danger)';
+    markFieldWarn('websiteUrl', true);
+    return;
+  }
+
   fillDataBtn.disabled = true;
   runBtn.disabled = true;
   fillDataHint.style.color = 'var(--muted)';
-  fillDataHint.textContent = 'Đang lấy data (Main Web + footer) — Chrome ẩn…';
+  fillDataHint.textContent =
+    webTargetMode === 'website'
+      ? 'Đang lấy data (khớp Website + footer) — Chrome ẩn…'
+      : 'Đang lấy data (Main Web + footer) — Chrome ẩn…';
   if (fillFieldStatus) fillFieldStatus.hidden = true;
   clearFieldWarns();
   logBox.textContent = '';
   appendLog('=== Fill data ===');
+  if (webTargetMode === 'website') {
+    appendLog(`Target web = khớp Website (${websiteUrl})`);
+  }
   setRunBadge('running', 'Fill…');
 
   try {
@@ -375,6 +448,8 @@ fillDataBtn?.addEventListener('click', async () => {
       body: JSON.stringify({
         wpmProjectUrl,
         taskUrl: (taskInput?.value || '').trim(),
+        websiteUrl,
+        webTargetMode,
       }),
     });
     const data = await res.json();
@@ -463,6 +538,7 @@ form?.addEventListener('submit', async (e) => {
     downloadBackup: fd.get('downloadBackup') === 'on',
     packageTier: 'F',
     steps,
+    webTargetMode: getWebTargetMode(),
   };
 
   logBox.textContent = '';
@@ -471,7 +547,9 @@ form?.addEventListener('submit', async (e) => {
   clearStepStyles();
   runBtn.disabled = true;
   setRunBadge('running', 'Running');
-
+  if (payload.webTargetMode === 'website') {
+    appendLog(`⚠ Target web = khớp Website (${payload.websiteUrl})`);
+  }
   try {
     const res = await fetch('/api/run', {
       method: 'POST',
@@ -483,9 +561,11 @@ form?.addEventListener('submit', async (e) => {
       appendLog(`❌ ${data.error || res.statusText}`);
       setRunBadge('error', 'Error');
       runBtn.disabled = false;
+      setCancelVisible(false);
       return;
     }
     currentJobId = data.jobId;
+    setCancelVisible(true);
     queueHint.textContent = data.message || '';
     connectEvents(data.jobId);
     if (data.position > 1) setRunBadge('running', `Queue #${data.position}`);
@@ -493,7 +573,12 @@ form?.addEventListener('submit', async (e) => {
     appendLog(`❌ ${err.message}`);
     setRunBadge('error', 'Error');
     runBtn.disabled = false;
+    setCancelVisible(false);
   }
+});
+
+cancelBtn?.addEventListener('click', () => {
+  cancelCurrentJob();
 });
 
 copyBtn?.addEventListener('click', async () => {
@@ -648,7 +733,7 @@ async function loadReports() {
       r.error ||
       r.resultSummary?.username ||
       (r.resultSummary?.accountExists ? 'account exists' : '');
-    const note = String(noteRaw || '—');
+    const note = String(noteRaw || '—').replace(/\s+/g, ' ').trim();
     const dur = formatDuration(runDurationMs(r));
     const started = (r.startedAt || '').replace('T', ' ').slice(0, 19);
     const [datePart, timePart] = started.includes(' ')
@@ -657,16 +742,58 @@ async function loadReports() {
     const url = r.websiteUrl || '—';
     const user = r.toolUser || r.username || '—';
     const statusClass =
-      r.status === 'success' ? 'done' : r.status === 'error' ? 'error' : 'running';
-    tr.innerHTML = `
-      <td class="col-time">${datePart}${timePart ? `<br><span class="muted">${timePart}</span>` : ''}</td>
-      <td class="col-user" title="${user}">${user}</td>
-      <td class="col-url mono" title="${url}">${url}</td>
-      <td class="col-dur mono">${dur}</td>
-      <td class="col-status"><span class="badge ${statusClass}">${r.status}</span></td>
-      <td class="col-note" title="${note.replace(/"/g, '&quot;')}">${note}</td>`;
+      r.status === 'success'
+        ? 'done'
+        : r.status === 'error'
+          ? 'error'
+          : r.status === 'cancelled'
+            ? 'cancelled'
+            : 'running';
+
+    const tdTime = document.createElement('td');
+    tdTime.className = 'col-time';
+    tdTime.innerHTML = `${escapeHtml(datePart)}${timePart ? `<br><span class="muted">${escapeHtml(timePart)}</span>` : ''}`;
+
+    const tdUser = document.createElement('td');
+    tdUser.className = 'col-user';
+    tdUser.title = user;
+    tdUser.textContent = user;
+
+    const tdUrl = document.createElement('td');
+    tdUrl.className = 'col-url mono';
+    tdUrl.title = url;
+    tdUrl.textContent = url;
+
+    const tdDur = document.createElement('td');
+    tdDur.className = 'col-dur mono';
+    tdDur.textContent = dur;
+
+    const tdStatus = document.createElement('td');
+    tdStatus.className = 'col-status';
+    const badge = document.createElement('span');
+    badge.className = `badge ${statusClass}`;
+    badge.textContent = r.status || '—';
+    tdStatus.appendChild(badge);
+
+    const tdNote = document.createElement('td');
+    tdNote.className = 'col-note';
+    tdNote.title = note;
+    const noteSpan = document.createElement('span');
+    noteSpan.className = 'note-text';
+    noteSpan.textContent = note;
+    tdNote.appendChild(noteSpan);
+
+    tr.append(tdTime, tdUser, tdUrl, tdDur, tdStatus, tdNote);
     tbody.appendChild(tr);
   }
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 async function loadHealth() {

@@ -138,8 +138,11 @@ export async function fillTaskOutputFields(page, taskUrl, output, log) {
   const loginUrl = output.loginUrl || '';
   const guideFile = output.guideFile || output.docLink || '';
   const username = output.username || '';
-  const password = output.password || '';
-  const note = output.note || '';
+  // Không điền password dạng "đã tồn tại…" vào task; chỉ điền password thật
+  const password =
+    output.accountExists || /đã tồn tại|không có password/i.test(String(output.password || ''))
+      ? ''
+      : output.password || '';
 
   let filled = 0;
   if (await tryFill(page, ['Login Url'], loginUrl, log, 'Login Url')) filled += 1;
@@ -148,13 +151,13 @@ export async function fillTaskOutputFields(page, taskUrl, output, log) {
   await sleep(150);
   if (await tryFill(page, ['User name', 'Username'], username, log, 'User name')) filled += 1;
   await sleep(150);
-  if (await tryFill(page, ['Password'], password, log, 'Password')) filled += 1;
-  await sleep(150);
-  if (note) {
-    if (await tryFill(page, ['Note'], note, log, 'Note')) filled += 1;
+  if (password) {
+    if (await tryFill(page, ['Password'], password, log, 'Password')) filled += 1;
   } else {
-    log('  ⏭ Note — không có nội dung, bỏ qua');
+    log('  ⏭ Password — bỏ qua (không có / TK đã tồn tại)');
   }
+  // Không điền Note trên task (tránh dư "password: …")
+  log('  ⏭ Note — bỏ qua (không điền tự động)');
 
   if (filled === 0) {
     log(

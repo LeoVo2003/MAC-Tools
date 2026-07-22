@@ -155,8 +155,18 @@ export function createApp() {
     const body = req.body || {};
     const wpmProjectUrl = normalizeWpmProjectUrl(String(body.wpmProjectUrl || '').trim());
     const taskUrl = String(body.taskUrl || '').trim();
+    const websiteUrl = String(body.websiteUrl || '').trim();
+    // Non-admin luôn ép Main Web
+    let webTargetMode = body.webTargetMode === 'website' ? 'website' : 'main';
+    if (req.user.role !== 'admin') webTargetMode = 'main';
+
     if (!wpmProjectUrl) {
       return res.status(400).json({ error: 'Thiếu WPM Project URL.' });
+    }
+    if (webTargetMode === 'website' && !websiteUrl) {
+      return res.status(400).json({
+        error: 'Mode Website cần điền ô Website URL (subdomain test) trước khi Fill.',
+      });
     }
     const stored = getUserWpmCredentials(req.user.id);
     if (!stored.configured) {
@@ -171,6 +181,8 @@ export function createApp() {
         {
           wpmProjectUrl,
           taskUrl,
+          websiteUrl,
+          webTargetMode,
           wpmCredentials: { username: stored.username, password: stored.password },
         },
         (line) => {
@@ -238,10 +250,14 @@ export function createApp() {
 
   app.post('/api/run', requireAuth, (req, res) => {
     const body = req.body || {};
+    let webTargetMode = body.webTargetMode === 'website' ? 'website' : 'main';
+    if (req.user.role !== 'admin') webTargetMode = 'main';
+
     const jobPayload = {
       wpmProjectUrl: normalizeWpmProjectUrl(String(body.wpmProjectUrl || '').trim()),
       taskUrl: String(body.taskUrl || '').trim(),
       websiteUrl: String(body.websiteUrl || '').trim(),
+      webTargetMode,
       customer: {
         username: sanitizeWpUsername(String(body.username || '').trim()),
         password: sanitizeCustomerPassword(String(body.password || '')),
@@ -299,6 +315,7 @@ export function createApp() {
           wpmProjectUrl: jobPayload.wpmProjectUrl,
           taskUrl: jobPayload.taskUrl || '',
           websiteUrl: jobPayload.websiteUrl,
+          webTargetMode: jobPayload.webTargetMode,
           username: jobPayload.customer.username,
           steps: jobPayload.steps || [],
           jobId: thisJobId,

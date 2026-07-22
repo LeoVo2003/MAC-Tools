@@ -98,11 +98,8 @@ export function createJobQueue({ onLog, onChange, maxConcurrent = 4 } = {}) {
       push(job.cancelled ? `⏹ Đã hủy: ${message}` : `❌ Lỗi: ${message}`);
       job.onDone?.({ ok: false, error: message, cancelled: Boolean(job.cancelled) });
     } finally {
-      try {
-        await job.browser?.close?.();
-      } catch {
-        /* ignore */
-      }
+      // Không đóng Chrome — để user xem / debug; đóng tay khi xong.
+      // (runJob cũng không browser.close())
       active.delete(job.id);
       remember(job);
       onChange?.(snapshot());
@@ -141,11 +138,7 @@ export function createJobQueue({ onLog, onChange, maxConcurrent = 4 } = {}) {
     if (job) {
       job.cancelled = true;
       job.error = byUser ? `Hủy bởi ${byUser}` : 'Đã hủy';
-      try {
-        job.browser?.close?.();
-      } catch {
-        /* ignore */
-      }
+      // Không đóng Chrome khi hủy — giữ cửa sổ để xem đang đứng ở đâu.
       onChange?.(snapshot());
       return { ok: true, kind: 'running', jobId: id };
     }
