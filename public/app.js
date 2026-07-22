@@ -897,6 +897,13 @@ async function setupLiveChrome() {
       newTab.hidden = false;
       newTab.href = liveChromeSrc;
     }
+    const hintEl = panel.querySelector('.live-chrome-hint');
+    if (hintEl && data.hint) {
+      hintEl.textContent = data.hint;
+    }
+    if (data.backend && (!data.backend.websockify || !data.backend.vnc)) {
+      console.warn('[live-chrome] backend', data.backend, data.hint);
+    }
   } catch {
     panel.hidden = true;
     return;

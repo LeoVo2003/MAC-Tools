@@ -38,22 +38,53 @@ Admin mặc định: `leo.vo@macusaone.com` (thêm email: `ADMIN_EMAILS=a@x.com,
 | `MAX_CONCURRENT_JOBS` | Số Chrome chạy song song (mặc định `4`) |
 | `PORT` | Mặc định `3847` |
 
-## Nginx mẫu
+## Nginx mẫu (SSE + Live Chrome WebSocket)
 
 ```nginx
+map $http_upgrade $connection_upgrade {
+  default upgrade;
+  ''      close;
+}
+
 server {
   listen 80;
-  server_name tool.example.com;
-  location / {
+  server_name user-guide.keith;  # đổi domain
+
+  # SSE log — không dùng Upgrade
+  location /api/events {
     proxy_pass http://127.0.0.1:3847;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header Connection '';
-    proxy_buffering off; /* SSE */
+    proxy_buffering off;
+    proxy_read_timeout 24h;
+  }
+
+  # noVNC Live Chrome — BẮT BUỘC WebSocket
+  location /chrome-live/ {
+    proxy_pass http://127.0.0.1:3847;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+    proxy_read_timeout 24h;
+  }
+
+  location / {
+    proxy_pass http://127.0.0.1:3847;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+    proxy_buffering off;
   }
 }
 ```
+
+Nếu Live hiện logo noVNC + "无法连接 / Failed to connect": gần như chắc **proxy chưa forward WebSocket** — thêm block `/chrome-live/` như trên rồi reload nginx.
 
 ## Docker
 

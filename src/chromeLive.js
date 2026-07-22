@@ -3,6 +3,7 @@
  * Path: /chrome-live/  (cần đăng nhập)
  */
 import fs from 'fs';
+import net from 'net';
 import path from 'path';
 import express from 'express';
 import httpProxy from 'http-proxy';
@@ -43,6 +44,27 @@ function requireAuthPage(req, res, next) {
   requireAuth(req, res, next);
 }
 
+function probePort(port, host = '127.0.0.1') {
+  return new Promise((resolve) => {
+    const sock = net.connect({ port, host }, () => {
+      sock.end();
+      resolve(true);
+    });
+    sock.on('error', () => resolve(false));
+    sock.setTimeout(800, () => {
+      sock.destroy();
+      resolve(false);
+    });
+  });
+}
+
+/** noVNC path query — KHÔNG encode slash (%2F làm hỏng kết nối). */
+export function buildVncIframeSrc() {
+  return (
+    '/chrome-live/vnc.html?autoconnect=1&reconnect=1&resize=scale&path=chrome-live/websockify'
+  );
+}
+
 /** HTTP routes — gọi trong createApp() trước express.static. */
 export function mountChromeLiveRoutes(app) {
   if (!chromeLiveEnabled()) return { enabled: false };
@@ -72,21 +94,23 @@ export function mountChromeLiveRoutes(app) {
     }
   });
 
-  app.get('/api/chrome-live', requireAuth, (_req, res) => {
+  app.get('/api/chrome-live', requireAuth, async (_req, res) => {
+    const websockifyOk = await probePort(6080);
+    const vncOk = await probePort(5900);
     res.json({
       enabled: true,
-      iframeSrc:
-        '/chrome-live/vnc.html?autoconnect=true&resize=scale&reconnect=true&path=' +
-        encodeURIComponent('chrome-live/websockify'),
+      iframeSrc: buildVncIframeSrc(),
+      backend: { websockify: websockifyOk, vnc: vncOk },
+      hint: !websockifyOk
+        ? 'websockify chưa chạy trong container — xem log entrypoint /tmp/websockify.log'
+        : !vncOk
+          ? 'x11vnc chưa chạy — xem /tmp/x11vnc.log'
+          : 'Nếu vẫn "无法连接": nginx/proxy trước keith cần bật WebSocket Upgrade cho /chrome-live/',
     });
   });
 
-  const vncRedirect =
-    '/chrome-live/vnc.html?autoconnect=true&resize=scale&reconnect=true&path=' +
-    encodeURIComponent('chrome-live/websockify');
-
   app.get(['/chrome-live', '/chrome-live/'], requireAuthPage, (_req, res) => {
-    res.redirect(302, vncRedirect);
+    res.redirect(302, buildVncIframeSrc());
   });
 
   if (novncRoot) {
@@ -101,23 +125,39 @@ export function attachChromeLiveWs(server) {
   if (!chromeLiveEnabled() || !liveProxy) return;
 
   server.on('upgrade', (req, socket, head) => {
-    const url = req.url || '';
-    if (!url.startsWith('/chrome-live')) return;
+    try {
+      const raw = req.url || '';
+      if (!raw.includes('chrome-live')) return;
 
-    const cookie = req.headers.cookie || '';
-    if (!cookie.includes('fugt.sid')) {
-      socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
-      socket.destroy();
-      return;
-    }
+      const pathname = raw.split('?')[0] || '';
+      if (!pathname.startsWith('/chrome-live')) return;
 
-    if (url.includes('/websockify')) {
-      req.url = '/';
-    } else {
-      req.url = url.replace(/^\/chrome-live/, '') || '/';
+      const cookie = req.headers.cookie || '';
+      if (!cookie.includes('fugt.sid')) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+
+      // websockify listen root /
+      if (pathname.includes('websockify')) {
+        const q = raw.includes('?') ? raw.slice(raw.indexOf('?')) : '';
+        req.url = `/${q}`;
+      } else {
+        req.url = raw.replace(/^\/chrome-live/, '') || '/';
+      }
+
+      console.log(`[chrome-live] WS upgrade → ${req.url}`);
+      liveProxy.ws(req, socket, head);
+    } catch (err) {
+      console.warn('[chrome-live] upgrade error:', err?.message || err);
+      try {
+        socket.destroy();
+      } catch {
+        /* ignore */
+      }
     }
-    liveProxy.ws(req, socket, head);
   });
 
-  console.log('[chrome-live] WebSocket proxy gắn vào /chrome-live/websockify');
+  console.log('[chrome-live] WebSocket proxy: /chrome-live/websockify → :6080');
 }
