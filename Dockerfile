@@ -1,6 +1,6 @@
 FROM node:20-bookworm-slim
 
-# Chromium + deps (Docker headless cần lib đầy đủ, không chỉ binary)
+# Chromium + virtual display + noVNC (live tương tác)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium \
     fonts-liberation \
@@ -22,6 +22,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxkbcommon0 \
     libxrandr2 \
     xdg-utils \
+    xvfb \
+    x11vnc \
+    novnc \
+    websockify \
+    fluxbox \
+    procps \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -34,16 +40,22 @@ COPY src ./src
 COPY scripts ./scripts
 COPY .env.example ./
 
+RUN chmod +x /app/scripts/docker-entrypoint.sh
+
 ENV NODE_ENV=production \
     OPEN_BROWSER=false \
-    HEADLESS=true \
+    HEADLESS=false \
+    CHROME_LIVE=true \
+    DISPLAY=:99 \
     CHROME_PATH=/usr/bin/chromium \
     CHROME_NO_SANDBOX=true \
+    MAX_CONCURRENT_JOBS=1 \
     PORT=3847 \
-    DOWNLOAD_DIR=/data/downloads
+    DOWNLOAD_DIR=/data/downloads \
+    NOVNC_PATH=/usr/share/novnc
 
 RUN mkdir -p /data/downloads /data/appdata /app/errors
 VOLUME ["/data/downloads", "/data/appdata"]
 
 EXPOSE 3847
-CMD ["node", "server.js"]
+ENTRYPOINT ["/app/scripts/docker-entrypoint.sh"]

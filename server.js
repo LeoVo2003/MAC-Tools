@@ -24,6 +24,7 @@ import { createJobQueue } from './src/jobQueue.js';
 import { fillCustomerDataFromUrls } from './src/steps/fillData.js';
 import { listBackupFolders, listBackupFiles, resolveBackupFile } from './src/backupsApi.js';
 import { purgeOldBackups, buildHealthReport, detectStaleJobs } from './src/ops.js';
+import { mountChromeLiveRoutes, attachChromeLiveWs, chromeLiveEnabled } from './src/chromeLive.js';
 
 dotenv.config({ path: getEnvPath() });
 
@@ -435,6 +436,8 @@ export function createApp() {
     }
   });
 
+  mountChromeLiveRoutes(app);
+
   app.use(express.static(getPublicDir()));
 
   return app;
@@ -482,8 +485,11 @@ export async function startServer({ openBrowser: shouldOpen } = {}) {
     console.log(`Thư mục app: ${getAppRoot()}`);
     console.log(`Download dir: ${DOWNLOADS_DIR}`);
     console.log(`Health: ${url}/api/health`);
+    if (chromeLiveEnabled()) console.log(`Live Chrome: ${url}/chrome-live/`);
     if (autoOpen) setTimeout(() => openBrowser(url), 400);
   });
+
+  attachChromeLiveWs(server);
 
   server.on('error', (err) => {
     if (err?.code === 'EADDRINUSE') {

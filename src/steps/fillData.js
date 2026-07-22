@@ -203,7 +203,10 @@ export async function fillCustomerDataFromUrls(
   const webTargetMode = rawMode === 'website' ? 'website' : 'main';
   const preferUrl = normalizeHttpUrl(preferWebsite);
 
-  const { browser, page } = await launchBrowser({ headless: true });
+  const { browser, page } = await launchBrowser({
+    // Keith live: headed trên Xvfb; local/headless giữ mặc định env
+    headless: process.env.CHROME_LIVE === 'true' ? false : true,
+  });
   const warnings = [];
 
   try {

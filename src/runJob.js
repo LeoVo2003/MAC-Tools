@@ -280,6 +280,8 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
       log('→ Headless: đóng Chrome.');
       await browser.close().catch(() => {});
       hooks.setBrowser?.(null);
+    } else if (process.env.CHROME_LIVE === 'true') {
+      log('→ Live Chrome: mở panel Live trên UI để xem/tương tác (Chrome giữ trên server).');
     } else {
       log('→ Chrome giữ mở — đóng tay khi xem xong.');
     }

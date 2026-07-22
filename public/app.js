@@ -182,6 +182,7 @@ function showApp(user) {
   applyRoleUi(user);
   connectEvents();
   refreshQueue();
+  setupLiveChrome();
 }
 
 async function refreshMe() {
@@ -866,6 +867,62 @@ async function loadBackups() {
 }
 
 document.getElementById('refreshBackupsBtn')?.addEventListener('click', loadBackups);
+
+let liveChromeSrc = '';
+let liveChromeOpen = false;
+
+async function setupLiveChrome() {
+  const panel = document.getElementById('liveChromePanel');
+  const toggle = document.getElementById('liveChromeToggle');
+  const badge = document.getElementById('liveChromeBadge');
+  const wrap = document.getElementById('liveChromeFrameWrap');
+  const frame = document.getElementById('liveChromeFrame');
+  const newTab = document.getElementById('liveChromeNewTab');
+  if (!panel || !toggle) return;
+
+  try {
+    const res = await fetch('/api/chrome-live');
+    if (!res.ok) {
+      panel.hidden = true;
+      return;
+    }
+    const data = await res.json();
+    if (!data.enabled || !data.iframeSrc) {
+      panel.hidden = true;
+      return;
+    }
+    liveChromeSrc = data.iframeSrc;
+    panel.hidden = false;
+    if (newTab) {
+      newTab.hidden = false;
+      newTab.href = liveChromeSrc;
+    }
+  } catch {
+    panel.hidden = true;
+    return;
+  }
+
+  toggle.onclick = () => {
+    liveChromeOpen = !liveChromeOpen;
+    if (liveChromeOpen) {
+      if (frame && liveChromeSrc) frame.src = liveChromeSrc;
+      if (wrap) wrap.hidden = false;
+      toggle.textContent = 'Đóng Live';
+      if (badge) {
+        badge.textContent = 'LIVE';
+        badge.classList.add('on');
+      }
+    } else {
+      if (frame) frame.src = 'about:blank';
+      if (wrap) wrap.hidden = true;
+      toggle.textContent = 'Mở Live';
+      if (badge) {
+        badge.textContent = 'OFF';
+        badge.classList.remove('on');
+      }
+    }
+  };
+}
 
 refreshMe().catch((err) => {
   console.error(err);

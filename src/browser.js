@@ -37,8 +37,15 @@ export function findChromePath() {
  */
 export async function launchBrowser({ downloadPath, headless: headlessOpt } = {}) {
   const executablePath = findChromePath();
+  // CHROME_LIVE / DISPLAY (Docker Xvfb): luôn headed để noVNC xem + tương tác
+  const chromeLive =
+    process.env.CHROME_LIVE === 'true' || Boolean(String(process.env.DISPLAY || '').trim());
   const headless =
-    headlessOpt !== undefined ? Boolean(headlessOpt) : process.env.HEADLESS === 'true';
+    headlessOpt !== undefined
+      ? Boolean(headlessOpt)
+      : chromeLive
+        ? false
+        : process.env.HEADLESS === 'true';
   const userDataDir = process.env.CHROME_USER_DATA_DIR || undefined;
 
   const args = [
@@ -49,6 +56,10 @@ export async function launchBrowser({ downloadPath, headless: headlessOpt } = {}
     '--window-size=1440,900',
   ];
 
+  if (chromeLive && !headless) {
+    args.push('--start-maximized', '--window-position=0,0');
+  }
+
   // Docker/Linux chạy Chromium thường là root → bắt buộc --no-sandbox
   // (crbug.com/638180). --disable-dev-shm-usage tránh crash /dev/shm nhỏ.
   const needNoSandbox =
@@ -56,7 +67,9 @@ export async function launchBrowser({ downloadPath, headless: headlessOpt } = {}
     process.platform === 'linux' ||
     (typeof process.getuid === 'function' && process.getuid() === 0);
   if (needNoSandbox) {
-    args.push('--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu');
+    args.push('--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage');
+    // Headed trên Xvfb vẫn dùng GPU software; disable-gpu giúp ổn định container
+    if (headless || chromeLive) args.push('--disable-gpu');
   }
 
   const browser = await puppeteer.launch({

@@ -52,8 +52,24 @@ export async function loginToWPM(page, { username, password }, log) {
         title: document.title,
         body: (document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 280),
         inputCount: document.querySelectorAll('input').length,
+        statusHint: document.body?.innerText || '',
       }))
       .catch(() => ({}));
+
+    const blob = `${diag.title || ''} ${diag.body || ''}`;
+    if (/403\s*forbidden/i.test(blob) || /403/.test(diag.title || '')) {
+      throw new Error(
+        'WPM trả 403 Forbidden (nginx chặn IP máy chạy tool). ' +
+          'Trên user-guide.keith: nhờ admin whitelist IP VPS vào wpm.macusaone.com — ' +
+          'hoặc chạy tool trên máy local (IP công ty đã được phép). ' +
+          `url=${diag.url || '?'}`
+      );
+    }
+    if (/cloudflare|just a moment|attention required|cf-browser/i.test(blob)) {
+      throw new Error(
+        `WPM bị Cloudflare/chặn bot. url=${diag.url || '?'} body="${diag.body || ''}"`
+      );
+    }
     throw new Error(
       `Không thấy ô login WPM. url=${diag.url || '?'} title="${diag.title || ''}" inputs=${diag.inputCount ?? '?'} body="${diag.body || ''}"`
     );
