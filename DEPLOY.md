@@ -57,11 +57,48 @@ server {
 
 ## Docker
 
+### Build local
+
 ```bash
 docker compose up -d --build
 ```
 
 Nhớ inject `.env` an toàn; không build secret vào image.
+
+### Image từ GHCR + auto deploy
+
+Push `main` / tag `v*` → Actions **build → push GHCR → SSH VPS** (`/home/flashvps/User-Guide`) chạy:
+
+`docker compose pull && docker compose up -d`
+
+Image: `ghcr.io/leovo2003/user-guide:latest`
+
+#### GitHub Secrets (Settings → Secrets and variables → Actions)
+
+| Secret | Ý nghĩa |
+|--------|---------|
+| `SSH_HOST` | IP hoặc domain VPS |
+| `SSH_USER` | User SSH (vd. `flashvps`) |
+| `SSH_PRIVATE_KEY` | Private key (nội dung file `~/.ssh/id_ed25519` hoặc deploy key) |
+| `SSH_PORT` | (Tuỳ chọn) mặc định `22` |
+| `GHCR_TOKEN` | PAT GitHub quyền `read:packages` (bắt buộc nếu package private) |
+| `GHCR_USER` | Username GitHub (vd. `LeoVo2003`) |
+
+#### Chuẩn bị VPS (một lần)
+
+Deploy CI sẽ **tự tạo** `/home/flashvps/User-Guide` nếu chưa có, sync `docker-compose.yml` + `.env.example`.
+
+Lần đầu nếu chưa có `.env`: CI copy từ `.env.example` rồi **dừng** — bạn SSH vào sửa `SESSION_SECRET` / `APP_SECRET`, chạy lại workflow.
+
+```bash
+# Chỉ cần sẵn trên VPS:
+# - Public key trong ~/.ssh/authorized_keys của SSH_USER
+# - User trong group docker
+# (thư mục + compose do CI tạo)
+nano /home/flashvps/User-Guide/.env   # sau lần deploy đầu
+```
+
+`.env` chỉ nằm trên VPS — không đưa vào image hay GitHub Secrets (trừ SSH/GHCR ở trên).
 
 ## Lưu ý vận hành
 

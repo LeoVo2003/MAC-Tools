@@ -1,5 +1,6 @@
 services:
   fugt:
+    image: ghcr.io/leovo2003/user-guide:latest
     build: .
     ports:
       - "3847:3847"
