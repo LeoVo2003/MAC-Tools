@@ -15,6 +15,11 @@ import { createCustomerAccount } from './steps/user.js';
 import { installMacRoleViaMacCore, configureFPackageUser } from './steps/macRole.js';
 import { pullWebInfoToDashboard } from './steps/webInfo.js';
 import { fillTaskOutputFields } from './steps/task.js';
+import {
+  startLiveSession,
+  stopLiveSession,
+  setLivePage,
+} from './liveSession.js';
 
 /** Các bước có thể tick/bỏ tick trên UI (login WPM + Quick Login luôn chạy). */
 export const SELECTABLE_STEPS = [
@@ -38,7 +43,7 @@ function normalizeSteps(raw) {
  * @param {object} job
  * @param {(msg: string) => void} onLog
  * @param {(payload: { id: string, status: 'start'|'done' }) => void} onStep
- * @param {{ shouldCancel?: () => boolean, setBrowser?: (b: import('puppeteer').Browser) => void }} [hooks]
+ * @param {{ shouldCancel?: () => boolean, setBrowser?: (b: import('puppeteer').Browser) => void, jobId?: string, onScreencast?: (payload: object) => void }} [hooks]
  */
 export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {}) {
   const log = (msg) => {
@@ -111,6 +116,21 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
   });
   hooks.setBrowser?.(browser);
 
+  const liveId = hooks.jobId || 'run';
+  const pushFrame = (payload) => {
+    try {
+      hooks.onScreencast?.(payload);
+    } catch {
+      /* ignore */
+    }
+  };
+  if (process.env.CHROME_LIVE === 'true' && hooks.onScreencast) {
+    await startLiveSession(liveId, browser, wpmPage, pushFrame).catch((e) =>
+      log(`⚠ Live screencast: ${e?.message || e}`)
+    );
+    log('→ Live screencast bật — mở panel Live Chrome trên UI.');
+  }
+
   let wpPage = null;
   /** Bước đang chạy — để chụp đúng tab khi lỗi */
   let currentStep = 'init';
@@ -133,6 +153,9 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
     log('▶ Mở project + Quick Login...');
     const opened = await openProjectAndQuickLogin(browser, wpmPage, wpmProjectUrl, log, targetOpts);
     wpPage = opened.wpPage;
+    if (process.env.CHROME_LIVE === 'true' && hooks.onScreencast && wpPage) {
+      await setLivePage(liveId, wpPage, pushFrame).catch(() => {});
+    }
     const projectName = opened.projectName || '';
     projectLabel = opened.projectLabel || projectName;
 
@@ -277,11 +300,12 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
 
     log('▶ Xong.');
     if (process.env.HEADLESS === 'true') {
+      await stopLiveSession(liveId).catch(() => {});
       log('→ Headless: đóng Chrome.');
       await browser.close().catch(() => {});
       hooks.setBrowser?.(null);
     } else if (process.env.CHROME_LIVE === 'true') {
-      log('→ Live Chrome: mở panel Live trên UI để xem/tương tác (Chrome giữ trên server).');
+      log('→ Live Chrome: panel Live vẫn stream — click/gõ trên ảnh để tương tác.');
     } else {
       log('→ Chrome giữ mở — đóng tay khi xem xong.');
     }
@@ -296,6 +320,9 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
       await primary?.bringToFront?.();
     } catch {
       /* ignore */
+    }
+    if (process.env.CHROME_LIVE === 'true' && hooks.onScreencast && primary) {
+      await setLivePage(liveId, primary, pushFrame).catch(() => {});
     }
     const shot1 = await screenshotError(
       primary,
@@ -312,9 +339,12 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
     }
 
     if (process.env.HEADLESS === 'true') {
+      await stopLiveSession(liveId).catch(() => {});
       log('→ Headless: đóng Chrome sau lỗi.');
       await browser.close().catch(() => {});
       hooks.setBrowser?.(null);
+    } else if (process.env.CHROME_LIVE === 'true') {
+      log('→ Live Chrome: panel Live vẫn xem được trang lỗi — tương tác trên ảnh.');
     } else {
       log('→ Chrome giữ mở để xem lỗi — đóng tay khi xong.');
     }

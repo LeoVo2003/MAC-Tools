@@ -7,6 +7,7 @@ import {
   GOTO,
 } from '../utils.js';
 import { loginToWPM, readProjectName, readProjectZipcode, openWebsiteInformationTab, resolveTargetWeb } from './wpm.js';
+import { startLiveSession, stopLiveSession } from '../liveSession.js';
 
 const US_STATES = new Set(
   'AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC'
@@ -187,10 +188,20 @@ export async function scrapeSiteFooterContact(page, websiteUrl, log) {
  * @param {{ username: string, password: string }} opts.wpmCredentials
  * @param {'main'|'website'} [opts.webTargetMode]
  * @param {string} [opts.websiteUrl] Prefer URL khi mode=website (admin đã điền subdomain)
+ * @param {string} [opts.liveSessionId]
+ * @param {(payload: object) => void} [opts.onScreencast]
  * @returns {Promise<object>}
  */
 export async function fillCustomerDataFromUrls(
-  { wpmProjectUrl, taskUrl, wpmCredentials, webTargetMode: rawMode, websiteUrl: preferWebsite },
+  {
+    wpmProjectUrl,
+    taskUrl,
+    wpmCredentials,
+    webTargetMode: rawMode,
+    websiteUrl: preferWebsite,
+    liveSessionId,
+    onScreencast,
+  },
   onLog = () => {}
 ) {
   const log = (msg) => onLog(`[${new Date().toLocaleTimeString('vi-VN')}] ${msg}`);
@@ -204,12 +215,19 @@ export async function fillCustomerDataFromUrls(
   const preferUrl = normalizeHttpUrl(preferWebsite);
 
   const { browser, page } = await launchBrowser({
-    // Keith live: headed trên Xvfb; local/headless giữ mặc định env
     headless: process.env.CHROME_LIVE === 'true' ? false : true,
   });
   const warnings = [];
+  const sid = liveSessionId || '';
 
   try {
+    if (sid && onScreencast && process.env.CHROME_LIVE === 'true') {
+      await startLiveSession(sid, browser, page, onScreencast).catch((e) =>
+        log(`⚠ Live screencast: ${e?.message || e}`)
+      );
+      log('→ Live screencast bật — mở panel Live trên UI.');
+    }
+
     log('▶ Fill data: login WPM...');
     await loginToWPM(page, wpmCredentials, log);
 
@@ -374,6 +392,7 @@ export async function fillCustomerDataFromUrls(
       wpmProjectUrl: projectUrl,
     };
   } finally {
+    if (sid) await stopLiveSession(sid).catch(() => {});
     await browser.close().catch(() => {});
   }
 }

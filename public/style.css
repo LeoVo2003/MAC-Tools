@@ -982,14 +982,23 @@ kbd {
   border-radius: 8px;
   overflow: hidden;
   background: #0b0f14;
-  min-height: 420px;
+  min-height: 280px;
+  position: relative;
 }
 
-.live-chrome-frame-wrap iframe {
+.live-chrome-frame-wrap img {
   display: block;
   width: 100%;
-  height: min(70vh, 640px);
-  border: 0;
+  height: auto;
+  max-height: min(70vh, 640px);
+  object-fit: contain;
   background: #111;
+  cursor: crosshair;
+  outline: none;
+}
+
+.live-chrome-frame-wrap #liveChromeWaiting {
+  margin: 1rem;
+  text-align: center;
 }
 

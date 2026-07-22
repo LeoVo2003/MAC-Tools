@@ -25,6 +25,7 @@ import { fillCustomerDataFromUrls } from './src/steps/fillData.js';
 import { listBackupFolders, listBackupFiles, resolveBackupFile } from './src/backupsApi.js';
 import { purgeOldBackups, buildHealthReport, detectStaleJobs } from './src/ops.js';
 import { mountChromeLiveRoutes, attachChromeLiveWs, chromeLiveEnabled } from './src/chromeLive.js';
+import { dispatchLiveInput, listLiveSessions, getLiveSession } from './src/liveSession.js';
 
 dotenv.config({ path: getEnvPath() });
 
@@ -35,10 +36,11 @@ const VERSION = '2.0.0-dev';
 /** SSE clients: Map<res, { jobId?: string }> */
 const clients = new Map();
 
-function broadcast(event, data, { jobId } = {}) {
+function broadcast(event, data, { jobId, userId } = {}) {
   const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const [res, meta] of clients) {
     if (jobId && meta.jobId && meta.jobId !== jobId) continue;
+    if (userId && meta.userId && meta.userId !== userId) continue;
     try {
       res.write(payload);
     } catch {
@@ -177,6 +179,7 @@ export function createApp() {
     }
 
     const logs = [];
+    const fillSessionId = `fill-${req.user.id}`;
     try {
       const data = await fillCustomerDataFromUrls(
         {
@@ -185,10 +188,17 @@ export function createApp() {
           websiteUrl,
           webTargetMode,
           wpmCredentials: { username: stored.username, password: stored.password },
+          liveSessionId: process.env.CHROME_LIVE === 'true' ? fillSessionId : undefined,
+          onScreencast:
+            process.env.CHROME_LIVE === 'true'
+              ? (payload) =>
+                  broadcast('screencast', { ...payload, jobId: fillSessionId }, { userId: req.user.id })
+              : undefined,
         },
         (line) => {
           logs.push(line);
           console.log(line);
+          broadcast('log', { line, jobId: fillSessionId }, { userId: req.user.id });
         }
       );
       res.json({ ...data, logs });
@@ -198,6 +208,29 @@ export function createApp() {
         logs,
       });
     }
+  });
+
+  app.post('/api/chrome-live/input', requireAuth, async (req, res) => {
+    if (process.env.CHROME_LIVE !== 'true') {
+      return res.status(404).json({ error: 'Chrome Live tắt.' });
+    }
+    const sessionId = String(req.body?.sessionId || req.body?.jobId || '').trim();
+    if (!sessionId) return res.status(400).json({ error: 'Thiếu sessionId.' });
+    try {
+      await dispatchLiveInput(sessionId, req.body || {});
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(400).json({ error: err?.message || String(err) });
+    }
+  });
+
+  app.get('/api/chrome-live/sessions', requireAuth, (_req, res) => {
+    res.json({
+      sessions: listLiveSessions().map((id) => ({
+        id,
+        hasPage: Boolean(getLiveSession(id)?.page),
+      })),
+    });
   });
 
   app.get('/api/status', requireAuth, (req, res) => {
@@ -330,8 +363,12 @@ export function createApp() {
           pushLog('=== Bắt đầu job F User Guide Tool v2 ===');
           const result = await runJob(jobPayload, pushLog, onStep, {
             shouldCancel: () => Boolean(jobRef.cancelled),
+            jobId: thisJobId,
             setBrowser: (b) => {
               jobRef.browser = b;
+            },
+            onScreencast: (payload) => {
+              broadcast('screencast', { ...payload, jobId: thisJobId }, { jobId: thisJobId });
             },
           });
           if (jobRef.cancelled) throw new Error('Job đã bị hủy.');

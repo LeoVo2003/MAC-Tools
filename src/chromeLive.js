@@ -99,13 +99,12 @@ export function mountChromeLiveRoutes(app) {
     const vncOk = await probePort(5900);
     res.json({
       enabled: true,
-      iframeSrc: buildVncIframeSrc(),
-      backend: { websockify: websockifyOk, vnc: vncOk },
-      hint: !websockifyOk
-        ? 'websockify chưa chạy trong container — xem log entrypoint /tmp/websockify.log'
-        : !vncOk
-          ? 'x11vnc chưa chạy — xem /tmp/x11vnc.log'
-          : 'Nếu vẫn "无法连接": nginx/proxy trước keith cần bật WebSocket Upgrade cho /chrome-live/',
+      mode: 'screencast',
+      // Screencast qua SSE — không phụ thuộc nginx WebSocket
+      iframeSrc: null,
+      hint:
+        'Live = stream ảnh Chrome (SSE). Bấm Fill/Run rồi click/gõ trên ảnh. Không cần noVNC.',
+      backend: { websockify: websockifyOk, vnc: vncOk, screencast: true },
     });
   });
 

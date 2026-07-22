@@ -159,12 +159,12 @@
             <h2>Live Chrome <span class="live-badge" id="liveChromeBadge">OFF</span></h2>
             <div class="live-chrome-actions">
               <button type="button" id="liveChromeToggle" class="secondary tiny">Mở Live</button>
-              <a id="liveChromeNewTab" class="hint" href="/chrome-live/" target="_blank" rel="noopener" hidden>Mở tab mới</a>
             </div>
           </div>
-          <p class="hint live-chrome-hint">Xem + click/gõ Chromium trên server (keith). Bấm Fill/Run rồi mở Live.</p>
+          <p class="hint live-chrome-hint">Stream Chrome qua SSE — bấm Fill/Run rồi click/gõ trên ảnh.</p>
           <div class="live-chrome-frame-wrap" id="liveChromeFrameWrap" hidden>
-            <iframe id="liveChromeFrame" title="Live Chrome" allow="clipboard-read; clipboard-write"></iframe>
+            <img id="liveChromeImg" alt="Live Chrome" draggable="false" tabindex="0" />
+            <p class="hint" id="liveChromeWaiting">Đang chờ Fill/Run…</p>
           </div>
         </section>
 
