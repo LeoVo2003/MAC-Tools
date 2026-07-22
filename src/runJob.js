@@ -276,7 +276,13 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
     }
 
     log('▶ Xong.');
-    log('→ Chrome giữ mở — đóng tay khi xem xong.');
+    if (process.env.HEADLESS === 'true') {
+      log('→ Headless: đóng Chrome.');
+      await browser.close().catch(() => {});
+      hooks.setBrowser?.(null);
+    } else {
+      log('→ Chrome giữ mở — đóng tay khi xem xong.');
+    }
 
     return output;
   } catch (err) {
@@ -303,8 +309,14 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
       if (shot2) log(`Screenshot tham chiếu (${onWpm ? 'WordPress' : 'WPM'}): ${shot2}`);
     }
 
-    log('→ Chrome giữ mở để xem lỗi — đóng tay khi xong.');
+    if (process.env.HEADLESS === 'true') {
+      log('→ Headless: đóng Chrome sau lỗi.');
+      await browser.close().catch(() => {});
+      hooks.setBrowser?.(null);
+    } else {
+      log('→ Chrome giữ mở để xem lỗi — đóng tay khi xong.');
+    }
     throw err;
   }
-  // Không browser.close() — Chrome không tự tắt sau khi chạy xong / lỗi
+  // Local (HEADLESS≠true): không browser.close() — để xem / debug.
 }

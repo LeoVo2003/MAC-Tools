@@ -4,6 +4,7 @@ services:
     build: .
     ports:
       - "3847:3847"
+    shm_size: "1gb"
     environment:
       NODE_ENV: production
       OPEN_BROWSER: "false"

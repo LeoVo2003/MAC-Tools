@@ -12,6 +12,8 @@ const DEFAULT_CHROME_PATHS = [
   'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
   path.join(os.homedir(), 'AppData', 'Local', 'Google', 'Chrome', 'Application', 'chrome.exe'),
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  '/usr/bin/chromium',
+  '/usr/bin/chromium-browser',
   '/usr/bin/google-chrome',
   '/usr/bin/google-chrome-stable',
 ].filter(Boolean);
@@ -63,10 +65,13 @@ export async function launchBrowser({ downloadPath, headless: headlessOpt } = {}
     defaultViewport: headless ? { width: 1440, height: 900 } : null,
     args,
     ignoreDefaultArgs: ['--enable-automation'],
+    ignoreHTTPSErrors: true,
     userDataDir,
   });
 
   const page = await browser.newPage();
+  page.setDefaultTimeout(45000);
+  page.setDefaultNavigationTimeout(60000);
 
   // Patch sớm trước mọi document (bổ sung stealth plugin)
   await page.evaluateOnNewDocument(() => {

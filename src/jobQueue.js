@@ -98,8 +98,11 @@ export function createJobQueue({ onLog, onChange, maxConcurrent = 4 } = {}) {
       push(job.cancelled ? `⏹ Đã hủy: ${message}` : `❌ Lỗi: ${message}`);
       job.onDone?.({ ok: false, error: message, cancelled: Boolean(job.cancelled) });
     } finally {
-      // Không đóng Chrome — để user xem / debug; đóng tay khi xong.
-      // (runJob cũng không browser.close())
+      // Headless (VPS): đóng Chrome để khỏi đầy RAM. Local: giữ để debug.
+      if (process.env.HEADLESS === 'true' && job.browser) {
+        await job.browser.close?.().catch(() => {});
+        job.browser = null;
+      }
       active.delete(job.id);
       remember(job);
       onChange?.(snapshot());

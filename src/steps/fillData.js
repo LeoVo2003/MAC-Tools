@@ -14,11 +14,29 @@ const US_STATES = new Set(
 );
 
 /**
- * Từ Website URL → username-admin (viết thường).
- * https://abc.com → abc-admin
- * https://www.musenaillounge.com/ → musenaillounge-admin
- * Bỏ https/http, www., và đuôi .com
+ * Tên tiệm → slug chữ thường, bỏ khoảng trắng/ký tự lạ.
+ * "Luna Beauty Nails" → lunabeautynails
+ * "lunabeautynails-admin" → lunabeautynails
  */
+export function shopNameSlug(shopName) {
+  let s = String(shopName || '')
+    .trim()
+    .toLowerCase()
+    .replace(/-admin$/i, '');
+  return sanitizeWpUsername(s.replace(/[^a-z0-9]/g, ''));
+}
+
+/**
+ * Username: Tên tiệm-admin
+ * vd lunabeautynails-admin
+ */
+export function usernameFromShopName(shopName) {
+  const base = shopNameSlug(shopName);
+  if (!base) return '';
+  return `${base}-admin`;
+}
+
+/** @deprecated Rule hiện tại dùng tên tiệm, không dùng domain. */
 export function usernameFromWebsiteUrl(websiteUrl) {
   let host = '';
   const raw = String(websiteUrl || '').trim();
@@ -31,39 +49,26 @@ export function usernameFromWebsiteUrl(websiteUrl) {
   }
   host = host.toLowerCase().replace(/^www\./, '');
   if (host.endsWith('.com')) host = host.slice(0, -4);
-  // Bỏ dấu chấm còn lại nếu muốn slug liền? Giữ dấu chấm (subdomain). WP cho phép.
   const base = sanitizeWpUsername(host.replace(/[^a-zA-Z0-9._\-]/g, ''));
   if (!base) return '';
   if (/-admin$/i.test(base)) return base.toLowerCase();
   return `${base}-admin`;
 }
 
-/** @deprecated Dùng usernameFromWebsiteUrl — giữ tạm. */
-export function usernameFromShopName(shopName) {
-  const first = String(shopName || '')
-    .trim()
-    .split(/\s+/)
-    .find((w) => /[a-zA-Z0-9]/.test(w));
-  if (!first) return '';
-  const base = sanitizeWpUsername(first.replace(/[^a-zA-Z0-9._\-]/g, ''));
-  if (!base) return '';
-  return `${base}-admin`;
-}
-
-/** Password: username@STATE-zip — chỉ State in hoa. vd abc-admin@TX-75001 */
-export function buildCustomerPassword(username, state, zip) {
-  const user = String(username || '')
-    .trim()
-    .toLowerCase();
-  const st = String(state || '')
-    .trim()
-    .toUpperCase();
+/**
+ * Password: Tên tiệm@Zipcode (không kèm -admin, không State).
+ * vd lunabeautynails@12345
+ * @param {string} shopNameOrSlug — tên tiệm / slug / username-admin
+ * @param {string} zip
+ */
+export function buildCustomerPassword(shopNameOrSlug, zip) {
+  const slug = shopNameSlug(shopNameOrSlug);
   const z = String(zip || '')
     .trim()
     .replace(/\D/g, '')
     .slice(0, 5);
-  if (!user || !st || !z) return '';
-  return sanitizeCustomerPassword(`${user}@${st}-${z}`);
+  if (!slug || !z) return '';
+  return sanitizeCustomerPassword(`${slug}@${z}`);
 }
 
 /** @deprecated Dùng Main Web trên Website Information — giữ tạm fallback. */
@@ -283,27 +288,25 @@ export async function fillCustomerDataFromUrls(
       log(`Website (${webTargetMode === 'website' ? 'target' : 'Main Web'}): ${websiteUrl}`);
     }
 
-    const username = usernameFromWebsiteUrl(websiteUrl);
-    if (!username) throw new Error('Không tạo được username từ Website URL (cần domain hợp lệ).');
-    log(`Username từ domain: ${username}`);
+    const shopSlug = shopNameSlug(shopName);
+    const username = usernameFromShopName(shopName);
+    if (!username) throw new Error('Không tạo được username từ tên tiệm.');
+    log(`Username từ tên tiệm: ${username}`);
 
     const site = await scrapeSiteFooterContact(page, websiteUrl, log);
     warnings.push(...(site.warnings || []));
 
-    // Zip fallback từ WPM nếu footer thiếu zip
+    // Zip: ưu tiên footer, fallback WPM Project
     let state = site.state;
     let zip = site.zip || (wpmZip || '').replace(/\D/g, '').slice(0, 5);
     if (!site.zip && zip) {
       log(`Zip fallback từ WPM Project: ${zip}`);
       warnings.push('Zip lấy từ WPM Project (footer không có / không parse được).');
     }
-    if (!state && zip) {
-      warnings.push('Có Zip nhưng thiếu State (cần State từ address footer để tạo password).');
-    }
 
-    const password = buildCustomerPassword(username, state, zip);
+    const password = buildCustomerPassword(shopSlug || shopName, zip);
     if (!password) {
-      warnings.push('Chưa tạo được password (thiếu State hoặc Zip).');
+      warnings.push('Chưa tạo được password (thiếu Zip).');
     } else {
       log(`Password: ${password}`);
     }
@@ -326,12 +329,12 @@ export async function fillCustomerDataFromUrls(
       username: {
         ok: Boolean(username),
         value: username,
-        hint: username ? 'Từ domain (bỏ https + .com) + -admin' : 'Thiếu Website URL',
+        hint: username ? 'Tên tiệm-admin' : 'Thiếu tên tiệm',
       },
       password: {
         ok: Boolean(password),
         value: password,
-        hint: password ? `${username}@${state}-${zip}` : 'Thiếu State/Zip — sửa tay password',
+        hint: password ? `${shopSlug}@${zip}` : 'Thiếu Zip — sửa tay password',
       },
       email: {
         ok: Boolean(site.email),

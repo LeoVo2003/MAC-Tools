@@ -26,30 +26,48 @@ const WPM_BASE = 'https://wpm.macusaone.com';
 
 export async function loginToWPM(page, { username, password }, log) {
   log('Mở trang login WPM...');
-  await page.goto(`${WPM_BASE}/login`, GOTO);
+  await page.goto(`${WPM_BASE}/login`, { ...GOTO, waitUntil: 'domcontentloaded' });
 
-  await fillFirst(page, [
-    'input[name="username"]',
+  const userSels = [
     'input[name="email"]',
     'input[type="email"]',
+    'input[name="username"]',
     'input#username',
     'input#email',
     'input[name="log"]',
-  ], username);
-
-  await fillFirst(page, [
+  ];
+  const passSels = [
     'input[name="password"]',
     'input[type="password"]',
     'input#password',
-  ], password);
+    'input#password-input',
+  ];
 
   try {
-    await clickFirst(page, [
-      'button[type="submit"]',
-      'input[type="submit"]',
-      'button.btn-primary',
-      'button.login',
-    ], { timeout: 4000 });
+    await page.waitForSelector(userSels.join(', '), { visible: true, timeout: 30000 });
+  } catch {
+    const diag = await page
+      .evaluate(() => ({
+        url: location.href,
+        title: document.title,
+        body: (document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 280),
+        inputCount: document.querySelectorAll('input').length,
+      }))
+      .catch(() => ({}));
+    throw new Error(
+      `Không thấy ô login WPM. url=${diag.url || '?'} title="${diag.title || ''}" inputs=${diag.inputCount ?? '?'} body="${diag.body || ''}"`
+    );
+  }
+
+  await fillFirst(page, userSels, username, { timeout: 10000 });
+  await fillFirst(page, passSels, password, { timeout: 10000 });
+
+  try {
+    await clickFirst(
+      page,
+      ['button[type="submit"]', 'input[type="submit"]', 'button.btn-primary', 'button.login'],
+      { timeout: 4000 }
+    );
   } catch {
     await clickByText(page, 'Login', { timeout: 4000 }).catch(() =>
       clickByText(page, 'Đăng nhập', { timeout: 4000 })
@@ -61,7 +79,7 @@ export async function loginToWPM(page, { username, password }, log) {
 
   const url = page.url();
   if (url.includes('/login')) {
-    throw new Error('Login WPM thất bại — vẫn ở trang /login. Kiểm tra WPM_USERNAME / WPM_PASSWORD.');
+    throw new Error('Login WPM thất bại — vẫn ở trang /login. Kiểm tra email/password WPM đã lưu khi đăng nhập tool.');
   }
   log('Đã login WPM.');
 }
