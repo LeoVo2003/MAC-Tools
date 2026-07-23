@@ -892,12 +892,13 @@ async function setupLiveChrome() {
       return;
     }
     panel.hidden = false;
-    liveChromeSrc = data.iframeSrc || '/chrome-live/';
+    liveChromeSrc = data.iframeSrc || '/chrome-live/embed';
     const hintEl = panel.querySelector('.live-chrome-hint');
     if (hintEl && data.hint) hintEl.textContent = data.hint;
     if (newTab) {
       newTab.hidden = false;
-      newTab.href = liveChromeSrc;
+      // Tab mới = UI noVNC đầy đủ (đang chạy ngon); panel = /embed
+      newTab.href = '/chrome-live/';
     }
   } catch {
     panel.hidden = true;
@@ -907,7 +908,17 @@ async function setupLiveChrome() {
   toggle.onclick = () => {
     liveChromeOpen = !liveChromeOpen;
     if (liveChromeOpen) {
-      if (frame && liveChromeSrc) frame.src = liveChromeSrc;
+      const src = liveChromeSrc.startsWith('http')
+        ? liveChromeSrc
+        : `${window.location.origin}${liveChromeSrc}`;
+      if (frame) {
+        frame.removeAttribute('sandbox');
+        frame.src = 'about:blank';
+        // Load lại embed sau tick — tránh cache kẹt 「连接中」
+        requestAnimationFrame(() => {
+          frame.src = `${src}${src.includes('?') ? '&' : '?'}_=${Date.now()}`;
+        });
+      }
       if (wrap) wrap.hidden = false;
       toggle.textContent = 'Đóng Live';
       if (badge) {
