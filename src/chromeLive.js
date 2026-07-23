@@ -93,10 +93,10 @@ function embedHtml() {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Live Chrome</title>
 <style>
-  html,body{margin:0;height:100%;background:#0b0f14;overflow:hidden;font-family:system-ui,sans-serif}
-  #screen{position:absolute;inset:0}
-  #screen>div{position:absolute!important;inset:0!important}
-  #msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  html,body{margin:0;width:100%;height:100%;background:#0b0f14;overflow:hidden;font-family:system-ui,sans-serif}
+  #screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
+  #screen canvas{outline:none}
+  #msg{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
        color:#c8d0d8;font-size:14px;z-index:2;pointer-events:none;text-align:center;padding:1rem}
 </style>
 </head>
@@ -121,10 +121,14 @@ async function tryRfb(){
   if (!RFB) throw new Error('no rfb');
   show('Đang kết nối VNC…');
   const rfb = new RFB(screen, wsUrl);
+  // Scale full khung iframe — không clip (tránh màn hình nhỏ giữa panel)
   rfb.scaleViewport = true;
-  rfb.clipViewport = true;
+  rfb.clipViewport = false;
   rfb.resizeSession = false;
-  rfb.addEventListener('connect', () => hide());
+  rfb.background = '#0b0f14';
+  const fit = () => { try { rfb.scaleViewport = true; } catch { /* ignore */ } };
+  window.addEventListener('resize', fit);
+  rfb.addEventListener('connect', () => { hide(); fit(); });
   rfb.addEventListener('disconnect', (ev) => {
     show(ev.detail?.clean ? 'Đã ngắt — thử lại…' : 'Mất kết nối — thử lại…');
     setTimeout(() => location.reload(), 2000);
@@ -135,7 +139,6 @@ async function tryRfb(){
 }
 
 tryRfb().catch(() => {
-  // Fallback UI đầy đủ noVNC (path tương đối)
   location.replace('/chrome-live/vnc.html?autoconnect=true&reconnect=true&reconnect_delay=2000&resize=scale&path=websockify');
 });
 </script>

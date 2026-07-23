@@ -982,15 +982,15 @@ kbd {
   border-radius: 8px;
   overflow: hidden;
   background: #0b0f14;
-  min-height: 420px;
+  min-height: 520px;
   position: relative;
 }
 
 .live-chrome-frame-wrap iframe {
   display: block;
   width: 100%;
-  height: min(70vh, 640px);
+  height: min(75vh, 720px);
   border: 0;
-  background: #111;
+  background: #0b0f14;
 }
 

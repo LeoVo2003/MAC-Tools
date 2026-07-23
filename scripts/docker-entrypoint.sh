@@ -40,8 +40,9 @@ fi
 
 # VNC
 pkill -x x11vnc >/dev/null 2>&1 || true
+# Không dùng -ncache: noVNC sẽ hiện nhiều bản màn hình nhỏ xếp dọc
 x11vnc -display "$DISPLAY" -forever -shared -rfbport 5900 -nopw -xkb \
-  -localhost -ncache 10 -ncache_cr \
+  -localhost \
   >/tmp/x11vnc.log 2>&1 &
 sleep 0.6
 if ! wait_port 5900 "x11vnc"; then
