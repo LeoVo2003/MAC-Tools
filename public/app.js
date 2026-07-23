@@ -63,6 +63,19 @@ function setRunBadge(mode, text) {
   setBadge(statusBadge, mode, text);
 }
 
+function setHintTone(el, tone = 'muted') {
+  if (!el) return;
+  el.classList.remove('hint--muted', 'hint--ok', 'hint--warn', 'hint--accent', 'hint--error');
+  const map = {
+    muted: 'hint--muted',
+    ok: 'hint--ok',
+    warn: 'hint--warn',
+    accent: 'hint--accent',
+    error: 'hint--error',
+  };
+  el.classList.add(map[tone] || map.muted);
+}
+
 function appendLog(line) {
   logBox.textContent += (logBox.textContent ? '\n' : '') + line;
   logBox.scrollTop = logBox.scrollHeight;
@@ -419,7 +432,7 @@ fillDataBtn?.addEventListener('click', async () => {
   if (projectInput && wpmProjectUrl) projectInput.value = wpmProjectUrl;
   if (!wpmProjectUrl) {
     fillDataHint.textContent = 'Nhập WPM Project URL trước.';
-    fillDataHint.style.color = 'var(--danger)';
+    setHintTone(fillDataHint, 'error');
     return;
   }
 
@@ -427,14 +440,14 @@ fillDataBtn?.addEventListener('click', async () => {
   const websiteUrl = (websiteInput?.value || '').trim();
   if (webTargetMode === 'website' && !websiteUrl) {
     fillDataHint.textContent = 'Mode Website: điền ô Website (subdomain) trước rồi Fill.';
-    fillDataHint.style.color = 'var(--danger)';
+    setHintTone(fillDataHint, 'error');
     markFieldWarn('websiteUrl', true);
     return;
   }
 
   fillDataBtn.disabled = true;
   runBtn.disabled = true;
-  fillDataHint.style.color = 'var(--muted)';
+  setHintTone(fillDataHint, 'muted');
   fillDataHint.textContent =
     webTargetMode === 'website'
       ? 'Đang lấy data (khớp Website + footer)…'
@@ -467,7 +480,7 @@ fillDataBtn?.addEventListener('click', async () => {
     if (!res.ok) {
       appendLog(`❌ ${data.error || res.statusText}`);
       fillDataHint.textContent = data.error || 'Fill data thất bại';
-      fillDataHint.style.color = 'var(--danger)';
+      setHintTone(fillDataHint, 'error');
       setRunBadge('error', 'Error');
       return;
     }
@@ -487,22 +500,22 @@ fillDataBtn?.addEventListener('click', async () => {
 
     if (data.needManual?.length) {
       fillDataHint.textContent = `Thiếu: ${data.needManual.join(', ')} — sửa tay ô vàng rồi Run.`;
-      fillDataHint.style.color = 'var(--warn)';
-      setRunBadge('error', 'Sửa tay');
+      setHintTone(fillDataHint, 'warn');
+      setRunBadge('warn', 'Sửa tay');
     } else if (warns.length) {
       fillDataHint.textContent = `Đã fill — ${warns.length} cảnh báo (xem Log). Có thể Run.`;
-      fillDataHint.style.color = 'var(--warn)';
+      setHintTone(fillDataHint, 'warn');
       setRunBadge('done', 'Filled');
     } else {
       fillDataHint.textContent = 'Đã fill xong — kiểm tra rồi bấm Run.';
-      fillDataHint.style.color = 'var(--accent)';
+      setHintTone(fillDataHint, 'ok');
       setRunBadge('done', 'Filled');
     }
     appendLog('=== Fill data xong ===');
   } catch (err) {
     appendLog(`❌ ${err.message}`);
     fillDataHint.textContent = err.message;
-    fillDataHint.style.color = 'var(--danger)';
+    setHintTone(fillDataHint, 'error');
     setRunBadge('error', 'Error');
   } finally {
     fillDataBtn.disabled = false;
@@ -709,13 +722,18 @@ function renderQueue(q) {
       : item.createdAt
         ? item.createdAt.replace('T', ' ').slice(0, 19)
         : '';
+    const statusLabel = item.status === 'running' ? '▶ Running' : `#${item.position || '?'} Waiting`;
+    const statusClass = item.status === 'running' ? 'is-running' : 'is-waiting';
+    const metaBits = [short ? `${short}…` : '', when].filter(Boolean).join(' · ');
     row.innerHTML = `
-      <div>
-        <strong>${item.status === 'running' ? '▶ Running' : `#${item.position || '?'} Waiting`}</strong>
-        · ${who}
-        <div class="meta">${short}… ${when}</div>
-      </div>
-      <button type="button" class="secondary tiny queue-cancel" data-id="${item.id}">Hủy</button>`;
+      <div class="queue-main">
+        <div class="queue-top">
+          <span class="queue-status ${statusClass}">${statusLabel}</span>
+          <button type="button" class="secondary tiny queue-cancel" data-id="${item.id}">Hủy</button>
+        </div>
+        <div class="queue-user" title="${who.replace(/"/g, '&quot;')}">${who}</div>
+        <div class="meta">${metaBits}</div>
+      </div>`;
     box.appendChild(row);
   }
   box.querySelectorAll('.queue-cancel').forEach((btn) => {
@@ -918,7 +936,7 @@ async function loadBackups() {
       });
     }
   } catch (err) {
-    box.innerHTML = `<p class="hint" style="color:var(--danger)">${err.message}</p>`;
+    box.innerHTML = `<p class="hint hint--error">${err.message}</p>`;
   }
 }
 

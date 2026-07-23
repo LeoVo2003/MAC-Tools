@@ -65,7 +65,7 @@
               <input name="taskUrl" type="url" placeholder="https://wpm.macusaone.com/tasks/16694/edit" />
             </label>
             <div class="fill-data-row">
-              <button type="button" id="fillDataBtn" class="secondary">Fill data</button>
+              <button type="button" id="fillDataBtn">Fill data</button>
               <p id="fillDataHint" class="hint"></p>
             </div>
             <label>
@@ -99,8 +99,8 @@
           </div>
 
           <div class="web-target" data-admin-only hidden>
-            <div class="panel-head" style="margin-bottom:0.35rem">
-              <h2 style="margin:0;font-size:0.85rem">Target web</h2>
+            <div class="panel-head panel-head--compact">
+              <h2 class="subsection-title">Target web</h2>
             </div>
             <p class="hint panel-desc">Admin: test subdomain → điền ô Website = subdomain → chọn “Khớp ô Website”. User thường luôn Main Web.</p>
             <div class="web-target-options">
@@ -137,12 +137,16 @@
             </div>
           </fieldset>
 
-          <div class="actions">
-            <button type="submit" id="runBtn">Run</button>
-            <button type="button" id="cancelBtn" class="danger" hidden title="Dừng job đang chạy / đang chờ">Hủy</button>
-            <button type="button" id="resumeBtn" class="secondary" hidden title="Chạy lại các bước còn đang tick">Resume</button>
-            <span id="statusBadge" class="badge idle">Idle</span>
-            <span id="queueHint" class="hint"></span>
+          <div class="actions actions-run">
+            <div class="actions-primary">
+              <button type="submit" id="runBtn">Run</button>
+              <button type="button" id="cancelBtn" class="danger" hidden title="Dừng job đang chạy / đang chờ">Hủy</button>
+              <button type="button" id="resumeBtn" class="secondary" hidden title="Chạy lại các bước còn đang tick">Resume</button>
+            </div>
+            <div class="actions-meta">
+              <span id="statusBadge" class="badge idle" role="status" aria-live="polite">Idle</span>
+              <span id="queueHint" class="hint"></span>
+            </div>
           </div>
           <div id="fillFieldStatus" class="fill-status" hidden></div>
 

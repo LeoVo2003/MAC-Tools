@@ -1,5 +1,5 @@
 ---
-description: Brand UI F User Guide Tool — đỏ/cam gradient, Bricolage + Plus Jakarta
+description: Brand UI F User Guide Tool — đỏ/cam brand, semantic xanh/cam/đỏ, Bricolage + Plus Jakarta
 globs: public/**/*.{html,css,js}
 alwaysApply: false
 ---
@@ -8,10 +8,12 @@ alwaysApply: false
 
 Khi sửa UI tool:
 
-- Màu: `--red: #E31E24`, `--red-dark: #B5141A`, `--orange: #FF6A2C`, CTA = `linear-gradient(120deg, var(--red), var(--orange))`
-- Không dùng accent xanh lá cũ
-- Font: Bricolage Grotesque (display, dày), Plus Jakarta Sans (UI), IBM Plex Mono (log)
-- Layout Run: form ~28% | Live ~72% khi `live-layout`; Live = flex viewport (không sticky)
-- Spacing: dùng `--space-*` / `--text-*` tokens
+- Brand: `--red`, `--orange`, CTA = `--brand-gradient`
+- Semantic: xanh = success/OK/Done; cam = Running/progress; amber = Waiting/warn; đỏ = error/thiếu/Hủy
+- Không dùng xanh làm brand accent; Running không dùng xanh
+- Font: Bricolage Grotesque (display), Plus Jakarta Sans (UI), IBM Plex Mono (log)
+- Layout Run: form ~28% | Live ~72% khi `live-layout`; `#tab-run.run-workspace` = grid (không flex cột)
+- Spacing: `--space-*` / `--text-*`; hint tone = class, không inline color
+- Surfaces: `--surface-input` / `--surface-log` / `--surface-frame`
 - Brand "F User Guide" là tín hiệu hero trên header
 - Áp dụng skill `frontend-design` + `fugt-brand-ui`
