@@ -20,6 +20,7 @@ import {
   stopLiveSession,
   setLivePage,
 } from './liveSession.js';
+import { registerLiveBrowser, unregisterLiveBrowser } from './liveBrowser.js';
 
 /** Các bước có thể tick/bỏ tick trên UI (login WPM + Quick Login luôn chạy). */
 export const SELECTABLE_STEPS = [
@@ -43,7 +44,7 @@ function normalizeSteps(raw) {
  * @param {object} job
  * @param {(msg: string) => void} onLog
  * @param {(payload: { id: string, status: 'start'|'done' }) => void} onStep
- * @param {{ shouldCancel?: () => boolean, setBrowser?: (b: import('puppeteer').Browser) => void, jobId?: string, onScreencast?: (payload: object) => void }} [hooks]
+ * @param {{ shouldCancel?: () => boolean, setBrowser?: (b: import('puppeteer').Browser) => void, jobId?: string, liveUserId?: string, reuseBrowser?: import('puppeteer').Browser, onScreencast?: (payload: object) => void }} [hooks]
  */
 export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {}) {
   const log = (msg) => {
@@ -111,10 +112,22 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
   }
   throwIfCancelled();
 
-  const { browser, page: wpmPage } = await launchBrowser({
-    downloadPath: DOWNLOADS_DIR,
-  });
-  hooks.setBrowser?.(browser);
+  let browser;
+  let wpmPage;
+  if (hooks.reuseBrowser) {
+    browser = hooks.reuseBrowser;
+    hooks.setBrowser?.(browser);
+    const pages = await browser.pages().catch(() => []);
+    wpmPage =
+      pages.find((p) => p && !p.isClosed?.()) ||
+      (await browser.newPage());
+    log('→ Resume: tái sử dụng Chrome Live đang mở.');
+  } else {
+    ({ browser, page: wpmPage } = await launchBrowser({
+      downloadPath: DOWNLOADS_DIR,
+    }));
+    hooks.setBrowser?.(browser);
+  }
 
   const liveId = hooks.jobId || 'run';
   const pushFrame = (payload) => {
@@ -313,9 +326,11 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
     if (process.env.HEADLESS === 'true') {
       await stopLiveSession(liveId).catch(() => {});
       log('→ Headless: đóng Chrome.');
+      unregisterLiveBrowser(hooks.liveUserId, browser);
       await browser.close().catch(() => {});
       hooks.setBrowser?.(null);
     } else if (process.env.CHROME_LIVE === 'true') {
+      registerLiveBrowser(hooks.liveUserId, browser);
       log('→ Live Chrome: panel Live vẫn mở — click/gõ trên Live để tương tác.');
     } else {
       log('→ Chrome giữ mở — đóng tay khi xem xong.');
@@ -357,9 +372,11 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
     if (process.env.HEADLESS === 'true') {
       await stopLiveSession(liveId).catch(() => {});
       log('→ Headless: đóng Chrome sau lỗi.');
+      unregisterLiveBrowser(hooks.liveUserId, browser);
       await browser.close().catch(() => {});
       hooks.setBrowser?.(null);
     } else if (process.env.CHROME_LIVE === 'true') {
+      registerLiveBrowser(hooks.liveUserId, browser);
       log('→ Live Chrome: panel Live vẫn xem được trang lỗi — tương tác trên Live.');
     } else {
       log('→ Chrome giữ mở để xem lỗi — đóng tay khi xong.');

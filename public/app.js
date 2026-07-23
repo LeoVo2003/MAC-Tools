@@ -431,12 +431,14 @@ fillDataBtn?.addEventListener('click', async () => {
   fillDataHint.style.color = 'var(--muted)';
   fillDataHint.textContent =
     webTargetMode === 'website'
-      ? 'Đang lấy data (khớp Website + footer) — Chrome ẩn…'
-      : 'Đang lấy data (Main Web + footer) — Chrome ẩn…';
+      ? 'Đang lấy data (khớp Website + footer)…'
+      : 'Đang lấy data (Main Web + footer)…';
   if (fillFieldStatus) fillFieldStatus.hidden = true;
   clearFieldWarns();
   logBox.textContent = '';
   appendLog('=== Fill data ===');
+  resetLiveFrameBlank();
+  appendLog('[live] Clear Live → Fill mới…');
   if (webTargetMode === 'website') {
     appendLog(`Target web = khớp Website (${websiteUrl})`);
   }
@@ -502,13 +504,36 @@ fillDataBtn?.addEventListener('click', async () => {
   }
 });
 
+let pendingResume = false;
+let liveChromeOpen = false;
+let liveChromeSrc = '';
+
 resumeBtn?.addEventListener('click', () => {
-  appendLog('↳ Resume = Run lại với các bước còn đang tick (bước xong đã bỏ tick).');
+  appendLog('↳ Resume = chạy tiếp trên Chrome đang mở (không clear Live).');
+  pendingResume = true;
   form?.requestSubmit();
 });
 
+function resetLiveFrameBlank() {
+  const frame = document.getElementById('liveChromeFrame');
+  const wrap = document.getElementById('liveChromeFrameWrap');
+  if (!frame || !liveChromeOpen) return;
+  // Về trắng trước khi job mới — rồi reload embed
+  frame.src = 'about:blank';
+  if (wrap) wrap.hidden = false;
+  const src = liveChromeSrc.startsWith('http')
+    ? liveChromeSrc
+    : `${window.location.origin}${liveChromeSrc || '/chrome-live/embed'}`;
+  setTimeout(() => {
+    if (!liveChromeOpen) return;
+    frame.src = `${src}${src.includes('?') ? '&' : '?'}_=${Date.now()}`;
+  }, 400);
+}
+
 form?.addEventListener('submit', async (e) => {
   e.preventDefault();
+  const isResume = pendingResume;
+  pendingResume = false;
   const fd = new FormData(form);
   const steps = getSelectedSteps();
   if (steps.length === 0) {
@@ -540,6 +565,7 @@ form?.addEventListener('submit', async (e) => {
     packageTier: 'F',
     steps,
     webTargetMode: getWebTargetMode(),
+    resume: isResume,
   };
 
   logBox.textContent = '';
@@ -547,7 +573,11 @@ form?.addEventListener('submit', async (e) => {
   doneThisRun.clear();
   clearStepStyles();
   runBtn.disabled = true;
-  setRunBadge('running', 'Running');
+  setRunBadge('running', isResume ? 'Resume' : 'Running');
+  if (!isResume) {
+    resetLiveFrameBlank();
+    appendLog('[live] Clear Live → chạy Run mới…');
+  }
   if (payload.webTargetMode === 'website') {
     appendLog(`⚠ Target web = khớp Website (${payload.websiteUrl})`);
   }
@@ -879,9 +909,6 @@ async function loadBackups() {
 }
 
 document.getElementById('refreshBackupsBtn')?.addEventListener('click', loadBackups);
-
-let liveChromeOpen = false;
-let liveChromeSrc = '';
 
 async function setupLiveChrome() {
   const panel = document.getElementById('liveChromePanel');

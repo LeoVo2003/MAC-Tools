@@ -152,12 +152,54 @@ export function createJobQueue({ onLog, onChange, maxConcurrent = 4 } = {}) {
     return [...active.values()];
   }
 
+  /** Đóng Chrome còn giữ sau job xong (cùng user). Không đụng job đang running. */
+  async function closeBrowsersForUser(userId) {
+    const uid = String(userId || '');
+    if (!uid) return 0;
+    let closed = 0;
+    for (const j of [...recent.values(), ...active.values()]) {
+      if (String(j.meta?.userId || '') !== uid) continue;
+      if (active.has(j.id) && j.status === 'running') continue;
+      if (!j.browser) continue;
+      try {
+        await j.browser.close?.().catch(() => {});
+        closed += 1;
+      } catch {
+        /* ignore */
+      }
+      j.browser = null;
+    }
+    return closed;
+  }
+
+  /** Lấy browser đang giữ của user (Resume) — ưu tiên job recent mới nhất. */
+  function takeBrowserForUser(userId) {
+    const uid = String(userId || '');
+    if (!uid) return null;
+    const candidates = [...recent.values()]
+      .filter((j) => String(j.meta?.userId || '') === uid && j.browser)
+      .reverse();
+    for (const j of candidates) {
+      const b = j.browser;
+      j.browser = null;
+      try {
+        if (b?.isConnected?.() === false) continue;
+      } catch {
+        continue;
+      }
+      return b;
+    }
+    return null;
+  }
+
   return {
     enqueue,
     getJob,
     snapshot,
     cancel,
     listActiveJobs,
+    closeBrowsersForUser,
+    takeBrowserForUser,
     get active() {
       return active.values().next().value || null;
     },

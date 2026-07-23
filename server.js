@@ -26,6 +26,7 @@ import { listBackupFolders, listBackupFiles, resolveBackupFile } from './src/bac
 import { purgeOldBackups, buildHealthReport, detectStaleJobs } from './src/ops.js';
 import { mountChromeLiveRoutes, attachChromeLiveWs, chromeLiveEnabled } from './src/chromeLive.js';
 import { dispatchLiveInput, listLiveSessions, getLiveSession } from './src/liveSession.js';
+import { clearLiveBrowsersForUser, takeLiveBrowser } from './src/liveBrowser.js';
 
 dotenv.config({ path: getEnvPath() });
 
@@ -181,6 +182,17 @@ export function createApp() {
     const logs = [];
     const fillSessionId = `fill-${req.user.id}`;
     try {
+      // Fill mới: clear Chrome Live cũ (tránh lag / timeout trên Xvfb)
+      const clearedReg = await clearLiveBrowsersForUser(req.user.id);
+      const clearedQueue = await queue.closeBrowsersForUser(req.user.id);
+      const cleared = (clearedReg.closed || 0) + (clearedQueue || 0);
+      if (cleared > 0) {
+        const line = `[live] Đã clear ${cleared} Chrome cũ trước Fill.`;
+        logs.push(line);
+        console.log(line);
+        broadcast('log', { line, jobId: fillSessionId }, { userId: req.user.id });
+      }
+
       const data = await fillCustomerDataFromUrls(
         {
           wpmProjectUrl,
@@ -188,6 +200,7 @@ export function createApp() {
           websiteUrl,
           webTargetMode,
           wpmCredentials: { username: stored.username, password: stored.password },
+          liveUserId: req.user.id,
           liveSessionId:
             process.env.CHROME_LIVE === 'true' && process.env.CHROME_LIVE_MODE === 'screencast'
               ? fillSessionId
@@ -335,6 +348,8 @@ export function createApp() {
       username: req.user.username,
     };
 
+    const isResume = Boolean(body.resume);
+
     const { jobId, position, queue: qSnap } = queue.enqueue({
       meta: userMeta,
       run: async (pushLog, jobRef) => {
@@ -342,6 +357,24 @@ export function createApp() {
         for (const [, meta] of clients) {
           if (meta.userId === req.user.id && !meta.jobId) {
             meta.jobId = thisJobId;
+          }
+        }
+
+        // Run mới: clear Chrome Live cũ. Resume: tái sử dụng Chrome đang mở.
+        let reuseBrowser = null;
+        if (isResume) {
+          reuseBrowser = takeLiveBrowser(req.user.id) || queue.takeBrowserForUser?.(req.user.id);
+          if (reuseBrowser) {
+            pushLog('[live] Resume — tái sử dụng Chrome đang mở (không clear).');
+          } else {
+            pushLog('[live] Resume — không còn Chrome cũ, mở mới.');
+          }
+        } else {
+          const clearedReg = await clearLiveBrowsersForUser(req.user.id);
+          const clearedQueue = await queue.closeBrowsersForUser(req.user.id);
+          const cleared = (clearedReg.closed || 0) + (clearedQueue || 0);
+          if (cleared > 0) {
+            pushLog(`[live] Đã clear ${cleared} Chrome cũ trước Run.`);
           }
         }
 
@@ -357,6 +390,7 @@ export function createApp() {
           steps: jobPayload.steps || [],
           jobId: thisJobId,
           edition: 'v2',
+          resume: isResume,
         });
 
         const onStep = (payload) =>
@@ -367,6 +401,8 @@ export function createApp() {
           const result = await runJob(jobPayload, pushLog, onStep, {
             shouldCancel: () => Boolean(jobRef.cancelled),
             jobId: thisJobId,
+            liveUserId: req.user.id,
+            reuseBrowser: reuseBrowser || undefined,
             setBrowser: (b) => {
               jobRef.browser = b;
             },

@@ -8,6 +8,7 @@ import {
 } from '../utils.js';
 import { loginToWPM, readProjectName, readProjectZipcode, openWebsiteInformationTab, resolveTargetWeb } from './wpm.js';
 import { startLiveSession, stopLiveSession } from '../liveSession.js';
+import { registerLiveBrowser, unregisterLiveBrowser } from '../liveBrowser.js';
 
 const US_STATES = new Set(
   'AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC'
@@ -190,6 +191,7 @@ export async function scrapeSiteFooterContact(page, websiteUrl, log) {
  * @param {string} [opts.websiteUrl] Prefer URL khi mode=website (admin đã điền subdomain)
  * @param {string} [opts.liveSessionId]
  * @param {(payload: object) => void} [opts.onScreencast]
+ * @param {string} [opts.liveUserId] — đăng ký Chrome Live theo user
  * @returns {Promise<object>}
  */
 export async function fillCustomerDataFromUrls(
@@ -201,6 +203,7 @@ export async function fillCustomerDataFromUrls(
     websiteUrl: preferWebsite,
     liveSessionId,
     onScreencast,
+    liveUserId,
   },
   onLog = () => {}
 ) {
@@ -395,8 +398,10 @@ export async function fillCustomerDataFromUrls(
     if (sid) await stopLiveSession(sid).catch(() => {});
     // CHROME_LIVE: giữ Chrome để tương tác trên panel Live (giống Run)
     if (process.env.CHROME_LIVE === 'true' && process.env.HEADLESS !== 'true') {
+      registerLiveBrowser(liveUserId, browser);
       log('→ Live Chrome: giữ mở sau Fill — tương tác trên panel Live.');
     } else {
+      unregisterLiveBrowser(liveUserId, browser);
       await browser.close().catch(() => {});
     }
   }
