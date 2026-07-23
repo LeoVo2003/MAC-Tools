@@ -162,3 +162,12 @@ export function runsToCsv(rows) {
   }
   return `${lines.join('\n')}\n`;
 }
+
+/** Xóa toàn bộ lịch sử báo cáo (admin). */
+export function clearRuns() {
+  ensureDataDir();
+  const before = readAllRuns().length;
+  fs.writeFileSync(RUNS_FILE, '', 'utf-8');
+  return { cleared: before };
+}
+

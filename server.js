@@ -12,7 +12,7 @@ import {
   sanitizeCustomerPassword,
   DOWNLOADS_DIR,
 } from './src/utils.js';
-import { startRun, finishRun, listRuns, runsStats, runsToCsv } from './src/tracking.js';
+import { startRun, finishRun, listRuns, runsStats, runsToCsv, clearRuns } from './src/tracking.js';
 import {
   ensureKnownUsers,
   loginWithWpm,
@@ -437,6 +437,15 @@ export function createApp() {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="runs.csv"');
     res.send(csv);
+  });
+
+  app.delete('/api/runs', requireAuth, requireAdmin, (_req, res) => {
+    try {
+      const result = clearRuns();
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      res.status(500).json({ error: err?.message || String(err) });
+    }
   });
 
   app.post('/api/backups/purge', requireAuth, requireAdmin, (req, res) => {

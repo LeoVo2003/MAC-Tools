@@ -822,6 +822,18 @@ document.getElementById('refreshReportsBtn')?.addEventListener('click', loadRepo
 document.getElementById('exportCsvBtn')?.addEventListener('click', () => {
   window.location.href = `/api/runs.csv?${reportQuery()}`;
 });
+document.getElementById('clearReportsBtn')?.addEventListener('click', async () => {
+  if (!confirm('Xóa toàn bộ lịch sử báo cáo? Không hoàn tác được.')) return;
+  try {
+    const res = await fetch('/api/runs', { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || res.statusText);
+    await loadReports();
+    alert(`Đã xóa ${data.cleared ?? 0} bản ghi.`);
+  } catch (err) {
+    alert(err?.message || 'Xóa báo cáo thất bại.');
+  }
+});
 document.getElementById('refreshHealthBtn')?.addEventListener('click', loadHealth);
 ['filterUser', 'filterFrom', 'filterTo', 'filterStatus'].forEach((id) => {
   document.getElementById(id)?.addEventListener('change', loadReports);
