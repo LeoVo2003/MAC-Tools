@@ -1,0 +1,16 @@
+---
+description: Brand UI F User Guide Tool — đỏ/cam gradient, fonts Syne + DM Sans
+globs: public/**/*.{html,css,js}
+alwaysApply: false
+---
+
+# Brand UI (public/)
+
+Khi sửa UI tool:
+
+- Màu: `--red: #E31E24`, `--red-dark: #B5141A`, `--orange: #FF6A2C`, CTA = `linear-gradient(120deg, var(--red), var(--orange))`
+- Không dùng accent xanh lá cũ
+- Font: Syne (display/brand), DM Sans (UI), IBM Plex Mono (log)
+- Giữ layout Run: form ~28% | Live ~72% khi `live-layout`
+- Brand "F User Guide" là tín hiệu hero trên header
+- Áp dụng skill `frontend-design` + `fugt-brand-ui`
