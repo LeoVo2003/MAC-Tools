@@ -3,7 +3,13 @@ import { findUserById, toPublicUser } from './userStore.js';
 
 export function sessionMiddleware() {
   const secret = process.env.SESSION_SECRET || process.env.APP_SECRET || 'dev-change-me-session';
-  const isProd = process.env.NODE_ENV === 'production';
+  // COOKIE_SECURE=true → luôn Secure (chỉ HTTPS)
+  // COOKIE_SECURE=false → luôn không Secure (HTTP)
+  // không set / auto → theo X-Forwarded-Proto (trust proxy) — tránh mất login khi nginx chỉ HTTP
+  const raw = String(process.env.COOKIE_SECURE || 'auto').toLowerCase();
+  const secure =
+    raw === 'true' || raw === '1' ? true : raw === 'false' || raw === '0' ? false : 'auto';
+
   return session({
     name: 'fugt.sid',
     secret,
@@ -12,7 +18,7 @@ export function sessionMiddleware() {
     cookie: {
       httpOnly: true,
       sameSite: 'lax',
-      secure: isProd && process.env.COOKIE_SECURE === 'true',
+      secure,
       maxAge: 7 * 24 * 60 * 60 * 1000,
     },
   });
