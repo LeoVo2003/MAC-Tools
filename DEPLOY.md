@@ -86,6 +86,24 @@ server {
 
 Nếu Live hiện logo noVNC + "无法连接 / Failed to connect": gần như chắc **proxy chưa forward WebSocket** — thêm block `/chrome-live/` như trên rồi reload nginx.
 
+### Domain thật (FlashVPS)
+`https://user-guide.kietvh.io.vn` — nginx: `/etc/nginx/sites-available/user-guide`
+
+### Checklist chạy mượt trên VPS
+```bash
+cd /home/flashvps/User-Guide
+# 1) .env đủ CHROME_LIVE / HEADLESS=false / secrets
+# 2) nginx có /api/events + /chrome-live/ + nginx -t && systemctl reload nginx
+docker compose pull
+docker compose up -d --force-recreate
+docker compose ps
+docker compose logs --tail=40
+# Health
+curl -s http://127.0.0.1:3847/api/health
+# IP egress (whitelist WPM)
+curl -4 -s https://ifconfig.me; echo
+```
+
 ## Docker
 
 ### Build local
