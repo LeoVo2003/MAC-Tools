@@ -48,7 +48,10 @@ function normalizeSteps(raw) {
  */
 export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {}) {
   const log = (msg) => {
-    const line = `[${new Date().toLocaleTimeString('vi-VN')}] ${msg}`;
+    const line = `[${new Date().toLocaleTimeString('vi-VN', {
+      timeZone: 'Asia/Ho_Chi_Minh',
+      hour12: false,
+    })}] ${msg}`;
     onLog(line);
   };
 

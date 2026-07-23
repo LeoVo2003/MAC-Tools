@@ -688,6 +688,27 @@ function formatDuration(ms) {
   return `${s}s`;
 }
 
+/** ISO UTC → `YYYY-MM-DD HH:mm:ss` theo giờ Việt Nam (UTC+7). */
+function formatVnDateTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) {
+    return String(iso).replace('T', ' ').replace(/\.\d+Z?$/, '').slice(0, 19);
+  }
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Ho_Chi_Minh',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(d);
+  const get = (type) => parts.find((p) => p.type === type)?.value || '';
+  return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}:${get('second')}`;
+}
+
 function runDurationMs(r) {
   if (r.durationMs != null && Number.isFinite(Number(r.durationMs))) return Number(r.durationMs);
   if (!r.startedAt || !r.finishedAt) return null;
@@ -718,9 +739,9 @@ function renderQueue(q) {
     const short = String(item.id || '').slice(0, 8);
     const who = String(item.user || item.username || '').trim() || '—';
     const when = item.startedAt
-      ? item.startedAt.replace('T', ' ').slice(0, 19)
+      ? formatVnDateTime(item.startedAt)
       : item.createdAt
-        ? item.createdAt.replace('T', ' ').slice(0, 19)
+        ? formatVnDateTime(item.createdAt)
         : '';
     const statusLabel = item.status === 'running' ? '▶ Running' : `#${item.position || '?'} Waiting`;
     const statusClass = item.status === 'running' ? 'is-running' : 'is-waiting';
@@ -798,7 +819,7 @@ async function loadReports() {
       (r.resultSummary?.accountExists ? 'account exists' : '');
     const note = String(noteRaw || '—').replace(/\s+/g, ' ').trim();
     const dur = formatDuration(runDurationMs(r));
-    const started = (r.startedAt || '').replace('T', ' ').slice(0, 19);
+    const started = formatVnDateTime(r.startedAt);
     const [datePart, timePart] = started.includes(' ')
       ? started.split(' ')
       : [started, ''];
@@ -916,7 +937,7 @@ async function loadBackups() {
     for (const folder of data.folders) {
       const details = document.createElement('details');
       details.className = 'backup-folder';
-      details.innerHTML = `<summary><strong>${folder.name}</strong> <span class="hint">(${folder.fileCount} files · ${folder.mtime?.slice(0, 19) || ''})</span></summary><div class="backup-files" data-name="${folder.name}">Loading…</div>`;
+      details.innerHTML = `<summary><strong>${folder.name}</strong> <span class="hint">(${folder.fileCount} files · ${formatVnDateTime(folder.mtime) || ''})</span></summary><div class="backup-files" data-name="${folder.name}">Loading…</div>`;
       box.appendChild(details);
       details.addEventListener('toggle', async () => {
         if (!details.open) return;

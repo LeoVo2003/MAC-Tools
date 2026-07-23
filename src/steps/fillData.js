@@ -214,7 +214,13 @@ export async function fillCustomerDataFromUrls(
   },
   onLog = () => {}
 ) {
-  const log = (msg) => onLog(`[${new Date().toLocaleTimeString('vi-VN')}] ${msg}`);
+  const log = (msg) =>
+    onLog(
+      `[${new Date().toLocaleTimeString('vi-VN', {
+        timeZone: 'Asia/Ho_Chi_Minh',
+        hour12: false,
+      })}] ${msg}`
+    );
   const projectUrl = normalizeWpmProjectUrl(String(wpmProjectUrl || '').trim());
   if (!projectUrl) throw new Error('Thiếu WPM Project URL.');
   if (!wpmCredentials?.username || !wpmCredentials?.password) {
