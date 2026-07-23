@@ -61,6 +61,7 @@ export function createJobQueue({ onLog, onChange, maxConcurrent = 4 } = {}) {
     };
     pending.push(job);
     const position = pending.length + active.size;
+    onChange?.(snapshot());
     setImmediate(() => pump());
     return { jobId: id, position, queue: snapshot() };
   }

@@ -291,9 +291,13 @@ function connectEvents(jobId) {
       /* ignore */
     }
   });
+  eventSource.addEventListener('open', () => {
+    refreshQueue();
+  });
   eventSource.addEventListener('done', () => {
     runBtn.disabled = false;
     setCancelVisible(false);
+    refreshQueue();
   });
 }
 
@@ -396,9 +400,11 @@ function renderFillStatus(fields = {}, needManual = []) {
   fillFieldStatus.innerHTML = keys
     .map((k) => {
       const f = fields[k] || {};
-      const ok = f.ok !== false && f.value;
+      const ok = f.ok === true && Boolean(String(f.value || '').trim());
       const label = k === 'websiteUrl' ? 'Website' : k;
-      return `<span class="fill-chip ${ok ? 'ok' : 'bad'}" title="${f.hint || ''}">${label}: ${ok ? 'OK' : 'thiếu — sửa tay'}</span>`;
+      const text = ok ? `${label}: OK` : `${label}: thiếu`;
+      const title = String(f.hint || (ok ? 'OK' : 'Cần sửa tay')).replace(/"/g, '&quot;');
+      return `<span class="fill-chip ${ok ? 'ok' : 'bad'}" title="${title}">${text}</span>`;
     })
     .join('');
   clearFieldWarns();
@@ -598,7 +604,9 @@ form?.addEventListener('submit', async (e) => {
     currentJobId = data.jobId;
     setCancelVisible(true);
     queueHint.textContent = data.message || '';
+    if (data.queue) renderQueue(data.queue);
     connectEvents(data.jobId);
+    refreshQueue();
     if (data.position > 1) setRunBadge('running', `Queue #${data.position}`);
   } catch (err) {
     appendLog(`❌ ${err.message}`);
@@ -695,11 +703,17 @@ function renderQueue(q) {
     const row = document.createElement('div');
     row.className = 'queue-row';
     const short = String(item.id || '').slice(0, 8);
+    const who = String(item.user || item.username || '').trim() || '—';
+    const when = item.startedAt
+      ? item.startedAt.replace('T', ' ').slice(0, 19)
+      : item.createdAt
+        ? item.createdAt.replace('T', ' ').slice(0, 19)
+        : '';
     row.innerHTML = `
       <div>
         <strong>${item.status === 'running' ? '▶ Running' : `#${item.position || '?'} Waiting`}</strong>
-        · ${item.user || '—'}
-        <div class="meta">${short}… ${item.startedAt ? item.startedAt.replace('T', ' ').slice(0, 19) : ''}</div>
+        · ${who}
+        <div class="meta">${short}… ${when}</div>
       </div>
       <button type="button" class="secondary tiny queue-cancel" data-id="${item.id}">Hủy</button>`;
     box.appendChild(row);

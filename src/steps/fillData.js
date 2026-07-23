@@ -6,7 +6,14 @@ import {
   sleepExact,
   GOTO,
 } from '../utils.js';
-import { loginToWPM, readProjectName, readProjectZipcode, openWebsiteInformationTab, resolveTargetWeb } from './wpm.js';
+import {
+  loginToWPM,
+  readProjectName,
+  readProjectZipcode,
+  readProjectEmail,
+  openWebsiteInformationTab,
+  resolveTargetWeb,
+} from './wpm.js';
 import { startLiveSession, stopLiveSession } from '../liveSession.js';
 import { registerLiveBrowser, unregisterLiveBrowser } from '../liveBrowser.js';
 
@@ -263,9 +270,11 @@ export async function fillCustomerDataFromUrls(
 
     let shopName = '';
     let wpmZip = '';
+    let wpmEmail = '';
     for (let i = 0; i < 12; i += 1) {
       shopName = await readProjectName(page);
       wpmZip = await readProjectZipcode(page);
+      wpmEmail = await readProjectEmail(page);
       if (shopName) break;
       await sleepExact(350);
     }
@@ -274,6 +283,7 @@ export async function fillCustomerDataFromUrls(
       throw new Error('Không đọc được Name (tên tiệm) trên WPM Project.');
     }
     log(`Tên tiệm: ${shopName}`);
+    if (wpmEmail) log(`Email (Project Information): ${wpmEmail}`);
 
     log(
       webTargetMode === 'website'
@@ -328,6 +338,41 @@ export async function fillCustomerDataFromUrls(
       warnings.push('Zip lấy từ WPM Project (footer không có / không parse được).');
     }
 
+    // Email: ưu tiên footer, fallback Project Information
+    let email = String(site.email || '').trim();
+    let emailSource = email ? 'footer' : '';
+    if (!email && wpmEmail) {
+      email = String(wpmEmail).trim();
+      emailSource = 'project';
+      log(`Email fallback từ Project Information: ${email}`);
+      warnings.push('Email lấy từ WPM Project Information (footer không có).');
+    } else if (!email) {
+      // Thử mở lại tab Project Information (đã rời sang Website Information / site)
+      try {
+        log('Footer không có email — mở lại Project Information…');
+        await page.goto(cleanUrl, GOTO);
+        await sleepExact(600);
+        await page.evaluate(() => {
+          const tab = Array.from(
+            document.querySelectorAll('a.nav-link, button.nav-link, a[role="tab"], a, button')
+          ).find((el) =>
+            /^project information$/i.test((el.textContent || '').replace(/\s+/g, ' ').trim())
+          );
+          tab?.click();
+        });
+        await sleepExact(500);
+        wpmEmail = await readProjectEmail(page);
+        if (wpmEmail) {
+          email = String(wpmEmail).trim();
+          emailSource = 'project';
+          log(`Email từ Project Information: ${email}`);
+          warnings.push('Email lấy từ WPM Project Information (footer không có).');
+        }
+      } catch (e) {
+        log(`⚠ Đọc email Project Information thất bại: ${e?.message || e}`);
+      }
+    }
+
     const password = buildCustomerPassword(shopSlug || shopName, zip);
     if (!password) {
       warnings.push('Chưa tạo được password (thiếu Zip).');
@@ -336,8 +381,11 @@ export async function fillCustomerDataFromUrls(
     }
 
     log(`Username: ${username}`);
-    if (site.email) log(`Email: ${site.email}`);
-    else log('⚠ Không lấy được email từ footer — điền tay trên form trước khi Run.');
+    if (email) {
+      log(`Email: ${email} (${emailSource === 'project' ? 'Project Information' : 'footer'})`);
+    } else {
+      log('⚠ Không lấy được email (footer + Project Information) — điền tay trên form trước khi Run.');
+    }
 
     const urlHint =
       webTargetMode === 'website'
@@ -347,6 +395,12 @@ export async function fillCustomerDataFromUrls(
         : websiteUrl
           ? 'Main Web'
           : 'Thiếu Main Web URL';
+
+    const emailHint = email
+      ? emailSource === 'project'
+        ? 'WPM Project Information'
+        : 'Footer website'
+      : 'Không thấy email footer / Project Information — điền tay';
 
     const fields = {
       websiteUrl: { ok: Boolean(websiteUrl), value: websiteUrl, hint: urlHint },
@@ -361,9 +415,9 @@ export async function fillCustomerDataFromUrls(
         hint: password ? `${shopSlug}@${zip}` : 'Thiếu Zip — sửa tay password',
       },
       email: {
-        ok: Boolean(site.email),
-        value: site.email || '',
-        hint: site.email ? 'Footer website' : 'Không thấy email footer — điền tay',
+        ok: Boolean(email),
+        value: email || '',
+        hint: emailHint,
       },
       state: { ok: Boolean(state), value: state || '', hint: state ? 'Footer' : 'Thiếu State' },
       zip: { ok: Boolean(zip), value: zip || '', hint: zip ? (site.zip ? 'Footer' : 'WPM fallback') : 'Thiếu Zip' },
@@ -383,7 +437,7 @@ export async function fillCustomerDataFromUrls(
       websiteUrl,
       username,
       password,
-      email: site.email || '',
+      email: email || '',
       state: state || '',
       zip: zip || '',
       warnings,

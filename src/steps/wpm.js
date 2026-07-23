@@ -149,6 +149,70 @@ export async function readProjectZipcode(page) {
   });
 }
 
+/**
+ * Đọc Email trên tab Project Information (Yelp / Email / Website block).
+ * Ưu tiên input → mailto → text cạnh label "Email".
+ */
+export async function readProjectEmail(page) {
+  return page.evaluate(() => {
+    const emailRe = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
+    const reject = (s) => /example\.com|sentry\.|wixpress|cloudflare|schema|noreply@/i.test(s || '');
+    const pick = (raw) => {
+      const m = String(raw || '').match(emailRe);
+      if (!m || reject(m[0])) return '';
+      return m[0];
+    };
+
+    const inputs = [
+      document.querySelector('input#email[name="email"]'),
+      document.querySelector('input#email'),
+      document.querySelector('input[name="email"]'),
+      document.querySelector('input[type="email"]'),
+      document.querySelector('input[data-label="Email"]'),
+      document.querySelector('input[placeholder*="email" i]'),
+    ].filter(Boolean);
+    for (const el of inputs) {
+      const v = pick(el.value || el.getAttribute('value') || '');
+      if (v) return v;
+    }
+
+    for (const a of document.querySelectorAll('a[href^="mailto:"]')) {
+      const href = decodeURIComponent((a.getAttribute('href') || '').replace(/^mailto:/i, ''))
+        .split('?')[0]
+        .trim();
+      const v = pick(href) || pick(a.textContent || '');
+      if (v) return v;
+    }
+
+    const nodes = Array.from(
+      document.querySelectorAll(
+        'label, h2, h3, h4, h5, strong, b, span, div, p, dt, th, .form-label, .col-form-label'
+      )
+    );
+    for (const el of nodes) {
+      const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+      // Label ngắn "Email" (có thể kèm icon SVG không chữ)
+      if (!/^e-?mails?$/i.test(t)) continue;
+      if (el.querySelectorAll('*').length > 6 && t.length > 12) continue;
+
+      const group =
+        el.closest('.form-group, .mb-2, .mb-3, .row, li, .info-item, .detail-item, .card, section') ||
+        el.parentElement;
+      if (group) {
+        const v = pick(group.innerText || '');
+        if (v) return v;
+      }
+      let sib = el.nextElementSibling;
+      for (let i = 0; i < 4 && sib; i += 1, sib = sib.nextElementSibling) {
+        const v = pick(sib.value || sib.innerText || sib.textContent || '');
+        if (v) return v;
+      }
+    }
+
+    return '';
+  });
+}
+
 /** Mở tab Website Information trên trang project. */
 export async function openWebsiteInformationTab(page, projectUrl, log = () => {}) {
   const u = new URL(projectUrl);
