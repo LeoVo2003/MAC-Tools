@@ -124,11 +124,17 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
       /* ignore */
     }
   };
-  if (process.env.CHROME_LIVE === 'true' && hooks.onScreencast) {
+  if (
+    process.env.CHROME_LIVE === 'true' &&
+    process.env.CHROME_LIVE_MODE === 'screencast' &&
+    hooks.onScreencast
+  ) {
     await startLiveSession(liveId, browser, wpmPage, pushFrame).catch((e) =>
       log(`⚠ Live screencast: ${e?.message || e}`)
     );
     log('→ Live screencast bật — mở panel Live Chrome trên UI.');
+  } else if (process.env.CHROME_LIVE === 'true') {
+    log('→ Live noVNC: mở panel Live /chrome-live để xem + tương tác.');
   }
 
   let wpPage = null;
@@ -153,7 +159,12 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
     log('▶ Mở project + Quick Login...');
     const opened = await openProjectAndQuickLogin(browser, wpmPage, wpmProjectUrl, log, targetOpts);
     wpPage = opened.wpPage;
-    if (process.env.CHROME_LIVE === 'true' && hooks.onScreencast && wpPage) {
+    if (
+      process.env.CHROME_LIVE === 'true' &&
+      process.env.CHROME_LIVE_MODE === 'screencast' &&
+      hooks.onScreencast &&
+      wpPage
+    ) {
       await setLivePage(liveId, wpPage, pushFrame).catch(() => {});
     }
     const projectName = opened.projectName || '';
@@ -321,7 +332,12 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
     } catch {
       /* ignore */
     }
-    if (process.env.CHROME_LIVE === 'true' && hooks.onScreencast && primary) {
+    if (
+      process.env.CHROME_LIVE === 'true' &&
+      process.env.CHROME_LIVE_MODE === 'screencast' &&
+      hooks.onScreencast &&
+      primary
+    ) {
       await setLivePage(liveId, primary, pushFrame).catch(() => {});
     }
     const shot1 = await screenshotError(

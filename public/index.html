@@ -159,12 +159,12 @@
             <h2>Live Chrome <span class="live-badge" id="liveChromeBadge">OFF</span></h2>
             <div class="live-chrome-actions">
               <button type="button" id="liveChromeToggle" class="secondary tiny">Mở Live</button>
+              <a id="liveChromeNewTab" class="hint" href="/chrome-live/" target="_blank" rel="noopener" hidden>Mở tab mới</a>
             </div>
           </div>
-          <p class="hint live-chrome-hint">Stream Chrome qua SSE — bấm Fill/Run rồi click/gõ trên ảnh.</p>
+          <p class="hint live-chrome-hint">Live = noVNC — xem + click/gõ Chromium trên server.</p>
           <div class="live-chrome-frame-wrap" id="liveChromeFrameWrap" hidden>
-            <img id="liveChromeImg" alt="Live Chrome" draggable="false" tabindex="0" />
-            <p class="hint" id="liveChromeWaiting">Đang chờ Fill/Run…</p>
+            <iframe id="liveChromeFrame" title="Live Chrome noVNC" allow="clipboard-read; clipboard-write"></iframe>
           </div>
         </section>
 

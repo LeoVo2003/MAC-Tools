@@ -188,9 +188,12 @@ export function createApp() {
           websiteUrl,
           webTargetMode,
           wpmCredentials: { username: stored.username, password: stored.password },
-          liveSessionId: process.env.CHROME_LIVE === 'true' ? fillSessionId : undefined,
+          liveSessionId:
+            process.env.CHROME_LIVE === 'true' && process.env.CHROME_LIVE_MODE === 'screencast'
+              ? fillSessionId
+              : undefined,
           onScreencast:
-            process.env.CHROME_LIVE === 'true'
+            process.env.CHROME_LIVE === 'true' && process.env.CHROME_LIVE_MODE === 'screencast'
               ? (payload) =>
                   broadcast('screencast', { ...payload, jobId: fillSessionId }, { userId: req.user.id })
               : undefined,

@@ -97,14 +97,23 @@ export function mountChromeLiveRoutes(app) {
   app.get('/api/chrome-live', requireAuth, async (_req, res) => {
     const websockifyOk = await probePort(6080);
     const vncOk = await probePort(5900);
+    const mode = (process.env.CHROME_LIVE_MODE || 'novnc').toLowerCase();
+    if (mode === 'screencast') {
+      return res.json({
+        enabled: true,
+        mode: 'screencast',
+        iframeSrc: null,
+        hint: 'Live = stream ảnh Chrome (SSE). Bấm Fill/Run rồi click/gõ trên ảnh.',
+        backend: { websockify: websockifyOk, vnc: vncOk, screencast: true },
+      });
+    }
     res.json({
       enabled: true,
-      mode: 'screencast',
-      // Screencast qua SSE — không phụ thuộc nginx WebSocket
-      iframeSrc: null,
+      mode: 'novnc',
+      iframeSrc: buildVncIframeSrc(),
       hint:
-        'Live = stream ảnh Chrome (SSE). Bấm Fill/Run rồi click/gõ trên ảnh. Không cần noVNC.',
-      backend: { websockify: websockifyOk, vnc: vncOk, screencast: true },
+        'Live = noVNC (remote desktop). Mở Live để xem + click/gõ. Fill/Run để Chrome hiện trên màn hình.',
+      backend: { websockify: websockifyOk, vnc: vncOk, screencast: false },
     });
   });
 

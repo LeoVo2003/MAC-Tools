@@ -12,6 +12,7 @@ services:
       OPEN_BROWSER: "false"
       HEADLESS: ${HEADLESS:-false}
       CHROME_LIVE: ${CHROME_LIVE:-true}
+      CHROME_LIVE_MODE: ${CHROME_LIVE_MODE:-novnc}
       DISPLAY: ${DISPLAY:-:99}
       CHROME_PATH: ${CHROME_PATH:-/usr/bin/chromium}
       CHROME_NO_SANDBOX: ${CHROME_NO_SANDBOX:-true}

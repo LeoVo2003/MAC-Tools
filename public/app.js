@@ -295,14 +295,6 @@ function connectEvents(jobId) {
     runBtn.disabled = false;
     setCancelVisible(false);
   });
-  eventSource.addEventListener('screencast', (e) => {
-    try {
-      const data = JSON.parse(e.data);
-      onLiveScreencast(data);
-    } catch {
-      /* ignore */
-    }
-  });
 }
 
 function normalizeWpmProjectUrl(raw) {
@@ -877,65 +869,15 @@ async function loadBackups() {
 document.getElementById('refreshBackupsBtn')?.addEventListener('click', loadBackups);
 
 let liveChromeOpen = false;
-let liveSessionId = null;
-let liveMeta = { deviceWidth: 1440, deviceHeight: 900 };
-
-function onLiveScreencast(data) {
-  const img = document.getElementById('liveChromeImg');
-  const waiting = document.getElementById('liveChromeWaiting');
-  if (!img || !data?.image) return;
-  if (data.sessionId) liveSessionId = data.sessionId;
-  else if (data.jobId) liveSessionId = data.jobId;
-  if (data.meta?.deviceWidth) liveMeta.deviceWidth = data.meta.deviceWidth;
-  if (data.meta?.deviceHeight) liveMeta.deviceHeight = data.meta.deviceHeight;
-  img.src = `data:image/jpeg;base64,${data.image}`;
-  img.hidden = false;
-  if (waiting) waiting.hidden = true;
-  if (!liveChromeOpen) {
-    const wrap = document.getElementById('liveChromeFrameWrap');
-    const toggle = document.getElementById('liveChromeToggle');
-    const badge = document.getElementById('liveChromeBadge');
-    liveChromeOpen = true;
-    if (wrap) wrap.hidden = false;
-    if (toggle) toggle.textContent = 'Đóng Live';
-    if (badge) {
-      badge.textContent = 'LIVE';
-      badge.classList.add('on');
-    }
-  }
-}
-
-function liveCoords(ev, img) {
-  const rect = img.getBoundingClientRect();
-  const scaleX = (liveMeta.deviceWidth || img.naturalWidth || 1440) / Math.max(rect.width, 1);
-  const scaleY = (liveMeta.deviceHeight || img.naturalHeight || 900) / Math.max(rect.height, 1);
-  return {
-    x: Math.round((ev.clientX - rect.left) * scaleX),
-    y: Math.round((ev.clientY - rect.top) * scaleY),
-  };
-}
-
-async function sendLiveInput(body) {
-  const sessionId = liveSessionId || currentJobId;
-  if (!sessionId) return;
-  try {
-    await fetch('/api/chrome-live/input', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...body, sessionId }),
-    });
-  } catch {
-    /* ignore */
-  }
-}
+let liveChromeSrc = '';
 
 async function setupLiveChrome() {
   const panel = document.getElementById('liveChromePanel');
   const toggle = document.getElementById('liveChromeToggle');
   const badge = document.getElementById('liveChromeBadge');
   const wrap = document.getElementById('liveChromeFrameWrap');
-  const img = document.getElementById('liveChromeImg');
-  const waiting = document.getElementById('liveChromeWaiting');
+  const frame = document.getElementById('liveChromeFrame');
+  const newTab = document.getElementById('liveChromeNewTab');
   if (!panel || !toggle) return;
 
   try {
@@ -950,8 +892,13 @@ async function setupLiveChrome() {
       return;
     }
     panel.hidden = false;
+    liveChromeSrc = data.iframeSrc || '/chrome-live/';
     const hintEl = panel.querySelector('.live-chrome-hint');
     if (hintEl && data.hint) hintEl.textContent = data.hint;
+    if (newTab) {
+      newTab.hidden = false;
+      newTab.href = liveChromeSrc;
+    }
   } catch {
     panel.hidden = true;
     return;
@@ -960,14 +907,15 @@ async function setupLiveChrome() {
   toggle.onclick = () => {
     liveChromeOpen = !liveChromeOpen;
     if (liveChromeOpen) {
+      if (frame && liveChromeSrc) frame.src = liveChromeSrc;
       if (wrap) wrap.hidden = false;
       toggle.textContent = 'Đóng Live';
       if (badge) {
         badge.textContent = 'LIVE';
         badge.classList.add('on');
       }
-      img?.focus?.();
     } else {
+      if (frame) frame.src = 'about:blank';
       if (wrap) wrap.hidden = true;
       toggle.textContent = 'Mở Live';
       if (badge) {
@@ -976,38 +924,6 @@ async function setupLiveChrome() {
       }
     }
   };
-
-  if (!img || img.dataset.bound) return;
-  img.dataset.bound = '1';
-  img.addEventListener('click', (ev) => {
-    ev.preventDefault();
-    const { x, y } = liveCoords(ev, img);
-    sendLiveInput({ type: 'click', x, y });
-  });
-  img.addEventListener('contextmenu', (ev) => {
-    ev.preventDefault();
-    const { x, y } = liveCoords(ev, img);
-    sendLiveInput({ type: 'click', x, y, button: 'right' });
-  });
-  img.addEventListener('dblclick', (ev) => {
-    ev.preventDefault();
-    const { x, y } = liveCoords(ev, img);
-    sendLiveInput({ type: 'dblclick', x, y });
-  });
-  img.addEventListener('wheel', (ev) => {
-    ev.preventDefault();
-    sendLiveInput({ type: 'wheel', deltaX: ev.deltaX, deltaY: ev.deltaY });
-  }, { passive: false });
-  img.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Tab') ev.preventDefault();
-    if (ev.key.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
-      sendLiveInput({ type: 'type', text: ev.key });
-    } else {
-      sendLiveInput({ type: 'press', key: ev.key });
-    }
-  });
-  if (waiting) waiting.hidden = false;
-  if (img) img.hidden = true;
 }
 
 refreshMe().catch((err) => {
