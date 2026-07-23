@@ -72,10 +72,13 @@ export async function launchBrowser({ downloadPath, headless: headlessOpt } = {}
     if (headless || chromeLive) args.push('--disable-gpu');
   }
 
+  const screenW = Number(process.env.CHROME_SCREEN_W) || 1440;
+  const screenH = Number(process.env.CHROME_SCREEN_H) || 900;
+
   const browser = await puppeteer.launch({
     executablePath,
     headless: headless ? 'new' : false,
-    defaultViewport: headless ? { width: 1440, height: 900 } : null,
+    defaultViewport: headless ? { width: screenW, height: screenH } : null,
     args,
     ignoreDefaultArgs: ['--enable-automation'],
     ignoreHTTPSErrors: true,
@@ -85,6 +88,27 @@ export async function launchBrowser({ downloadPath, headless: headlessOpt } = {}
   const page = await browser.newPage();
   page.setDefaultTimeout(45000);
   page.setDefaultNavigationTimeout(60000);
+
+  // Live: ép cửa sổ full Xvfb — tránh cửa sổ nhỏ giữa desktop
+  // Không setViewport (headed) — viewport giả sẽ làm trang nhỏ trong cửa sổ.
+  if (chromeLive && !headless) {
+    try {
+      const session = await page.createCDPSession();
+      const { windowId } = await session.send('Browser.getWindowForTarget');
+      await session.send('Browser.setWindowBounds', {
+        windowId,
+        bounds: {
+          left: 0,
+          top: 0,
+          width: screenW,
+          height: screenH,
+          windowState: 'normal',
+        },
+      });
+    } catch {
+      /* ignore */
+    }
+  }
 
   // Patch sớm trước mọi document (bổ sung stealth plugin)
   await page.evaluateOnNewDocument(() => {

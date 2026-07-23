@@ -210,7 +210,7 @@ export function mountChromeLiveRoutes(app) {
       mode: 'novnc',
       iframeSrc: '/chrome-live/embed',
       hint: websockifyOk && vncOk
-        ? 'Live = noVNC. Mở Live để xem + click/gõ. Fill/Run để Chrome hiện trên màn hình.'
+        ? 'Live chiếm ~72% màn hình. Fill/Run rồi click/gõ trên Live.'
         : `Live backend chưa sẵn sàng (websockify=${websockifyOk}, vnc=${vncOk}). Restart container.`,
       backend: { websockify: websockifyOk, vnc: vncOk, screencast: false },
     });

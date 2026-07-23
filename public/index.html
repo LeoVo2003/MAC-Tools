@@ -49,7 +49,8 @@
         <button type="button" class="tab" data-tab="backups">Backup files</button>
       </nav>
 
-      <div id="tab-run">
+      <div id="tab-run" class="run-workspace">
+        <div class="run-sidebar">
         <form id="jobForm" class="panel">
           <div class="grid">
             <label>
@@ -154,24 +155,6 @@
           <pre id="logBox" class="log"></pre>
         </section>
 
-        <section class="panel live-chrome-panel" id="liveChromePanel" hidden>
-          <div class="panel-head live-chrome-head">
-            <h2>Live Chrome <span class="live-badge" id="liveChromeBadge">OFF</span></h2>
-            <div class="live-chrome-actions">
-              <button type="button" id="liveChromeToggle" class="secondary tiny">Mở Live</button>
-              <a id="liveChromeNewTab" class="hint" href="/chrome-live/" target="_blank" rel="noopener" hidden>Mở tab mới</a>
-            </div>
-          </div>
-          <p class="hint live-chrome-hint">Live = noVNC — xem + click/gõ Chromium trên server.</p>
-          <div class="live-chrome-frame-wrap" id="liveChromeFrameWrap" hidden>
-            <iframe
-              id="liveChromeFrame"
-              title="Live Chrome noVNC"
-              allow="clipboard-read; clipboard-write; fullscreen"
-            ></iframe>
-          </div>
-        </section>
-
         <section class="panel result" id="resultPanel" hidden>
           <h2>Output fields</h2>
           <dl class="result-grid">
@@ -205,6 +188,25 @@
             </dd>
           </dl>
           <button type="button" id="copyBtn" class="secondary">Copy tất cả</button>
+        </section>
+        </div>
+
+        <section class="panel live-chrome-panel run-live" id="liveChromePanel" hidden>
+          <div class="panel-head live-chrome-head">
+            <h2>Live Chrome <span class="live-badge" id="liveChromeBadge">OFF</span></h2>
+            <div class="live-chrome-actions">
+              <button type="button" id="liveChromeToggle" class="secondary tiny">Mở Live</button>
+              <a id="liveChromeNewTab" class="hint" href="/chrome-live/" target="_blank" rel="noopener" hidden>Mở tab mới</a>
+            </div>
+          </div>
+          <p class="hint live-chrome-hint">Live = noVNC — xem + click/gõ Chromium trên server.</p>
+          <div class="live-chrome-frame-wrap" id="liveChromeFrameWrap" hidden>
+            <iframe
+              id="liveChromeFrame"
+              title="Live Chrome noVNC"
+              allow="clipboard-read; clipboard-write; fullscreen"
+            ></iframe>
+          </div>
         </section>
       </div>
 

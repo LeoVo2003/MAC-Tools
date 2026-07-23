@@ -393,6 +393,11 @@ export async function fillCustomerDataFromUrls(
     };
   } finally {
     if (sid) await stopLiveSession(sid).catch(() => {});
-    await browser.close().catch(() => {});
+    // CHROME_LIVE: giữ Chrome để tương tác trên panel Live (giống Run)
+    if (process.env.CHROME_LIVE === 'true' && process.env.HEADLESS !== 'true') {
+      log('→ Live Chrome: giữ mở sau Fill — tương tác trên panel Live.');
+    } else {
+      await browser.close().catch(() => {});
+    }
   }
 }

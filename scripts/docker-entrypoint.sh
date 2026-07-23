@@ -34,13 +34,10 @@ if ! pgrep -x Xvfb >/dev/null 2>&1; then
 fi
 echo "[entrypoint] Xvfb OK ($DISPLAY)"
 
-if command -v fluxbox >/dev/null 2>&1; then
-  fluxbox >/tmp/fluxbox.log 2>&1 &
-fi
+# Không chạy fluxbox — taskbar làm Chrome nhỏ / bị cắt trong Live
 
-# VNC
+# VNC — không -ncache (tránh thumbnail nhân đôi)
 pkill -x x11vnc >/dev/null 2>&1 || true
-# Không dùng -ncache: noVNC sẽ hiện nhiều bản màn hình nhỏ xếp dọc
 x11vnc -display "$DISPLAY" -forever -shared -rfbport 5900 -nopw -xkb \
   -localhost \
   >/tmp/x11vnc.log 2>&1 &

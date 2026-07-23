@@ -880,15 +880,51 @@ async function setupLiveChrome() {
   const newTab = document.getElementById('liveChromeNewTab');
   if (!panel || !toggle) return;
 
+  const openLive = () => {
+    if (liveChromeOpen) return;
+    liveChromeOpen = true;
+    document.body.classList.add('live-layout');
+    const src = liveChromeSrc.startsWith('http')
+      ? liveChromeSrc
+      : `${window.location.origin}${liveChromeSrc}`;
+    if (frame) {
+      frame.removeAttribute('sandbox');
+      frame.src = 'about:blank';
+      requestAnimationFrame(() => {
+        frame.src = `${src}${src.includes('?') ? '&' : '?'}_=${Date.now()}`;
+      });
+    }
+    if (wrap) wrap.hidden = false;
+    toggle.textContent = 'Đóng Live';
+    if (badge) {
+      badge.textContent = 'LIVE';
+      badge.classList.add('on');
+    }
+  };
+
+  const closeLive = () => {
+    liveChromeOpen = false;
+    document.body.classList.remove('live-layout');
+    if (frame) frame.src = 'about:blank';
+    if (wrap) wrap.hidden = true;
+    toggle.textContent = 'Mở Live';
+    if (badge) {
+      badge.textContent = 'OFF';
+      badge.classList.remove('on');
+    }
+  };
+
   try {
     const res = await fetch('/api/chrome-live');
     if (!res.ok) {
       panel.hidden = true;
+      document.body.classList.remove('live-layout');
       return;
     }
     const data = await res.json();
     if (!data.enabled) {
       panel.hidden = true;
+      document.body.classList.remove('live-layout');
       return;
     }
     panel.hidden = false;
@@ -897,43 +933,20 @@ async function setupLiveChrome() {
     if (hintEl && data.hint) hintEl.textContent = data.hint;
     if (newTab) {
       newTab.hidden = false;
-      // Tab mới = UI noVNC đầy đủ (đang chạy ngon); panel = /embed
       newTab.href = '/chrome-live/';
     }
+    // Layout ngang + tự mở Live khi có CHROME_LIVE
+    document.body.classList.add('live-layout');
+    openLive();
   } catch {
     panel.hidden = true;
+    document.body.classList.remove('live-layout');
     return;
   }
 
   toggle.onclick = () => {
-    liveChromeOpen = !liveChromeOpen;
-    if (liveChromeOpen) {
-      const src = liveChromeSrc.startsWith('http')
-        ? liveChromeSrc
-        : `${window.location.origin}${liveChromeSrc}`;
-      if (frame) {
-        frame.removeAttribute('sandbox');
-        frame.src = 'about:blank';
-        // Load lại embed sau tick — tránh cache kẹt 「连接中」
-        requestAnimationFrame(() => {
-          frame.src = `${src}${src.includes('?') ? '&' : '?'}_=${Date.now()}`;
-        });
-      }
-      if (wrap) wrap.hidden = false;
-      toggle.textContent = 'Đóng Live';
-      if (badge) {
-        badge.textContent = 'LIVE';
-        badge.classList.add('on');
-      }
-    } else {
-      if (frame) frame.src = 'about:blank';
-      if (wrap) wrap.hidden = true;
-      toggle.textContent = 'Mở Live';
-      if (badge) {
-        badge.textContent = 'OFF';
-        badge.classList.remove('on');
-      }
-    }
+    if (liveChromeOpen) closeLive();
+    else openLive();
   };
 }
 

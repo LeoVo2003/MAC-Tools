@@ -316,7 +316,7 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
       await browser.close().catch(() => {});
       hooks.setBrowser?.(null);
     } else if (process.env.CHROME_LIVE === 'true') {
-      log('→ Live Chrome: panel Live vẫn stream — click/gõ trên ảnh để tương tác.');
+      log('→ Live Chrome: panel Live vẫn mở — click/gõ trên Live để tương tác.');
     } else {
       log('→ Chrome giữ mở — đóng tay khi xem xong.');
     }
@@ -360,7 +360,7 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
       await browser.close().catch(() => {});
       hooks.setBrowser?.(null);
     } else if (process.env.CHROME_LIVE === 'true') {
-      log('→ Live Chrome: panel Live vẫn xem được trang lỗi — tương tác trên ảnh.');
+      log('→ Live Chrome: panel Live vẫn xem được trang lỗi — tương tác trên Live.');
     } else {
       log('→ Chrome giữ mở để xem lỗi — đóng tay khi xong.');
     }
