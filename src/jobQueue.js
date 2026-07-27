@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { acquireCpuBoost, releaseCpuBoost } from './dockerCpuScale.js';
 
 /**
  * Queue chạy song song có giới hạn (mặc định 4 Chrome cùng lúc).
@@ -82,6 +83,9 @@ export function createJobQueue({ onLog, onChange, maxConcurrent = 4 } = {}) {
       onLog?.(job.id, line);
     };
 
+    await acquireCpuBoost('job').catch((err) => {
+      console.warn('[queue] cpu boost:', err?.message || err);
+    });
     try {
       push('=== Job bắt đầu ===');
       if (job.cancelled) throw new Error('Job đã bị hủy.');
@@ -107,6 +111,9 @@ export function createJobQueue({ onLog, onChange, maxConcurrent = 4 } = {}) {
       active.delete(job.id);
       remember(job);
       onChange?.(snapshot());
+      await releaseCpuBoost('job').catch((err) => {
+        console.warn('[queue] cpu release:', err?.message || err);
+      });
       setImmediate(() => pump());
     }
   }

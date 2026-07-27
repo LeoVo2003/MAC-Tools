@@ -6,7 +6,7 @@
 import { spawn, spawnSync } from 'child_process';
 import net from 'net';
 import fs from 'fs';
-import { scaleCpuIdle, scaleCpuLive } from './dockerCpuScale.js';
+import { acquireCpuBoost, releaseCpuBoost, resetCpuScaleIdle } from './dockerCpuScale.js';
 
 const VNC_PORT = 5900;
 const WS_PORT = 6080;
@@ -19,6 +19,23 @@ let startPromise = null;
 let x11Child = null;
 let wsChild = null;
 let idleTimer = null;
+let liveBoostHeld = false;
+
+async function holdLiveBoost() {
+  if (liveBoostHeld) return;
+  liveBoostHeld = true;
+  await acquireCpuBoost('live').catch((err) => {
+    console.warn('[live-vnc] cpu boost:', err?.message || err);
+  });
+}
+
+async function dropLiveBoost() {
+  if (!liveBoostHeld) return;
+  liveBoostHeld = false;
+  await releaseCpuBoost('live').catch((err) => {
+    console.warn('[live-vnc] cpu release:', err?.message || err);
+  });
+}
 
 function probePort(port, host = '127.0.0.1') {
   return new Promise((resolve) => {
@@ -107,9 +124,7 @@ async function startProcesses() {
   }
 
   // Nới CPU trước khi spawn VNC (Live cần headroom)
-  await scaleCpuLive().catch((err) => {
-    console.warn('[live-vnc] scale live:', err?.message || err);
-  });
+  await holdLiveBoost();
 
   killByName(['x11vnc', 'websockify.*6080']);
   await sleep(300);
@@ -185,9 +200,7 @@ function stopProcesses() {
   wsChild = null;
   killByName(['x11vnc', 'websockify.*6080']);
   console.log('[live-vnc] stopped (no Live viewers)');
-  scaleCpuIdle().catch((err) => {
-    console.warn('[live-vnc] scale idle:', err?.message || err);
-  });
+  dropLiveBoost();
 }
 
 async function runStart() {
@@ -211,11 +224,8 @@ export async function acquireLiveVnc() {
   clearIdleTimer();
   refCount += 1;
   try {
-    // Scale sớm khi user bấm Mở Live (kể cả VNC đã chạy)
     if (refCount === 1) {
-      await scaleCpuLive().catch((err) => {
-        console.warn('[live-vnc] scale live:', err?.message || err);
-      });
+      await holdLiveBoost();
     }
     const result = await runStart();
     return { ...result, refCount };
@@ -245,7 +255,7 @@ export async function probeLiveVnc() {
 
 /** Boot: ép về idle (tránh kẹt 1.5 sau crash). */
 export function initLiveVncIdleCpu() {
-  scaleCpuIdle().catch((err) => {
+  resetCpuScaleIdle().catch((err) => {
     console.warn('[live-vnc] boot scale idle:', err?.message || err);
   });
 }

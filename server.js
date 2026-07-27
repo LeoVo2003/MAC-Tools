@@ -26,6 +26,7 @@ import { listBackupFolders, listBackupFiles, resolveBackupFile } from './src/bac
 import { purgeOldBackups, buildHealthReport, detectStaleJobs } from './src/ops.js';
 import { mountChromeLiveRoutes, attachChromeLiveWs, chromeLiveEnabled } from './src/chromeLive.js';
 import { initLiveVncIdleCpu } from './src/liveVnc.js';
+import { acquireCpuBoost, releaseCpuBoost } from './src/dockerCpuScale.js';
 import { dispatchLiveInput, listLiveSessions, getLiveSession } from './src/liveSession.js';
 import { clearLiveBrowsersForUser, takeLiveBrowser } from './src/liveBrowser.js';
 
@@ -182,6 +183,9 @@ export function createApp() {
 
     const logs = [];
     const fillSessionId = `fill-${req.user.id}`;
+    await acquireCpuBoost('fill').catch((err) => {
+      console.warn('[fill] cpu boost:', err?.message || err);
+    });
     try {
       // Fill mới: clear Chrome Live cũ (tránh lag / timeout trên Xvfb)
       const clearedReg = await clearLiveBrowsersForUser(req.user.id);
@@ -223,6 +227,10 @@ export function createApp() {
       res.status(500).json({
         error: err?.message || String(err),
         logs,
+      });
+    } finally {
+      await releaseCpuBoost('fill').catch((err) => {
+        console.warn('[fill] cpu release:', err?.message || err);
       });
     }
   });

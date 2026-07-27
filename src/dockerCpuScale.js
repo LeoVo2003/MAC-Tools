@@ -1,20 +1,29 @@
 /**
- * Scale CPU limit của container qua Docker API (docker.sock).
- * Idle → DOCKER_CPU_IDLE (0.3); Mở Live → DOCKER_CPU_LIVE (1.5).
+ * Scale CPU container qua Docker API (docker.sock).
+ * Idle 0.3 khi không có holder; Fill/Run/Live → DOCKER_CPU_LIVE (1.5).
  */
 import fs from 'fs';
 import http from 'http';
 
 const SOCKET = process.env.DOCKER_SOCK || '/var/run/docker.sock';
 const IDLE = Number(process.env.DOCKER_CPU_IDLE) || 0.3;
-const LIVE = Number(process.env.DOCKER_CPU_LIVE) || 1.5;
+/** Boost khi Chrome đang làm việc (Fill/Run) hoặc Live mở */
+const BOOST = Number(process.env.DOCKER_CPU_LIVE) || 1.5;
 
+/** @type {Map<string, number>} */
+const holders = new Map();
 let lastMode = null;
 let warnedOff = false;
 
 function scaleEnabled() {
   const v = (process.env.DOCKER_CPU_SCALE || 'true').toLowerCase();
   return v !== '0' && v !== 'false' && v !== 'off';
+}
+
+function holderTotal() {
+  let n = 0;
+  for (const c of holders.values()) n += c;
+  return n;
 }
 
 function resolveContainerId() {
@@ -84,7 +93,7 @@ async function setNanoCpus(cpus) {
   if (!fs.existsSync(SOCKET)) {
     if (!warnedOff) {
       console.warn(
-        '[cpu-scale] không có docker.sock — giữ cpus compose. Mount /var/run/docker.sock để scale Live.'
+        '[cpu-scale] không có docker.sock — giữ cpus compose. Mount /var/run/docker.sock để scale.'
       );
       warnedOff = true;
     }
@@ -117,28 +126,65 @@ async function setNanoCpus(cpus) {
   return { ok: false, status: res.status, detail };
 }
 
-/** Mở Live / start VNC → ~1.5 CPU */
-export async function scaleCpuLive() {
-  if (lastMode === 'live') return { ok: true, already: true, mode: 'live', cpus: LIVE };
-  const result = await setNanoCpus(LIVE);
-  if (result.ok) lastMode = 'live';
-  return { ...result, mode: 'live', cpus: LIVE };
+async function applyHolders() {
+  const total = holderTotal();
+  const want = total > 0 ? 'boost' : 'idle';
+  const cpus = total > 0 ? BOOST : IDLE;
+  if (lastMode === want) {
+    return { ok: true, already: true, mode: want, cpus, holders: total };
+  }
+  const result = await setNanoCpus(cpus);
+  if (result.ok) lastMode = want;
+  return { ...result, mode: want, cpus, holders: total };
 }
 
-/** Đóng Live / idle → ~0.3 CPU */
+/** Giữ boost (Fill / Run / Live). Nhiều holder → chỉ hạ idle khi hết tất cả. */
+export async function acquireCpuBoost(reason = 'work') {
+  const key = String(reason || 'work');
+  holders.set(key, (holders.get(key) || 0) + 1);
+  return applyHolders();
+}
+
+export async function releaseCpuBoost(reason = 'work') {
+  const key = String(reason || 'work');
+  const next = (holders.get(key) || 0) - 1;
+  if (next <= 0) holders.delete(key);
+  else holders.set(key, next);
+  return applyHolders();
+}
+
+/** @deprecated dùng acquireCpuBoost — giữ alias cho Live */
+export async function scaleCpuLive() {
+  return acquireCpuBoost('live');
+}
+
+/** Chỉ idle nếu không còn holder nào (tránh hạ CPU khi Fill đang chạy). */
 export async function scaleCpuIdle() {
-  if (lastMode === 'idle') return { ok: true, already: true, mode: 'idle', cpus: IDLE };
-  const result = await setNanoCpus(IDLE);
-  if (result.ok) lastMode = 'idle';
-  return { ...result, mode: 'idle', cpus: IDLE };
+  if (holderTotal() > 0) {
+    return { ok: true, skipped: true, reason: 'holders-active', holders: holderTotal() };
+  }
+  return applyHolders();
+}
+
+/** Boot: xóa holder + ép idle. */
+export async function resetCpuScaleIdle() {
+  holders.clear();
+  lastMode = null;
+  return setNanoCpus(IDLE).then((r) => {
+    if (r.ok) lastMode = 'idle';
+    return { ...r, mode: 'idle', cpus: IDLE, holders: 0 };
+  });
 }
 
 export function cpuScaleConfig() {
   return {
     enabled: scaleEnabled(),
     idle: IDLE,
-    live: LIVE,
+    live: BOOST,
+    boost: BOOST,
     socket: SOCKET,
     lastMode,
+    holders: Object.fromEntries(holders),
+    holderTotal: holderTotal(),
   };
 }
