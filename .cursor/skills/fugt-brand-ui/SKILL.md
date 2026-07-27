@@ -41,10 +41,11 @@ Internal ops console: Fill/Run WPM + WordPress F Package. Audience = team nội 
 - Mono / log: **IBM Plex Mono**
 
 ## Layout (đã chốt)
-- Run: sidebar ~28% | Live ~72% khi `body.live-layout`
+- Run: sidebar ~28% | Live ~72% khi `body.live-layout` (chỉ sau khi user bấm Mở Live)
+- Live mặc định **đóng** — không auto-open; x11vnc on-demand qua `/api/chrome-live/start|stop`
 - Khi Live bật: `body` overflow hidden + flex viewport; sidebar scroll riêng; Live cố định (không sticky)
 - `#tab-run.run-workspace` phải `display: grid` (không flex cột — sẽ đẩy Live xuống dưới)
-- Local không Live trừ khi `CHROME_LIVE=true`
+- Local không Live trừ khi `CHROME_LIVE=true`; VPS team không cần xem → `CHROME_LIVE=false`
 - Brand name là tín hiệu hero trên header — không để headline phụ át brand.
 
 ## Spacing
@@ -57,4 +58,4 @@ Internal ops console: Fill/Run WPM + WordPress F Package. Audience = team nội 
 
 ## Copy
 - Tiếng Việt, câu ngắn, nút theo hành động: Fill data, Run, Resume, Clear báo cáo.
-- Live hint: ngắn, không nhắc tỉ lệ màn hình.
+- Live hint: ngắn, nhắc tiết kiệm CPU / tự bật khi cần — không nhắc tỉ lệ màn hình.

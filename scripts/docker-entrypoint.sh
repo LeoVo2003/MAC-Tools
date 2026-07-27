@@ -23,7 +23,7 @@ wait_port() {
   return 1
 }
 
-# Virtual framebuffer
+# Virtual framebuffer (Chrome headed cần DISPLAY) — giữ 1440x900
 pkill -x Xvfb >/dev/null 2>&1 || true
 Xvfb "$DISPLAY" -screen 0 1440x900x24 -ac +extension RANDR -nolisten tcp >/tmp/xvfb.log 2>&1 &
 sleep 0.8
@@ -36,32 +36,10 @@ echo "[entrypoint] Xvfb OK ($DISPLAY)"
 
 # Không chạy fluxbox — taskbar làm Chrome nhỏ / bị cắt trong Live
 
-# VNC — không -ncache (tránh thumbnail nhân đôi)
+# x11vnc + websockify: KHÔNG start sẵn (CPU nặng). App bật on-demand khi user Mở Live.
 pkill -x x11vnc >/dev/null 2>&1 || true
-x11vnc -display "$DISPLAY" -forever -shared -rfbport 5900 -nopw -xkb \
-  -localhost \
-  >/tmp/x11vnc.log 2>&1 &
-sleep 0.6
-if ! wait_port 5900 "x11vnc"; then
-  echo "[entrypoint] x11vnc log:"; cat /tmp/x11vnc.log || true
-  exit 1
-fi
-
-# Websockify → VNC
 pkill -f "websockify.*6080" >/dev/null 2>&1 || true
-if command -v websockify >/dev/null 2>&1; then
-  websockify --heartbeat=30 127.0.0.1:6080 127.0.0.1:5900 >/tmp/websockify.log 2>&1 &
-elif python3 -c "import websockify" >/dev/null 2>&1; then
-  python3 -m websockify --heartbeat=30 127.0.0.1:6080 127.0.0.1:5900 >/tmp/websockify.log 2>&1 &
-else
-  echo "[entrypoint] ERROR: websockify not found"
-  exit 1
-fi
-sleep 0.5
-if ! wait_port 6080 "websockify"; then
-  echo "[entrypoint] websockify log:"; cat /tmp/websockify.log || true
-  exit 1
-fi
+echo "[entrypoint] x11vnc/websockify deferred (on-demand via /api/chrome-live/start)"
 
-echo "[entrypoint] Xvfb + x11vnc + websockify ready — starting app"
+echo "[entrypoint] Xvfb ready — starting app"
 exec node server.js

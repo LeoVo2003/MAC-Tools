@@ -1,13 +1,14 @@
 /**
  * Live Chrome (noVNC) — static + WebSocket khi CHROME_LIVE=true.
  * Path: /chrome-live/  (cần đăng nhập)
+ * x11vnc/websockify: on-demand qua /api/chrome-live/start|stop
  */
 import fs from 'fs';
-import net from 'net';
 import path from 'path';
 import express from 'express';
 import httpProxy from 'http-proxy';
 import { requireAuth } from './auth.js';
+import { acquireLiveVnc, releaseLiveVnc, probeLiveVnc, ensureLiveVnc } from './liveVnc.js';
 
 const NOVNC_CANDIDATES = [
   process.env.NOVNC_PATH,
@@ -37,7 +38,6 @@ function allowEmbed(res) {
   } catch {
     /* ignore */
   }
-  // Cho phép nhúng iframe same-origin (panel Live trong tool)
   res.setHeader('Content-Security-Policy', "frame-ancestors 'self'");
 }
 
@@ -55,23 +55,8 @@ function requireAuthPage(req, res, next) {
   requireAuth(req, res, next);
 }
 
-function probePort(port, host = '127.0.0.1') {
-  return new Promise((resolve) => {
-    const sock = net.connect({ port, host }, () => {
-      sock.end();
-      resolve(true);
-    });
-    sock.on('error', () => resolve(false));
-    sock.setTimeout(800, () => {
-      sock.destroy();
-      resolve(false);
-    });
-  });
-}
-
 /**
  * path=websockify (tương đối) — cùng cách tab /chrome-live đang chạy ngon.
- * KHÔNG dùng path tuyệt đối / encode %2F (dễ lệch URL WebSocket trong iframe).
  */
 export function buildVncIframeSrc() {
   const q = [
@@ -84,7 +69,7 @@ export function buildVncIframeSrc() {
   return `/chrome-live/vnc.html?${q}`;
 }
 
-/** Embed nhẹ — RFB nối thẳng WS, tránh UI noVNC kẹt 「连接中」 trong iframe. */
+/** Embed nhẹ — RFB nối thẳng WS. */
 function embedHtml() {
   return `<!DOCTYPE html>
 <html lang="vi">
@@ -121,7 +106,6 @@ async function tryRfb(){
   if (!RFB) throw new Error('no rfb');
   show('Đang kết nối VNC…');
   const rfb = new RFB(screen, wsUrl);
-  // Scale full khung iframe — không clip (tránh màn hình nhỏ giữa panel)
   rfb.scaleViewport = true;
   rfb.clipViewport = false;
   rfb.resizeSession = false;
@@ -193,36 +177,92 @@ export function mountChromeLiveRoutes(app) {
   });
 
   app.get('/api/chrome-live', requireAuth, async (_req, res) => {
-    const websockifyOk = await probePort(6080);
-    const vncOk = await probePort(5900);
+    const backend = await probeLiveVnc();
     const mode = (process.env.CHROME_LIVE_MODE || 'novnc').toLowerCase();
     if (mode === 'screencast') {
       return res.json({
         enabled: true,
         mode: 'screencast',
         iframeSrc: null,
-        hint: 'Live = stream ảnh Chrome (SSE). Bấm Fill/Run rồi click/gõ trên ảnh.',
-        backend: { websockify: websockifyOk, vnc: vncOk, screencast: true },
+        autoOpen: false,
+        hint: 'Live = stream ảnh Chrome (SSE). Bấm Mở Live rồi Fill/Run.',
+        backend: { ...backend, screencast: true },
       });
     }
     res.json({
       enabled: true,
       mode: 'novnc',
       iframeSrc: '/chrome-live/embed',
-      hint: websockifyOk && vncOk
-        ? 'Fill/Run rồi click/gõ trên Live.'
-        : `Live backend chưa sẵn sàng (websockify=${websockifyOk}, vnc=${vncOk}). Restart container.`,
-      backend: { websockify: websockifyOk, vnc: vncOk, screencast: false },
+      autoOpen: false,
+      hint: 'Live mặc định tắt (tiết kiệm CPU). Bấm Mở Live khi cần xem/click Chrome.',
+      backend: { ...backend, screencast: false },
     });
   });
 
-  app.get('/chrome-live/embed', requireAuthPage, (_req, res) => {
+  app.post('/api/chrome-live/start', requireAuth, async (_req, res) => {
+    const mode = (process.env.CHROME_LIVE_MODE || 'novnc').toLowerCase();
+    if (mode === 'screencast') {
+      return res.json({ ok: true, mode: 'screencast', message: 'Screencast không cần x11vnc.' });
+    }
+    try {
+      const result = await acquireLiveVnc();
+      res.json({
+        ok: true,
+        mode: 'novnc',
+        already: Boolean(result.already),
+        refCount: result.refCount,
+        message: result.already ? 'Live backend đang chạy.' : 'Đã bật x11vnc.',
+      });
+    } catch (err) {
+      res.status(503).json({ error: err?.message || String(err) });
+    }
+  });
+
+  app.post('/api/chrome-live/stop', requireAuth, async (_req, res) => {
+    const mode = (process.env.CHROME_LIVE_MODE || 'novnc').toLowerCase();
+    if (mode === 'screencast') {
+      return res.json({ ok: true, mode: 'screencast', stopped: false });
+    }
+    try {
+      const result = await releaseLiveVnc();
+      res.json({
+        ok: true,
+        stopped: result.stopped,
+        refCount: result.refCount,
+        message: result.stopped ? 'Đã tắt x11vnc.' : 'Còn viewer khác — giữ VNC.',
+      });
+    } catch (err) {
+      res.status(500).json({ error: err?.message || String(err) });
+    }
+  });
+
+  app.get('/chrome-live/embed', requireAuthPage, async (_req, res) => {
     allowEmbed(res);
+    try {
+      await ensureLiveVnc();
+    } catch (err) {
+      return res
+        .status(503)
+        .type('html')
+        .send(
+          `<!doctype html><meta charset="utf-8"><p>Không bật được Live: ${String(err?.message || err)}</p>`
+        );
+    }
     res.type('html').send(embedHtml());
   });
 
-  app.get(['/chrome-live', '/chrome-live/'], requireAuthPage, (_req, res) => {
+  app.get(['/chrome-live', '/chrome-live/'], requireAuthPage, async (_req, res) => {
     allowEmbed(res);
+    try {
+      await ensureLiveVnc();
+    } catch (err) {
+      return res
+        .status(503)
+        .type('html')
+        .send(
+          `<!doctype html><meta charset="utf-8"><p>Không bật được Live: ${String(err?.message || err)}</p>`
+        );
+    }
     res.redirect(302, buildVncIframeSrc());
   });
 
@@ -278,5 +318,5 @@ export function attachChromeLiveWs(server) {
     }
   });
 
-  console.log('[chrome-live] WebSocket proxy: /chrome-live/websockify → :6080');
+  console.log('[chrome-live] WebSocket proxy: /chrome-live/websockify → :6080 (VNC on-demand)');
 }
