@@ -4,7 +4,8 @@ services:
     build: .
     ports:
       - "3847:3847"
-    shm_size: "1gb"
+    cpus: "0.30"
+    shm_size: "256m"
     env_file:
       - .env
     environment:
