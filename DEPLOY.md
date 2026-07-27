@@ -94,7 +94,9 @@ Nếu Live hiện logo noVNC + "无法连接 / Failed to connect": gần như ch
 cd /home/flashvps/User-Guide
 # 1) .env: CHROME_LIVE=true (hoặc false nếu team không cần Live), HEADLESS=false, secrets
 #    Live mặc định tắt trên UI — user bấm Mở Live mới start x11vnc; Đóng Live = tắt (tiết kiệm CPU)
+#    CPU: idle 0.3; Mở Live scale ~1.5 qua docker.sock (compose đã mount) — Đóng Live hạ lại 0.3
 # 2) nginx có /api/events + /chrome-live/ + nginx -t && systemctl reload nginx
+# 3) recreate để nhận docker.sock + shm 512m: docker compose up -d --force-recreate
 docker compose pull
 docker compose up -d --force-recreate
 docker compose ps

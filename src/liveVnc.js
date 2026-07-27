@@ -1,10 +1,12 @@
 /**
  * x11vnc + websockify — bật khi user mở Live, tắt khi đóng (tiết kiệm CPU).
  * Xvfb vẫn chạy sẵn từ entrypoint (Chrome headed cần DISPLAY).
+ * Mở Live → scale CPU lên; đóng → hạ về idle (docker.sock).
  */
 import { spawn, spawnSync } from 'child_process';
 import net from 'net';
 import fs from 'fs';
+import { scaleCpuIdle, scaleCpuLive } from './dockerCpuScale.js';
 
 const VNC_PORT = 5900;
 const WS_PORT = 6080;
@@ -104,10 +106,16 @@ async function startProcesses() {
     throw new Error('x11vnc không có trên server (chỉ VPS/Docker có Live noVNC).');
   }
 
+  // Nới CPU trước khi spawn VNC (Live cần headroom)
+  await scaleCpuLive().catch((err) => {
+    console.warn('[live-vnc] scale live:', err?.message || err);
+  });
+
   killByName(['x11vnc', 'websockify.*6080']);
   await sleep(300);
 
   if (!(await probePort(VNC_PORT))) {
+    // -nap/-wait/-deferupdate: ít poll hơn khi màn hình ít đổi (bớt CPU)
     x11Child = spawnLogged(
       'x11vnc',
       [
@@ -120,6 +128,11 @@ async function startProcesses() {
         '-nopw',
         '-xkb',
         '-localhost',
+        '-nap',
+        '-wait',
+        '30',
+        '-deferupdate',
+        '30',
       ],
       '/tmp/x11vnc.log'
     );
@@ -172,6 +185,9 @@ function stopProcesses() {
   wsChild = null;
   killByName(['x11vnc', 'websockify.*6080']);
   console.log('[live-vnc] stopped (no Live viewers)');
+  scaleCpuIdle().catch((err) => {
+    console.warn('[live-vnc] scale idle:', err?.message || err);
+  });
 }
 
 async function runStart() {
@@ -195,6 +211,12 @@ export async function acquireLiveVnc() {
   clearIdleTimer();
   refCount += 1;
   try {
+    // Scale sớm khi user bấm Mở Live (kể cả VNC đã chạy)
+    if (refCount === 1) {
+      await scaleCpuLive().catch((err) => {
+        console.warn('[live-vnc] scale live:', err?.message || err);
+      });
+    }
     const result = await runStart();
     return { ...result, refCount };
   } catch (err) {
@@ -219,4 +241,11 @@ export async function probeLiveVnc() {
   const websockify = await probePort(WS_PORT);
   const vnc = await probePort(VNC_PORT);
   return { websockify, vnc, running: websockify && vnc, refCount };
+}
+
+/** Boot: ép về idle (tránh kẹt 1.5 sau crash). */
+export function initLiveVncIdleCpu() {
+  scaleCpuIdle().catch((err) => {
+    console.warn('[live-vnc] boot scale idle:', err?.message || err);
+  });
 }

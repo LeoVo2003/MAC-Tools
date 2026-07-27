@@ -25,6 +25,7 @@ import { fillCustomerDataFromUrls } from './src/steps/fillData.js';
 import { listBackupFolders, listBackupFiles, resolveBackupFile } from './src/backupsApi.js';
 import { purgeOldBackups, buildHealthReport, detectStaleJobs } from './src/ops.js';
 import { mountChromeLiveRoutes, attachChromeLiveWs, chromeLiveEnabled } from './src/chromeLive.js';
+import { initLiveVncIdleCpu } from './src/liveVnc.js';
 import { dispatchLiveInput, listLiveSessions, getLiveSession } from './src/liveSession.js';
 import { clearLiveBrowsersForUser, takeLiveBrowser } from './src/liveBrowser.js';
 
@@ -571,6 +572,7 @@ export async function startServer({ openBrowser: shouldOpen } = {}) {
     console.log(`Download dir: ${DOWNLOADS_DIR}`);
     console.log(`Health: ${url}/api/health`);
     if (chromeLiveEnabled()) console.log(`Live Chrome: ${url}/chrome-live/`);
+    if (chromeLiveEnabled()) initLiveVncIdleCpu();
     if (autoOpen) setTimeout(() => openBrowser(url), 400);
   });
 

@@ -9,6 +9,7 @@ import express from 'express';
 import httpProxy from 'http-proxy';
 import { requireAuth } from './auth.js';
 import { acquireLiveVnc, releaseLiveVnc, probeLiveVnc, ensureLiveVnc } from './liveVnc.js';
+import { cpuScaleConfig } from './dockerCpuScale.js';
 
 const NOVNC_CANDIDATES = [
   process.env.NOVNC_PATH,
@@ -196,6 +197,7 @@ export function mountChromeLiveRoutes(app) {
       autoOpen: false,
       hint: 'Live mặc định tắt (tiết kiệm CPU). Bấm Mở Live khi cần xem/click Chrome.',
       backend: { ...backend, screencast: false },
+      cpuScale: cpuScaleConfig(),
     });
   });
 

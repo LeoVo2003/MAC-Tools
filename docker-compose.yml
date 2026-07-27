@@ -4,8 +4,9 @@ services:
     build: .
     ports:
       - "3847:3847"
+    # Idle mặc định 0.3 — app scale lên DOCKER_CPU_LIVE khi Mở Live (cần docker.sock)
     cpus: "0.30"
-    shm_size: "256m"
+    shm_size: "512m"
     env_file:
       - .env
     environment:
@@ -27,10 +28,15 @@ services:
       APP_SECRET: ${APP_SECRET:?set APP_SECRET}
       ADMIN_EMAILS: ${ADMIN_EMAILS:-}
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+      DOCKER_CPU_SCALE: ${DOCKER_CPU_SCALE:-true}
+      DOCKER_CPU_IDLE: ${DOCKER_CPU_IDLE:-0.3}
+      DOCKER_CPU_LIVE: ${DOCKER_CPU_LIVE:-1.5}
     volumes:
       - fugt_downloads:/data/downloads
       - fugt_data:/app/data
       - fugt_errors:/app/errors
+      # Cho phép docker update --cpus khi Mở/Đóng Live (idle 0.3 ↔ live 1.5)
+      - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
     healthcheck:
       test:
