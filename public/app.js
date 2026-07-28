@@ -168,11 +168,14 @@ function applyRoleUi(user) {
   document.querySelectorAll('[data-admin-only]').forEach((el) => {
     el.hidden = !isAdmin;
   });
-  const reportsTab = document.querySelector('.tab[data-tab="reports"]');
-  if (!isAdmin && reportsTab?.classList.contains('active')) {
-    document.querySelector('.tab[data-tab="run"]')?.click();
-  }
+  // User thường: không hiện tab (tránh nhầm với nút Run) — luôn ở màn job
   if (!isAdmin) {
+    document.querySelectorAll('.tab').forEach((b) => b.classList.remove('active'));
+    document.querySelector('.tab[data-tab="run"]')?.classList.add('active');
+    const tabRun = document.getElementById('tab-run');
+    const tabReports = document.getElementById('tab-reports');
+    if (tabRun) tabRun.hidden = false;
+    if (tabReports) tabReports.hidden = true;
     const mainRadio = form?.querySelector('input[name="webTargetMode"][value="main"]');
     if (mainRadio) mainRadio.checked = true;
   }
