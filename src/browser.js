@@ -34,13 +34,16 @@ export function findChromePath() {
 
 /**
  * Headed chỉ khi cần xem Live; còn lại headless cho nhanh.
+ * - force=true (Resume / wantLive) → headed
  * - Live panel đang mở → headed (noVNC)
  * - FORCE_HEADED=true → headed
  * - HEADLESS=true → luôn headless
  * - CHROME_LIVE + Live tắt → headless (không vẽ Xvfb)
  * - Local không CHROME_LIVE → theo HEADLESS (mặc định headed để debug)
+ * @param {{ force?: boolean }} [opts]
  */
-export function shouldRunHeaded() {
+export function shouldRunHeaded(opts = {}) {
+  if (opts.force) return true;
   if (process.env.FORCE_HEADED === 'true') return true;
   if (process.env.HEADLESS === 'true') return false;
   if (process.env.CHROME_LIVE === 'true') {
@@ -55,13 +58,19 @@ export function shouldRunHeaded() {
 
 /**
  * Launch system Chrome with stealth — tránh navigator.webdriver lộ như Playwright CDP.
- * @param {{ downloadPath?: string, headless?: boolean }} [opts]
+ * @param {{ downloadPath?: string, headless?: boolean, forceHeaded?: boolean }} [opts]
  */
-export async function launchBrowser({ downloadPath, headless: headlessOpt } = {}) {
+export async function launchBrowser({
+  downloadPath,
+  headless: headlessOpt,
+  forceHeaded = false,
+} = {}) {
   const executablePath = findChromePath();
   const chromeLiveEnv = process.env.CHROME_LIVE === 'true';
   const headless =
-    headlessOpt !== undefined ? Boolean(headlessOpt) : !shouldRunHeaded();
+    headlessOpt !== undefined
+      ? Boolean(headlessOpt)
+      : !shouldRunHeaded({ force: forceHeaded });
   const userDataDir = process.env.CHROME_USER_DATA_DIR || undefined;
 
   const args = [

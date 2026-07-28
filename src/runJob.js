@@ -45,7 +45,7 @@ function normalizeSteps(raw) {
  * @param {object} job
  * @param {(msg: string) => void} onLog
  * @param {(payload: { id: string, status: 'start'|'done' }) => void} onStep
- * @param {{ shouldCancel?: () => boolean, setBrowser?: (b: import('puppeteer').Browser) => void, jobId?: string, liveUserId?: string, reuseBrowser?: import('puppeteer').Browser, onScreencast?: (payload: object) => void }} [hooks]
+ * @param {{ shouldCancel?: () => boolean, setBrowser?: (b: import('puppeteer').Browser) => void, jobId?: string, liveUserId?: string, reuseBrowser?: import('puppeteer').Browser, forceHeaded?: boolean, onScreencast?: (payload: object) => void, onScreenshots?: (shots: object[]) => void }} [hooks]
  */
 export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {}) {
   const log = (msg) => {
@@ -118,6 +118,7 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
 
   let browser;
   let wpmPage;
+  const forceHeaded = Boolean(hooks.forceHeaded || job.resume);
   if (hooks.reuseBrowser) {
     browser = hooks.reuseBrowser;
     hooks.setBrowser?.(browser);
@@ -134,14 +135,19 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
       }) ||
       openPages[0] ||
       (await browser.newPage());
-    log('→ Resume: tái sử dụng Chrome Live đang mở.');
+    log('→ Resume: tái sử dụng Chrome đang mở.');
   } else {
     ({ browser, page: wpmPage } = await launchBrowser({
       downloadPath: DOWNLOADS_DIR,
+      forceHeaded,
     }));
     hooks.setBrowser?.(browser);
-    if (process.env.CHROME_LIVE === 'true' && !shouldRunHeaded()) {
-      log('→ Chạy headless (Live tắt) — nhanh hơn. Mở Live trước Run nếu cần xem.');
+    if (process.env.CHROME_LIVE === 'true') {
+      if (forceHeaded || shouldRunHeaded({ force: forceHeaded })) {
+        log('→ Chrome headed trên Live (Xvfb) — xem được trên panel Live.');
+      } else {
+        log('→ Chạy headless (Live tắt) — nhanh hơn. Muốn xem: Mở Live rồi Resume/Run.');
+      }
     }
   }
 
@@ -350,10 +356,12 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
       await browser.close().catch(() => {});
       hooks.setBrowser?.(null);
     } else if (process.env.CHROME_LIVE === 'true') {
-      const keepForLive = shouldRunHeaded() && isLiveVncActive();
+      // Resume/Live: giữ Chrome nếu đang headed (kể cả vừa force headed)
+      const keepForLive =
+        forceHeaded || shouldRunHeaded({ force: forceHeaded }) || isLiveVncActive();
       if (keepForLive) {
         registerLiveBrowser(hooks.liveUserId, browser);
-        log('→ Live Chrome: panel Live vẫn mở — click/gõ trên Live để tương tác.');
+        log('→ Live Chrome: giữ mở — xem / click trên panel Live.');
       } else {
         await stopLiveSession(liveId).catch(() => {});
         log('→ Đóng Chrome (chạy headless / Live tắt).');
@@ -413,9 +421,10 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
       await browser.close().catch(() => {});
       hooks.setBrowser?.(null);
     } else if (process.env.CHROME_LIVE === 'true') {
-      if (shouldRunHeaded() && isLiveVncActive()) {
+      // Giữ Chrome sau lỗi khi Resume/Live — để xem ảnh + Resume tiếp
+      if (forceHeaded || shouldRunHeaded({ force: forceHeaded }) || isLiveVncActive()) {
         registerLiveBrowser(hooks.liveUserId, browser);
-        log('→ Live Chrome: panel Live vẫn xem được trang lỗi — tương tác trên Live.');
+        log('→ Live Chrome: giữ trang lỗi — xem trên Live rồi Resume.');
       } else {
         await stopLiveSession(liveId).catch(() => {});
         log('→ Đóng Chrome sau lỗi (headless / Live tắt). Screenshot đã lưu nếu có.');

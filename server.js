@@ -328,6 +328,7 @@ export function createApp() {
     };
 
     const isResume = Boolean(body.resume);
+    const wantLive = Boolean(body.wantLive) || isResume;
     const ownerId = req.user.id;
 
     const { jobId, position } = queue.enqueue({
@@ -342,7 +343,7 @@ export function createApp() {
           if (reuseBrowser) {
             pushLog('[live] Resume — tái sử dụng Chrome đang mở (không clear).');
           } else {
-            pushLog('[live] Resume — không còn Chrome cũ, mở mới.');
+            pushLog('[live] Resume — không còn Chrome cũ, mở Chrome headed mới (để xem Live).');
           }
         } else {
           const clearedReg = await clearLiveBrowsersForUser(ownerId);
@@ -378,6 +379,7 @@ export function createApp() {
             jobId: thisJobId,
             liveUserId: ownerId,
             reuseBrowser: reuseBrowser || undefined,
+            forceHeaded: wantLive,
             setBrowser: (b) => {
               jobRef.browser = b;
             },

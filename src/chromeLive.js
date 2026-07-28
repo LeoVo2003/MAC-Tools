@@ -256,7 +256,8 @@ export function mountChromeLiveRoutes(app) {
   app.get(['/chrome-live', '/chrome-live/'], requireAuthPage, async (_req, res) => {
     allowEmbed(res);
     try {
-      await ensureLiveVnc();
+      // acquire giữ VNC sống (tránh ensure-only rồi idle-stop khi mở tab mới)
+      await acquireLiveVnc();
     } catch (err) {
       return res
         .status(503)

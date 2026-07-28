@@ -608,10 +608,20 @@ fillDataBtn?.addEventListener('click', async () => {
 let pendingResume = false;
 let liveChromeOpen = false;
 let liveChromeSrc = '';
+/** @type {null | (() => Promise<void>)} */
+let openLiveChromeFn = null;
 
-resumeBtn?.addEventListener('click', () => {
-  appendLog('↳ Resume = chạy tiếp trên Chrome đang mở (không clear Live).');
+resumeBtn?.addEventListener('click', async () => {
+  appendLog('↳ Resume = mở Live + Chrome headed (để xem được).');
   pendingResume = true;
+  try {
+    if (openLiveChromeFn && !liveChromeOpen) {
+      appendLog('[live] Đang bật Live trước Resume…');
+      await openLiveChromeFn();
+    }
+  } catch (err) {
+    appendLog(`⚠ Live: ${err?.message || err} — vẫn Resume (headed).`);
+  }
   form?.requestSubmit();
 });
 
@@ -666,6 +676,7 @@ form?.addEventListener('submit', async (e) => {
     steps,
     webTargetMode: getWebTargetMode(),
     resume: isResume,
+    wantLive: Boolean(isResume || liveChromeOpen),
   };
 
   logBox.textContent = '';
@@ -1093,10 +1104,13 @@ async function setupLiveChrome() {
       if (hintEl) {
         hintEl.textContent = `Không bật được Live: ${err.message || err}`;
       }
+      throw err;
     } finally {
       starting = false;
     }
   };
+
+  openLiveChromeFn = openLive;
 
   const closeLive = () => {
     if (!liveChromeOpen && !starting) return;
@@ -1131,6 +1145,18 @@ async function setupLiveChrome() {
     if (newTab) {
       newTab.hidden = false;
       newTab.href = '/chrome-live/';
+      newTab.addEventListener('click', async (e) => {
+        e.preventDefault();
+        try {
+          await fetch('/api/chrome-live/start', {
+            method: 'POST',
+            credentials: 'same-origin',
+          });
+        } catch {
+          /* vẫn thử mở */
+        }
+        window.open('/chrome-live/', '_blank', 'noopener');
+      });
     }
     // Mặc định ĐÓNG — user tự bật khi cần (không auto-open, không live-layout)
     setUiClosed();
