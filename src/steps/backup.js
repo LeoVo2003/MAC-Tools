@@ -358,7 +358,7 @@ export async function installAndBackupUpdraftPlus(page, options = {}, log) {
   });
 
   // Chờ backup MỚI trên site xong — không tải file về máy (dễ timeout/lag)
-  await waitUntilNewBackupReady(page, base, beforeSnap, log);
+  await waitUntilNewBackupReady(page, base, beforeSnap, log, options.shouldCancel);
   log('✓ Backup trên site xong — không tải file về máy.');
 }
 
@@ -432,7 +432,7 @@ async function snapshotNewestBackup(page) {
  * - Có tín hiệu complete trên UI progress
  * - VÀ hàng Existing Backups mới hơn snapshot trước Backup Now
  */
-async function waitUntilNewBackupReady(page, base, beforeSnap, log) {
+async function waitUntilNewBackupReady(page, base, beforeSnap, log, shouldCancel = null) {
   log('Đang chờ backup MỚI hoàn tất (không tải backup cũ)...');
   const deadline = Date.now() + 360000; // 6 phút
   let sawProgress = false;
@@ -440,6 +440,7 @@ async function waitUntilNewBackupReady(page, base, beforeSnap, log) {
   let lastLog = 0;
 
   while (Date.now() < deadline) {
+    if (shouldCancel?.()) throw new Error('Job đã bị hủy.');
     const state = await page.evaluate(() => {
       const body = document.body?.innerText || '';
       const progress =

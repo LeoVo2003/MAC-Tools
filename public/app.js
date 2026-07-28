@@ -47,7 +47,9 @@ async function cancelCurrentJob() {
     const res = await fetch(`/api/queue/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || res.statusText);
-    appendLog(`⏹ Đã gửi hủy job ${id.slice(0, 8)}… (${data.kind})`);
+    appendLog(
+      `⏹ Đã gửi hủy job ${id.slice(0, 8)}… (${data.kind}${data.closingBrowser ? ', đóng Chrome' : ''})`
+    );
     setRunBadge('error', 'Cancelling…');
     refreshQueue();
   } catch (err) {

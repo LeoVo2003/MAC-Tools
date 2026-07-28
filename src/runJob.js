@@ -202,7 +202,11 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
       currentStep = 'wp-backup';
       mark('backup', 'start');
       log('▶ Backup: UpdraftPlus...');
-      await installAndBackupUpdraftPlus(wpPage, { ...options, projectName }, log);
+      await installAndBackupUpdraftPlus(
+        wpPage,
+        { ...options, projectName, shouldCancel: () => hooks.shouldCancel?.() },
+        log
+      );
       await dismissBlockingAlerts(wpPage, log);
       mark('backup', 'done');
     } else {

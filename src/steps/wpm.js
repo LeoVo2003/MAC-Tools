@@ -186,33 +186,101 @@ export async function readProjectZipcode(page) {
 }
 
 /**
- * Đọc Email trên tab Project Information (Yelp / Email / Website block).
- * Ưu tiên input → mailto → text cạnh label "Email".
+ * Đọc Email trên tab Project Information (form project — không lấy email user đăng nhập trên header).
+ * @param {import('puppeteer').Page} page
+ * @param {{ excludeEmails?: string[] }} [opts]
  */
-export async function readProjectEmail(page) {
-  return page.evaluate(() => {
+export async function readProjectEmail(page, opts = {}) {
+  const excludeEmails = (opts.excludeEmails || [])
+    .map((e) => String(e || '').trim().toLowerCase())
+    .filter(Boolean);
+
+  return page.evaluate((excludes) => {
     const emailRe = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
-    const reject = (s) => /example\.com|sentry\.|wixpress|cloudflare|schema|noreply@/i.test(s || '');
+    const rejectNoise = (s) =>
+      /example\.com|sentry\.|wixpress|cloudflare|schema|noreply@|no-reply@/i.test(s || '');
+    const isExcluded = (s) => excludes.includes(String(s || '').trim().toLowerCase());
     const pick = (raw) => {
       const m = String(raw || '').match(emailRe);
-      if (!m || reject(m[0])) return '';
+      if (!m || rejectNoise(m[0]) || isExcluded(m[0])) return '';
       return m[0];
     };
 
-    const inputs = [
-      document.querySelector('input#email[name="email"]'),
-      document.querySelector('input#email'),
-      document.querySelector('input[name="email"]'),
-      document.querySelector('input[type="email"]'),
-      document.querySelector('input[data-label="Email"]'),
-      document.querySelector('input[placeholder*="email" i]'),
+    const inChrome = (el) => {
+      if (!el) return true;
+      return Boolean(
+        el.closest(
+          'header, nav, .navbar, .topbar, .dropdown-menu, .user-menu, .account-menu, #sidebar, .sidebar, .offcanvas'
+        )
+      );
+    };
+
+    // Scope: tab Project Information / form chính — tránh header user
+    const roots = [
+      document.querySelector('#tab-project-info'),
+      document.querySelector('#project-information'),
+      document.querySelector('[id*="project-info" i]'),
+      document.querySelector('form#project-form'),
+      document.querySelector('form[action*="project"]'),
+      document.querySelector('.tab-pane.active'),
+      document.querySelector('main, #content, .content, .container-fluid'),
     ].filter(Boolean);
-    for (const el of inputs) {
+    const root = roots[0] || document.body;
+
+    // 1) Input Email trong form project (ưu tiên)
+    const inputCandidates = [
+      ...root.querySelectorAll(
+        'input#email[name="email"], input[name="email"], input#email, input[type="email"], input[data-label="Email"], input[placeholder*="email" i]'
+      ),
+    ];
+    for (const el of inputCandidates) {
+      if (inChrome(el)) continue;
       const v = pick(el.value || el.getAttribute('value') || '');
       if (v) return v;
     }
 
-    for (const a of document.querySelectorAll('a[href^="mailto:"]')) {
+    // 2) Label "Email" → ô cạnh / group (trong root, không header)
+    const nodes = Array.from(
+      root.querySelectorAll(
+        'label, h2, h3, h4, h5, strong, b, span, div, p, dt, th, .form-label, .col-form-label'
+      )
+    );
+    for (const el of nodes) {
+      if (inChrome(el)) continue;
+      const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!/^e-?mails?$/i.test(t)) continue;
+      if (el.querySelectorAll('*').length > 6 && t.length > 12) continue;
+
+      const group =
+        el.closest('.form-group, .mb-2, .mb-3, .row, li, .info-item, .detail-item, .card, section') ||
+        el.parentElement;
+      if (group && !inChrome(group)) {
+        // Ưu tiên input trong group
+        const inp = group.querySelector('input, textarea, a[href^="mailto:"]');
+        if (inp) {
+          const raw =
+            inp.getAttribute?.('href')?.replace(/^mailto:/i, '') ||
+            inp.value ||
+            inp.getAttribute?.('value') ||
+            inp.textContent ||
+            '';
+          const v = pick(raw);
+          if (v) return v;
+        }
+        const v = pick(group.innerText || '');
+        if (v) return v;
+      }
+      let sib = el.nextElementSibling;
+      for (let i = 0; i < 4 && sib; i += 1, sib = sib.nextElementSibling) {
+        if (inChrome(sib)) continue;
+        const v = pick(sib.value || sib.innerText || sib.textContent || '');
+        if (v) return v;
+      }
+    }
+
+    // 3) mailto trong root (không header)
+    for (const a of root.querySelectorAll('a[href^="mailto:"]')) {
+      if (inChrome(a)) continue;
       const href = decodeURIComponent((a.getAttribute('href') || '').replace(/^mailto:/i, ''))
         .split('?')[0]
         .trim();
@@ -220,33 +288,8 @@ export async function readProjectEmail(page) {
       if (v) return v;
     }
 
-    const nodes = Array.from(
-      document.querySelectorAll(
-        'label, h2, h3, h4, h5, strong, b, span, div, p, dt, th, .form-label, .col-form-label'
-      )
-    );
-    for (const el of nodes) {
-      const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
-      // Label ngắn "Email" (có thể kèm icon SVG không chữ)
-      if (!/^e-?mails?$/i.test(t)) continue;
-      if (el.querySelectorAll('*').length > 6 && t.length > 12) continue;
-
-      const group =
-        el.closest('.form-group, .mb-2, .mb-3, .row, li, .info-item, .detail-item, .card, section') ||
-        el.parentElement;
-      if (group) {
-        const v = pick(group.innerText || '');
-        if (v) return v;
-      }
-      let sib = el.nextElementSibling;
-      for (let i = 0; i < 4 && sib; i += 1, sib = sib.nextElementSibling) {
-        const v = pick(sib.value || sib.innerText || sib.textContent || '');
-        if (v) return v;
-      }
-    }
-
     return '';
-  });
+  }, excludeEmails);
 }
 
 /** Mở tab Website Information trên trang project. */

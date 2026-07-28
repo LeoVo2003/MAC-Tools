@@ -277,10 +277,11 @@ export async function fillCustomerDataFromUrls(
     let shopName = '';
     let wpmZip = '';
     let wpmEmail = '';
+    const excludeEmails = [wpmCredentials.username].filter(Boolean);
     for (let i = 0; i < 12; i += 1) {
       shopName = await readProjectName(page);
       wpmZip = await readProjectZipcode(page);
-      wpmEmail = await readProjectEmail(page);
+      wpmEmail = await readProjectEmail(page, { excludeEmails });
       if (shopName) break;
       await sleepExact(350);
     }
@@ -290,6 +291,7 @@ export async function fillCustomerDataFromUrls(
     }
     log(`Tên tiệm: ${shopName}`);
     if (wpmEmail) log(`Email (Project Information): ${wpmEmail}`);
+    else log('⚠ Chưa đọc được Email Project Information (hoặc trùng email user đăng nhập — đã bỏ).');
 
     log(
       webTargetMode === 'website'
@@ -344,8 +346,15 @@ export async function fillCustomerDataFromUrls(
       warnings.push('Zip lấy từ WPM Project (footer không có / không parse được).');
     }
 
-    // Email: ưu tiên footer, fallback Project Information
+    // Email: ưu tiên footer (không lấy email user tool), fallback Project Information
+    const excludeSet = new Set(
+      excludeEmails.map((e) => String(e).trim().toLowerCase()).filter(Boolean)
+    );
     let email = String(site.email || '').trim();
+    if (email && excludeSet.has(email.toLowerCase())) {
+      log(`⚠ Footer trả email trùng user đăng nhập (${email}) — bỏ, dùng Project Information.`);
+      email = '';
+    }
     let emailSource = email ? 'footer' : '';
     if (!email && wpmEmail) {
       email = String(wpmEmail).trim();
@@ -367,7 +376,7 @@ export async function fillCustomerDataFromUrls(
           tab?.click();
         });
         await sleepExact(500);
-        wpmEmail = await readProjectEmail(page);
+        wpmEmail = await readProjectEmail(page, { excludeEmails });
         if (wpmEmail) {
           email = String(wpmEmail).trim();
           emailSource = 'project';

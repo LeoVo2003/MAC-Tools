@@ -119,11 +119,26 @@ export function createJobQueue({ onLog, onChange, maxConcurrent = 4 } = {}) {
       job.onDone?.({ ok: true, result });
     } catch (err) {
       const message = err?.message || String(err);
-      job.error = message;
-      job.status = job.cancelled ? 'cancelled' : 'error';
-      job.finishedAt = new Date().toISOString();
-      push(job.cancelled ? `⏹ Đã hủy: ${message}` : `❌ Lỗi: ${message}`);
-      job.onDone?.({ ok: false, error: message, cancelled: Boolean(job.cancelled) });
+      if (
+        /target closed|session closed|browser has been closed|connection closed|đã bị hủy/i.test(
+          message
+        )
+      ) {
+        job.cancelled = true;
+      }
+      if (job.cancelled) {
+        const finalMsg = job.error || 'Đã hủy';
+        job.status = 'cancelled';
+        job.finishedAt = new Date().toISOString();
+        push(`⏹ ${finalMsg}`);
+        job.onDone?.({ ok: false, error: finalMsg, cancelled: true });
+      } else {
+        job.error = message;
+        job.status = 'error';
+        job.finishedAt = new Date().toISOString();
+        push(`❌ Lỗi: ${message}`);
+        job.onDone?.({ ok: false, error: message, cancelled: false });
+      }
     } finally {
       // Headless (VPS): đóng Chrome để khỏi đầy RAM. Local: giữ để debug.
       if (process.env.HEADLESS === 'true' && job.browser) {
@@ -171,9 +186,16 @@ export function createJobQueue({ onLog, onChange, maxConcurrent = 4 } = {}) {
     if (job) {
       job.cancelled = true;
       job.error = byUser ? `Hủy bởi ${byUser}` : 'Đã hủy';
-      // Không đóng Chrome khi hủy — giữ cửa sổ để xem đang đứng ở đâu.
+      // Đóng Chrome ngay để ngắt Puppeteer (goto/wait) — hủy nhanh
+      const browser = job.browser;
+      if (browser) {
+        job.browser = null;
+        Promise.resolve()
+          .then(() => browser.close?.())
+          .catch(() => {});
+      }
       onChange?.(snapshot());
-      return { ok: true, kind: 'running', jobId: id };
+      return { ok: true, kind: 'running', jobId: id, closingBrowser: Boolean(browser) };
     }
     return { ok: false, error: 'Không tìm thấy job.' };
   }
