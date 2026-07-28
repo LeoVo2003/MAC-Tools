@@ -122,7 +122,9 @@ Nhớ inject `.env` an toàn; không build secret vào image.
 
 Push `main` / tag `v*` → Actions **build → push GHCR → SSH VPS** (`/home/flashvps/User-Guide`) chạy:
 
-`docker compose pull && docker compose up -d`
+`docker compose pull && docker compose up -d --force-recreate`
+
+**Không cần SSH VPS hàng ngày** — chỉ `git push origin main` (hoặc merge `develop` → `main`). Xem progress: GitHub → Actions. VPS chỉ cần setup secrets + `.env` một lần.
 
 Image: `ghcr.io/leovo2003/user-guide:latest`
 
