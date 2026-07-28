@@ -145,7 +145,8 @@ export function createJobQueue({ onLog, onChange, maxConcurrent = 4 } = {}) {
         await job.browser.close?.().catch(() => {});
         job.browser = null;
       }
-      active.delete(job.id);
+      // Cancel có thể đã xóa khỏi active — chỉ xóa nếu vẫn là job này
+      if (active.get(job.id) === job) active.delete(job.id);
       remember(job);
       onChange?.(snapshot());
       await releaseCpuBoost('job').catch((err) => {
@@ -180,21 +181,27 @@ export function createJobQueue({ onLog, onChange, maxConcurrent = 4 } = {}) {
       job.finishedAt = new Date().toISOString();
       remember(job);
       onChange?.(snapshot());
+      setImmediate(() => pump());
       return { ok: true, kind: 'pending', jobId: id };
     }
     const job = active.get(id);
     if (job) {
       job.cancelled = true;
+      job.status = 'cancelled';
       job.error = byUser ? `Hủy bởi ${byUser}` : 'Đã hủy';
-      // Đóng Chrome ngay để ngắt Puppeteer (goto/wait) — hủy nhanh
+      job.finishedAt = new Date().toISOString();
+      // Nhả slot ngay — user Run lại được, không kẹt "Trống" / nút chết
+      active.delete(id);
+      remember(job);
       const browser = job.browser;
+      job.browser = null;
       if (browser) {
-        job.browser = null;
         Promise.resolve()
           .then(() => browser.close?.())
           .catch(() => {});
       }
       onChange?.(snapshot());
+      setImmediate(() => pump());
       return { ok: true, kind: 'running', jobId: id, closingBrowser: Boolean(browser) };
     }
     return { ok: false, error: 'Không tìm thấy job.' };

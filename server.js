@@ -107,9 +107,15 @@ export function createApp() {
     if (!isOwner && !isAdmin) {
       return res.status(403).json({ error: 'Chỉ hủy job của bạn (hoặc admin).' });
     }
+    const ownerId = job.meta?.userId || req.user.id;
     const result = queue.cancel(jobId, { byUser: req.user.username });
-    broadcast('queue', null, { refreshQueues: true });
     if (!result.ok) return res.status(404).json(result);
+
+    // Báo UI ngay — không chờ browser đóng xong
+    const msg = job.error || `Hủy bởi ${req.user.username}`;
+    broadcast('job-error', { message: msg, jobId, cancelled: true }, { jobId, userId: ownerId });
+    broadcast('done', { running: false, jobId, cancelled: true }, { jobId, userId: ownerId });
+    broadcast('queue', null, { refreshQueues: true });
     res.json(result);
   });
 

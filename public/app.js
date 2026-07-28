@@ -50,11 +50,17 @@ async function cancelCurrentJob() {
     appendLog(
       `⏹ Đã gửi hủy job ${id.slice(0, 8)}… (${data.kind}${data.closingBrowser ? ', đóng Chrome' : ''})`
     );
-    setRunBadge('error', 'Cancelling…');
+    // Mở lại Run ngay — không chờ socket (tránh nút chết / “không có gì”)
+    setRunBadge('idle', 'Cancelled');
+    runBtn.disabled = false;
+    setCancelVisible(false);
+    currentJobId = null;
+    watchJobId = null;
     refreshQueue();
   } catch (err) {
     appendLog(`❌ Hủy job: ${err.message}`);
     if (cancelBtn) cancelBtn.disabled = false;
+    runBtn.disabled = false;
   }
 }
 
@@ -804,6 +810,13 @@ function renderQueue(q) {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || res.statusText);
         appendLog(`⏹ Đã hủy job ${id.slice(0, 8)}… (${data.kind})`);
+        if (id === currentJobId) {
+          setRunBadge('idle', 'Cancelled');
+          runBtn.disabled = false;
+          setCancelVisible(false);
+          currentJobId = null;
+          watchJobId = null;
+        }
         refreshQueue();
       } catch (err) {
         appendLog(`❌ Hủy job: ${err.message}`);

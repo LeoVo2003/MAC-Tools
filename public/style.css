@@ -441,7 +441,7 @@ input:focus {
 }
 
 .web-target {
-  margin: 0 0 var(--space-4);
+  margin: var(--space-4) 0 var(--space-4);
   padding: var(--space-3) var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -535,7 +535,7 @@ input:focus {
 }
 
 .steps-box {
-  margin: 0 0 var(--space-5);
+  margin: var(--space-2) 0 var(--space-5);
   padding: var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius);
