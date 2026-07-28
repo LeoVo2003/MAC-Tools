@@ -251,28 +251,36 @@ export async function waitForAnyText(page, texts, { timeout = 60000 } = {}) {
 export async function clickByText(page, text, { exact = false, timeout = 15000 } = {}) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
-    const clicked = await page.evaluate(
-      (needle, exactMatch) => {
-        const candidates = Array.from(
-          document.querySelectorAll(
-            'a, button, input[type="submit"], input[type="button"], [role="button"], .button, .button-primary, .cx-vui-button, button.cx-vui-button--style-accent'
-          )
-        );
-        for (const el of candidates) {
-          const t = (el.innerText || el.value || el.textContent || '').trim();
-          const ok = exactMatch ? t === needle : t.includes(needle);
-          if (!ok) continue;
-          const style = window.getComputedStyle(el);
-          if (style.display === 'none' || style.visibility === 'hidden') continue;
-          el.click();
-          return true;
-        }
-        return false;
-      },
-      text,
-      exact
-    );
-    if (clicked) return;
+    try {
+      const clicked = await page.evaluate(
+        (needle, exactMatch) => {
+          const candidates = Array.from(
+            document.querySelectorAll(
+              'a, button, input[type="submit"], input[type="button"], [role="button"], .button, .button-primary, .cx-vui-button, button.cx-vui-button--style-accent'
+            )
+          );
+          for (const el of candidates) {
+            const t = (el.innerText || el.value || el.textContent || '').trim();
+            const ok = exactMatch ? t === needle : t.includes(needle);
+            if (!ok) continue;
+            const style = window.getComputedStyle(el);
+            if (style.display === 'none' || style.visibility === 'hidden') continue;
+            el.click();
+            return true;
+          }
+          return false;
+        },
+        text,
+        exact
+      );
+      if (clicked) return;
+    } catch (err) {
+      // Click làm navigate → context chết = thường là đã click thành công
+      const msg = err?.message || String(err);
+      if (/Execution context was destroyed|Cannot find context|Target closed|navigat/i.test(msg)) {
+        return;
+      }
+    }
     await sleep(80);
   }
   throw new Error(`Không click được phần tử chứa text: "${text}"`);

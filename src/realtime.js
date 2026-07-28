@@ -22,6 +22,9 @@ export function attachRealtime(httpServer, { sessionMiddleware, queue }) {
     // Same-origin; cookie session
     cors: { origin: false },
     serveClient: true,
+    // Job dài (backup / Mac Role) — tránh proxy cắt khi im lặng
+    pingInterval: 20000,
+    pingTimeout: 60000,
   });
 
   // Share express-session với handshake Socket.IO

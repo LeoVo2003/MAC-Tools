@@ -312,6 +312,9 @@ function connectEvents(jobId) {
       path: '/socket.io',
       withCredentials: true,
       transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: 20,
+      reconnectionDelay: 1000,
     });
 
     socket.on('connect', () => {
@@ -608,6 +611,7 @@ fillDataBtn?.addEventListener('click', async () => {
 let pendingResume = false;
 let liveChromeOpen = false;
 let liveChromeSrc = '';
+let runSubmitting = false;
 /** @type {null | (() => Promise<void>)} */
 let openLiveChromeFn = null;
 
@@ -643,6 +647,10 @@ function resetLiveFrameBlank() {
 
 form?.addEventListener('submit', async (e) => {
   e.preventDefault();
+  if (runSubmitting) {
+    appendLog('⚠ Đang gửi Run rồi — bỏ qua lần bấm trùng.');
+    return;
+  }
   const isResume = pendingResume;
   pendingResume = false;
   const fd = new FormData(form);
@@ -679,6 +687,7 @@ form?.addEventListener('submit', async (e) => {
     wantLive: Boolean(isResume || liveChromeOpen),
   };
 
+  runSubmitting = true;
   logBox.textContent = '';
   resultPanel.hidden = true;
   doneThisRun.clear();
@@ -718,6 +727,8 @@ form?.addEventListener('submit', async (e) => {
     setRunBadge('error', 'Error');
     runBtn.disabled = false;
     setCancelVisible(false);
+  } finally {
+    runSubmitting = false;
   }
 });
 

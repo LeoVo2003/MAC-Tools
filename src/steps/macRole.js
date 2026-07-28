@@ -1,4 +1,11 @@
-import { originOf, clickByText, sleep, dismissBlockingAlerts } from '../utils.js';
+import {
+  originOf,
+  clickByText,
+  sleep,
+  sleepExact,
+  dismissBlockingAlerts,
+  evaluateSafe,
+} from '../utils.js';
 
 /**
  * Mac Role qua Mac Core:
@@ -22,11 +29,11 @@ export async function installMacRoleViaMacCore(page, log) {
   for (const url of macCoreUrls) {
     await page.goto(url, GOTO).catch(() => {});
     await sleep(200);
-    const ok = await page.evaluate(() => {
+    const ok = await evaluateSafe(page, () => {
       const t = (document.body?.innerText || '').toLowerCase();
       const title = (document.title || '').toLowerCase();
       return t.includes('mac core') || title.includes('mac core') || t.includes('mac-core');
-    });
+    }).catch(() => false);
     if (ok) {
       opened = true;
       break;
@@ -35,7 +42,7 @@ export async function installMacRoleViaMacCore(page, log) {
 
   if (!opened) {
     log('Thử mở Mac Core từ menu sidebar...');
-    const clicked = await page.evaluate(() => {
+    const clicked = await evaluateSafe(page, () => {
       const links = Array.from(document.querySelectorAll('#adminmenu a, .wp-submenu a, a'));
       for (const a of links) {
         const t = (a.innerText || a.textContent || '').trim().toLowerCase();
@@ -45,7 +52,7 @@ export async function installMacRoleViaMacCore(page, log) {
         }
       }
       return false;
-    });
+    }).catch(() => false);
     if (clicked) {
       await page.waitForNavigation(GOTO).catch(() => {});
       await sleep(300);
@@ -85,7 +92,7 @@ export async function installMacRoleViaMacCore(page, log) {
       }
     }
     if (!refreshed) {
-      refreshed = await page.evaluate(() => {
+      refreshed = await evaluateSafe(page, () => {
         const btn = Array.from(document.querySelectorAll('button, a, input[type="button"]')).find(
           (el) => /refresh\s+plugin\s*list/i.test((el.innerText || el.value || '').trim())
         );
@@ -94,7 +101,7 @@ export async function installMacRoleViaMacCore(page, log) {
           return true;
         }
         return false;
-      });
+      }).catch(() => false);
     }
     if (!refreshed) {
       throw new Error('Không tìm thấy nút "Refresh Plugin List" trên Mac Core.');
@@ -104,9 +111,9 @@ export async function installMacRoleViaMacCore(page, log) {
     await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
     await sleep(600);
 
-    const stillMacCore = await page.evaluate(() =>
+    const stillMacCore = await evaluateSafe(page, () =>
       /mac core/i.test(`${document.title} ${document.body?.innerText || ''}`)
-    );
+    ).catch(() => false);
     if (!stillMacCore) {
       await page.goto(macCoreUrls[0], GOTO);
       await sleep(300);
@@ -131,9 +138,9 @@ export async function installMacRoleViaMacCore(page, log) {
     await sleep(700);
 
     if (
-      !(await page.evaluate(() =>
+      !(await evaluateSafe(page, () =>
         /mac core/i.test(document.title + (document.body?.innerText || ''))
-      ))
+      ).catch(() => false))
     ) {
       await page.goto(macCoreUrls[0], GOTO);
       await sleep(300);
@@ -164,51 +171,56 @@ export async function installMacRoleViaMacCore(page, log) {
 }
 
 async function clickMacRoleButton(page, mode) {
-  return page.evaluate((mode) => {
-    const titles = Array.from(
-      document.querySelectorAll('h1,h2,h3,h4,h5,strong,.card-title,.addon-title,div,span')
-    );
-    for (const title of titles) {
-      if (!/^mac\s*role$/i.test((title.textContent || '').trim())) continue;
-      const row =
-        title.closest('.card, .addon, .plugin-card, .col, article, li, tr, section') ||
-        title.parentElement?.parentElement;
-      if (!row) continue;
-      const text = row.innerText || '';
-      if (/installed\s*&\s*active/i.test(text)) return 'already-active';
+  return evaluateSafe(
+    page,
+    (modeInner) => {
+      const titles = Array.from(
+        document.querySelectorAll('h1,h2,h3,h4,h5,strong,.card-title,.addon-title,div,span')
+      );
+      for (const title of titles) {
+        if (!/^mac\s*role$/i.test((title.textContent || '').trim())) continue;
+        const row =
+          title.closest('.card, .addon, .plugin-card, .col, article, li, tr, section') ||
+          title.parentElement?.parentElement;
+        if (!row) continue;
+        const text = row.innerText || '';
+        if (/installed\s*&\s*active/i.test(text)) return 'already-active';
 
-      if (mode === 'install') {
-        const install = Array.from(row.querySelectorAll('a, button')).find((el) =>
-          /install now|^install$/i.test((el.innerText || '').trim())
-        );
-        if (install) {
-          install.click();
-          return 'install';
+        if (modeInner === 'install') {
+          const install = Array.from(row.querySelectorAll('a, button')).find((el) =>
+            /install now|^install$/i.test((el.innerText || '').trim())
+          );
+          if (install) {
+            install.click();
+            return 'install';
+          }
+          const act = Array.from(row.querySelectorAll('a, button')).find((el) =>
+            /^activate$/i.test((el.innerText || '').trim())
+          );
+          if (act) return 'need-activate';
         }
-        const act = Array.from(row.querySelectorAll('a, button')).find((el) =>
-          /^activate$/i.test((el.innerText || '').trim())
-        );
-        if (act) return 'need-activate';
-      }
 
-      if (mode === 'activate') {
-        const act = Array.from(row.querySelectorAll('a, button')).find((el) =>
-          /^activate$/i.test((el.innerText || '').trim()) ||
-          /activate plugin/i.test((el.innerText || '').trim())
-        );
-        if (act) {
-          act.click();
-          return 'activate';
+        if (modeInner === 'activate') {
+          const act = Array.from(row.querySelectorAll('a, button')).find(
+            (el) =>
+              /^activate$/i.test((el.innerText || '').trim()) ||
+              /activate plugin/i.test((el.innerText || '').trim())
+          );
+          if (act) {
+            act.click();
+            return 'activate';
+          }
         }
       }
-    }
-    return null;
-  }, mode);
+      return null;
+    },
+    mode
+  );
 }
 
 /**
  * Vào /wp-admin/admin.php?page=mac-role
- * → bấm Create from "F Package User" → chờ load xong.
+ * → bấm Create from "F Package User" → chờ load xong (có heartbeat log).
  */
 export async function configureFPackageUser(page, packageTier = 'F', log) {
   const base = originOf(page.url());
@@ -220,7 +232,7 @@ export async function configureFPackageUser(page, packageTier = 'F', log) {
   await sleep(400);
   await dismissBlockingAlerts(page, log);
 
-  const onPage = await page.evaluate(() => {
+  const onPage = await evaluateSafe(page, () => {
     const t = (document.body?.innerText || '').toLowerCase();
     return (
       t.includes('role url links') ||
@@ -228,10 +240,10 @@ export async function configureFPackageUser(page, packageTier = 'F', log) {
       t.includes('f package user') ||
       t.includes('mac role')
     );
-  });
+  }).catch(() => false);
 
   if (!onPage) {
-    const clicked = await page.evaluate(() => {
+    const menuClicked = await evaluateSafe(page, () => {
       const hit = Array.from(document.querySelectorAll('#adminmenu a, a')).find((a) =>
         /mac role|role url/i.test((a.textContent || '').trim())
       );
@@ -240,62 +252,160 @@ export async function configureFPackageUser(page, packageTier = 'F', log) {
         return true;
       }
       return false;
-    });
-    if (clicked) {
+    }).catch(() => false);
+    if (menuClicked) {
       await page.waitForNavigation(GOTO).catch(() => {});
       await sleep(300);
     }
+  }
+
+  const alreadyDone = await evaluateSafe(page, () => {
+    const body = (document.body?.innerText || '').replace(/\s+/g, ' ');
+    const hasCreateBtn = Array.from(
+      document.querySelectorAll('a, button, input[type="button"], input[type="submit"]')
+    ).some((el) =>
+      /create from\s*["']?f[\s-]*package\s*user["']?/i.test(
+        (el.innerText || el.value || el.textContent || '').trim()
+      )
+    );
+    if (!hasCreateBtn && /f\s*package\s*user/i.test(body)) return true;
+    if (
+      !/quick create from template/i.test(body) &&
+      /f\s*package\s*user/i.test(body) &&
+      /role url|capabilities|edit role/i.test(body)
+    ) {
+      return true;
+    }
+    return false;
+  }).catch(() => false);
+
+  if (alreadyDone) {
+    log('F Package User đã có sẵn — bỏ qua Create.');
+    return;
   }
 
   const altLabels = [
     `Create from "${packageTier} Package User"`,
     'Create from "F Package User"',
     'Create from "F-Package User"',
+    'Create from F Package User',
   ];
 
   log('Bấm Create from "F Package User"...');
+
+  const mark = await evaluateSafe(page, () => {
+    const btns = Array.from(
+      document.querySelectorAll(
+        'a, button, input[type="button"], input[type="submit"], [role="button"]'
+      )
+    );
+    const hit = btns.find((el) =>
+      /create from\s*["']?f[\s-]*package\s*user["']?/i.test(
+        (el.innerText || el.value || el.textContent || '').trim()
+      )
+    );
+    if (!hit) return null;
+    const id = `afp-create-fpkg-${Date.now()}`;
+    hit.setAttribute('data-afp-create', id);
+    hit.scrollIntoView?.({ block: 'center' });
+    return id;
+  }).catch(() => null);
+
   let clicked = false;
-  for (const label of altLabels) {
+  if (mark) {
+    const sel = `[data-afp-create="${mark}"]`;
+    const navWait = page
+      .waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 90000 })
+      .catch(() => null);
     try {
-      await clickByText(page, label, { timeout: 4000 });
+      await page.click(sel, { delay: 20 });
       clicked = true;
-      break;
     } catch {
-      /* next */
+      clicked = await evaluateSafe(
+        page,
+        (m) => {
+          const el = document.querySelector(`[data-afp-create="${m}"]`);
+          if (!el) return false;
+          el.click();
+          return true;
+        },
+        mark
+      ).catch(() => false);
+    }
+
+    if (clicked) {
+      log('Đã bấm Create — chờ Mac Role xử lý (có thể 30–90s, đừng F5)...');
+      const started = Date.now();
+      let navDone = false;
+      navWait.then(() => {
+        navDone = true;
+      });
+      let lastBeat = 0;
+      while (Date.now() - started < 90000) {
+        if (navDone) break;
+        const elapsed = Math.round((Date.now() - started) / 1000);
+        if (elapsed >= 10 && elapsed - lastBeat >= 10) {
+          lastBeat = elapsed;
+          log(`… Mac Role vẫn đang xử lý Create (${elapsed}s)`);
+        }
+        await sleep(500);
+        const state = await evaluateSafe(page, () => {
+          const busy = !!document.querySelector(
+            '.spinner.is-active, .updating-message, .is-loading'
+          );
+          const text = (document.body?.innerText || '').replace(/\s+/g, ' ');
+          const stillCreateBtn = Array.from(
+            document.querySelectorAll('a, button, input[type="button"]')
+          ).some((el) =>
+            /create from\s*["']?f[\s-]*package\s*user["']?/i.test(
+              (el.innerText || el.value || '').trim()
+            )
+          );
+          return {
+            busy,
+            stillCreateBtn,
+            okHint: /created|updated|role saved|success/i.test(text),
+          };
+        }).catch(() => null);
+        if (
+          state?.okHint ||
+          (state && !state.busy && !state.stillCreateBtn && elapsed > 3)
+        ) {
+          break;
+        }
+      }
+      await navWait;
     }
   }
 
   if (!clicked) {
-    clicked = await page.evaluate(() => {
-      const btns = Array.from(
-        document.querySelectorAll('a, button, input[type="button"], input[type="submit"]')
-      );
-      const hit = btns.find((el) =>
-        /create from\s*["']?f\s*package\s*user["']?/i.test(
-          (el.innerText || el.value || '').trim()
-        )
-      );
-      if (hit) {
-        hit.click();
-        return true;
+    for (const label of altLabels) {
+      try {
+        const navWait = page
+          .waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 90000 })
+          .catch(() => null);
+        await clickByText(page, label, { timeout: 5000 });
+        clicked = true;
+        log('Đã bấm Create (fallback text) — chờ xử lý...');
+        await navWait;
+        break;
+      } catch {
+        /* next */
       }
-      return false;
-    });
+    }
   }
 
   if (!clicked) {
     throw new Error('Không tìm thấy nút Create from "F Package User" trên trang Mac Role.');
   }
 
-  log('Đã bấm Create from "F Package User" — chờ load xong...');
-  await page.waitForNavigation(GOTO).catch(() => {});
   await sleep(600);
-
-  const deadline = Date.now() + 60000;
+  const deadline = Date.now() + 45000;
   while (Date.now() < deadline) {
-    const busy = await page.evaluate(
+    const busy = await evaluateSafe(
+      page,
       () => !!document.querySelector('.spinner.is-active, .updating-message, .is-loading')
-    );
+    ).catch(() => false);
     if (!busy) break;
     await sleep(300);
   }
