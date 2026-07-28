@@ -253,6 +253,11 @@ export async function probeLiveVnc() {
   return { websockify, vnc, running: websockify && vnc, refCount };
 }
 
+/** Live panel đang mở (có viewer) — Chrome cần headed trên Xvfb. */
+export function isLiveVncActive() {
+  return refCount > 0;
+}
+
 /** Boot: ép về idle (tránh kẹt 1.5 sau crash). */
 export function initLiveVncIdleCpu() {
   resetCpuScaleIdle().catch((err) => {

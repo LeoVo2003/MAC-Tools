@@ -8,7 +8,7 @@ import http from 'http';
 const SOCKET = process.env.DOCKER_SOCK || '/var/run/docker.sock';
 const IDLE = Number(process.env.DOCKER_CPU_IDLE) || 0.3;
 /** Boost khi Chrome đang làm việc (Fill/Run) hoặc Live mở */
-const BOOST = Number(process.env.DOCKER_CPU_LIVE) || 1.5;
+const BOOST = Number(process.env.DOCKER_CPU_LIVE) || 2.5;
 
 /** @type {Map<string, number>} */
 const holders = new Map();

@@ -3,6 +3,7 @@ import path from 'path';
 import os from 'os';
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import { isLiveVncActive } from './liveVnc.js';
 
 puppeteer.use(StealthPlugin());
 
@@ -32,20 +33,35 @@ export function findChromePath() {
 }
 
 /**
+ * Headed chỉ khi cần xem Live; còn lại headless cho nhanh.
+ * - Live panel đang mở → headed (noVNC)
+ * - FORCE_HEADED=true → headed
+ * - HEADLESS=true → luôn headless
+ * - CHROME_LIVE + Live tắt → headless (không vẽ Xvfb)
+ * - Local không CHROME_LIVE → theo HEADLESS (mặc định headed để debug)
+ */
+export function shouldRunHeaded() {
+  if (process.env.FORCE_HEADED === 'true') return true;
+  if (process.env.HEADLESS === 'true') return false;
+  if (process.env.CHROME_LIVE === 'true') {
+    try {
+      return isLiveVncActive();
+    } catch {
+      return false;
+    }
+  }
+  return process.env.HEADLESS !== 'true';
+}
+
+/**
  * Launch system Chrome with stealth — tránh navigator.webdriver lộ như Playwright CDP.
  * @param {{ downloadPath?: string, headless?: boolean }} [opts]
  */
 export async function launchBrowser({ downloadPath, headless: headlessOpt } = {}) {
   const executablePath = findChromePath();
-  // CHROME_LIVE / DISPLAY (Docker Xvfb): luôn headed để noVNC xem + tương tác
-  const chromeLive =
-    process.env.CHROME_LIVE === 'true' || Boolean(String(process.env.DISPLAY || '').trim());
+  const chromeLiveEnv = process.env.CHROME_LIVE === 'true';
   const headless =
-    headlessOpt !== undefined
-      ? Boolean(headlessOpt)
-      : chromeLive
-        ? false
-        : process.env.HEADLESS === 'true';
+    headlessOpt !== undefined ? Boolean(headlessOpt) : !shouldRunHeaded();
   const userDataDir = process.env.CHROME_USER_DATA_DIR || undefined;
 
   const args = [
@@ -56,7 +72,7 @@ export async function launchBrowser({ downloadPath, headless: headlessOpt } = {}
     '--window-size=1440,900',
   ];
 
-  if (chromeLive && !headless) {
+  if (chromeLiveEnv && !headless) {
     args.push('--start-maximized', '--window-position=0,0');
   }
 
@@ -68,8 +84,19 @@ export async function launchBrowser({ downloadPath, headless: headlessOpt } = {}
     (typeof process.getuid === 'function' && process.getuid() === 0);
   if (needNoSandbox) {
     args.push('--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage');
-    // Headed trên Xvfb vẫn dùng GPU software; disable-gpu giúp ổn định container
-    if (headless || chromeLive) args.push('--disable-gpu');
+    if (headless || chromeLiveEnv) args.push('--disable-gpu');
+  }
+
+  // Headless nhanh hơn: tắt nền / extension / sync không cần cho automation
+  if (headless) {
+    args.push(
+      '--disable-background-networking',
+      '--disable-extensions',
+      '--disable-sync',
+      '--metrics-recording-only',
+      '--mute-audio',
+      '--no-pings'
+    );
   }
 
   const screenW = Number(process.env.CHROME_SCREEN_W) || 1440;
@@ -91,7 +118,7 @@ export async function launchBrowser({ downloadPath, headless: headlessOpt } = {}
 
   // Live: ép cửa sổ full Xvfb — tránh cửa sổ nhỏ giữa desktop
   // Không setViewport (headed) — viewport giả sẽ làm trang nhỏ trong cửa sổ.
-  if (chromeLive && !headless) {
+  if (!headless && chromeLiveEnv) {
     try {
       const session = await page.createCDPSession();
       const { windowId } = await session.send('Browser.getWindowForTarget');

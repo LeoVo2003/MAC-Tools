@@ -4,7 +4,7 @@ services:
     build: .
     ports:
       - "3847:3847"
-    # Idle mặc định 0.3 — app scale lên DOCKER_CPU_LIVE khi Mở Live (cần docker.sock)
+    # Idle mặc định 0.3 — app scale lên DOCKER_CPU_LIVE khi Fill/Run/Mở Live (cần docker.sock)
     cpus: "0.30"
     shm_size: "512m"
     env_file:
@@ -20,7 +20,7 @@ services:
       CHROME_NO_SANDBOX: ${CHROME_NO_SANDBOX:-true}
       MAX_CONCURRENT_JOBS: ${MAX_CONCURRENT_JOBS:-1}
       PORT: ${PORT:-3847}
-      SPEED: ${SPEED:-fast}
+      SPEED: ${SPEED:-turbo}
       COOKIE_SECURE: ${COOKIE_SECURE:-auto}
       DOWNLOAD_DIR: ${DOWNLOAD_DIR:-/data/downloads}
       NOVNC_PATH: ${NOVNC_PATH:-/usr/share/novnc}
@@ -30,7 +30,7 @@ services:
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
       DOCKER_CPU_SCALE: ${DOCKER_CPU_SCALE:-true}
       DOCKER_CPU_IDLE: ${DOCKER_CPU_IDLE:-0.3}
-      DOCKER_CPU_LIVE: ${DOCKER_CPU_LIVE:-1.5}
+      DOCKER_CPU_LIVE: ${DOCKER_CPU_LIVE:-2.5}
     volumes:
       - fugt_downloads:/data/downloads
       - fugt_data:/app/data

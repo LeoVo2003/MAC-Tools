@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { launchBrowser } from './browser.js';
+import { launchBrowser, shouldRunHeaded } from './browser.js';
 import {
   ensureDirs,
   screenshotError,
@@ -21,6 +21,7 @@ import {
   setLivePage,
 } from './liveSession.js';
 import { registerLiveBrowser, unregisterLiveBrowser } from './liveBrowser.js';
+import { isLiveVncActive } from './liveVnc.js';
 
 /** Các bước có thể tick/bỏ tick trên UI (login WPM + Quick Login luôn chạy). */
 export const SELECTABLE_STEPS = [
@@ -139,6 +140,9 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
       downloadPath: DOWNLOADS_DIR,
     }));
     hooks.setBrowser?.(browser);
+    if (process.env.CHROME_LIVE === 'true' && !shouldRunHeaded()) {
+      log('→ Chạy headless (Live tắt) — nhanh hơn. Mở Live trước Run nếu cần xem.');
+    }
   }
 
   const liveId = hooks.jobId || 'run';
@@ -346,8 +350,17 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
       await browser.close().catch(() => {});
       hooks.setBrowser?.(null);
     } else if (process.env.CHROME_LIVE === 'true') {
-      registerLiveBrowser(hooks.liveUserId, browser);
-      log('→ Live Chrome: panel Live vẫn mở — click/gõ trên Live để tương tác.');
+      const keepForLive = shouldRunHeaded() && isLiveVncActive();
+      if (keepForLive) {
+        registerLiveBrowser(hooks.liveUserId, browser);
+        log('→ Live Chrome: panel Live vẫn mở — click/gõ trên Live để tương tác.');
+      } else {
+        await stopLiveSession(liveId).catch(() => {});
+        log('→ Đóng Chrome (chạy headless / Live tắt).');
+        unregisterLiveBrowser(hooks.liveUserId, browser);
+        await browser.close().catch(() => {});
+        hooks.setBrowser?.(null);
+      }
     } else {
       log('→ Chrome giữ mở — đóng tay khi xem xong.');
     }
@@ -392,8 +405,16 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
       await browser.close().catch(() => {});
       hooks.setBrowser?.(null);
     } else if (process.env.CHROME_LIVE === 'true') {
-      registerLiveBrowser(hooks.liveUserId, browser);
-      log('→ Live Chrome: panel Live vẫn xem được trang lỗi — tương tác trên Live.');
+      if (shouldRunHeaded() && isLiveVncActive()) {
+        registerLiveBrowser(hooks.liveUserId, browser);
+        log('→ Live Chrome: panel Live vẫn xem được trang lỗi — tương tác trên Live.');
+      } else {
+        await stopLiveSession(liveId).catch(() => {});
+        log('→ Đóng Chrome sau lỗi (headless / Live tắt). Screenshot đã lưu nếu có.');
+        unregisterLiveBrowser(hooks.liveUserId, browser);
+        await browser.close().catch(() => {});
+        hooks.setBrowser?.(null);
+      }
     } else {
       log('→ Chrome giữ mở để xem lỗi — đóng tay khi xong.');
     }

@@ -1,4 +1,4 @@
-import { launchBrowser } from '../browser.js';
+import { launchBrowser, shouldRunHeaded } from '../browser.js';
 import {
   normalizeWpmProjectUrl,
   sanitizeWpUsername,
@@ -16,6 +16,7 @@ import {
 } from './wpm.js';
 import { startLiveSession, stopLiveSession } from '../liveSession.js';
 import { registerLiveBrowser, unregisterLiveBrowser } from '../liveBrowser.js';
+import { isLiveVncActive } from '../liveVnc.js';
 
 const US_STATES = new Set(
   'AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC'
@@ -230,18 +231,19 @@ export async function fillCustomerDataFromUrls(
   const webTargetMode = rawMode === 'website' ? 'website' : 'main';
   const preferUrl = normalizeHttpUrl(preferWebsite);
 
-  const { browser, page } = await launchBrowser({
-    headless: process.env.CHROME_LIVE === 'true' ? false : true,
-  });
+  const { browser, page } = await launchBrowser();
   const warnings = [];
   const sid = liveSessionId || '';
+  const headed = shouldRunHeaded();
 
   try {
-    if (sid && onScreencast && process.env.CHROME_LIVE === 'true') {
+    if (sid && onScreencast && process.env.CHROME_LIVE === 'true' && headed) {
       await startLiveSession(sid, browser, page, onScreencast).catch((e) =>
         log(`⚠ Live screencast: ${e?.message || e}`)
       );
       log('→ Live screencast bật — mở panel Live trên UI.');
+    } else if (process.env.CHROME_LIVE === 'true' && !headed) {
+      log('→ Chạy headless (Live tắt) — nhanh hơn. Mở Live trước Fill/Run nếu cần xem.');
     }
 
     log('▶ Fill data: login WPM...');
@@ -465,8 +467,8 @@ export async function fillCustomerDataFromUrls(
     };
   } finally {
     if (sid) await stopLiveSession(sid).catch(() => {});
-    // CHROME_LIVE: giữ Chrome để tương tác trên panel Live (giống Run)
-    if (process.env.CHROME_LIVE === 'true' && process.env.HEADLESS !== 'true') {
+    // Chỉ giữ Chrome khi đang headed + Live (xem được trên Xvfb)
+    if (process.env.CHROME_LIVE === 'true' && headed && isLiveVncActive()) {
       registerLiveBrowser(liveUserId, browser);
       log('→ Live Chrome: giữ mở sau Fill — tương tác trên panel Live.');
     } else {

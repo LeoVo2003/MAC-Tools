@@ -15,7 +15,7 @@ async function fillNative(page, handle, value) {
     el.value = '';
     el.dispatchEvent(new Event('input', { bubbles: true }));
   }, handle);
-  await handle.type(String(value), { delay: 15 });
+  await handle.type(String(value), { delay: 5 });
   await page.evaluate((el) => {
     el.dispatchEvent(new Event('change', { bubbles: true }));
     el.blur();

@@ -17,22 +17,34 @@ export function ensureDirs() {
   }
 }
 
-/** fast (mặc định) | normal | slow — chỉnh bằng SPEED trong .env */
+/** turbo | fast (mặc định) | normal | slow — chỉnh bằng SPEED trong .env */
 function speedFactor() {
   const s = (process.env.SPEED || 'fast').toLowerCase();
   if (s === 'slow') return 1;
   if (s === 'normal') return 0.55;
-  return 0.28; // fast
+  if (s === 'turbo') return 0.12;
+  return 0.22; // fast — nhanh hơn trước (0.28)
 }
 
 export function sleep(ms) {
-  const scaled = Math.max(40, Math.round(ms * speedFactor()));
+  const floor = (process.env.SPEED || '').toLowerCase() === 'turbo' ? 12 : 25;
+  const scaled = Math.max(floor, Math.round(ms * speedFactor()));
   return new Promise((r) => setTimeout(r, scaled));
 }
 
-/** Chờ đúng số ms (không nhân SPEED) — dùng khi cần đợi popup/UI thật */
+/**
+ * Chờ UI thật — vẫn scale nhẹ theo SPEED (trước đây cố định → cảm giác chậm).
+ * turbo ~35%, fast ~50%, normal ~70%, slow 100%.
+ */
 export function sleepExact(ms) {
-  return new Promise((r) => setTimeout(r, ms));
+  const s = (process.env.SPEED || 'fast').toLowerCase();
+  let f = 0.5;
+  if (s === 'turbo') f = 0.32;
+  else if (s === 'normal') f = 0.7;
+  else if (s === 'slow') f = 1;
+  const floor = s === 'turbo' ? 40 : 80;
+  const scaled = Math.max(floor, Math.round(ms * f));
+  return new Promise((r) => setTimeout(r, scaled));
 }
 
 /** goto nhanh: không đợi networkidle */
