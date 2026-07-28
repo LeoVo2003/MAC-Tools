@@ -1,36 +1,11 @@
-import fs from 'fs';
-import path from 'path';
 import {
   originOf,
   clickFirst,
   sleep,
   sleepExact,
-  DOWNLOADS_DIR,
-  ensureDirs,
-  dismissBlockingAlerts,
 } from '../utils.js';
 
 const GOTO = { waitUntil: 'domcontentloaded', timeout: 60000 };
-
-/** Tên an toàn cho Windows folder/file */
-function sanitizeFolderName(name) {
-  return (
-    String(name || '')
-      .replace(/[<>:"/\\|?*\x00-\x1f]/g, '')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, 120) || 'backup'
-  );
-}
-
-/** VD: "Olivia & Oliver Nail Lounge - backup - 20_07_26" */
-export function makeBackupBundleLabel(projectName, date = new Date()) {
-  const dd = String(date.getDate()).padStart(2, '0');
-  const mm = String(date.getMonth() + 1).padStart(2, '0');
-  const yy = String(date.getFullYear()).slice(-2);
-  const shop = sanitizeFolderName(projectName || 'Unknown shop');
-  return `${shop} - backup - ${dd}_${mm}_${yy}`;
-}
 
 async function assertNotForbidden(page) {
   const denied = await page.evaluate(() => {
@@ -320,7 +295,6 @@ async function openUpdraftPage(page, base, log) {
 
 export async function installAndBackupUpdraftPlus(page, options = {}, log) {
   const base = originOf(page.url());
-  ensureDirs();
 
   await ensureUpdraftInstalledAndActive(page, base, log);
 
@@ -332,7 +306,7 @@ export async function installAndBackupUpdraftPlus(page, options = {}, log) {
     );
   }
 
-  // Snapshot backup mới nhất HIỆN CÓ — sau này chỉ tải hàng mới hơn
+  // Snapshot backup mới nhất HIỆN CÓ — chờ hàng mới hơn sau Backup Now
   const beforeSnap = await snapshotNewestBackup(page);
   log(
     beforeSnap
@@ -383,19 +357,9 @@ export async function installAndBackupUpdraftPlus(page, options = {}, log) {
     (inModal || confirm)?.click();
   });
 
-  // 1) Chờ backup MỚI thật sự xong (không tin text cũ trên trang)
+  // Chờ backup MỚI trên site xong — không tải file về máy (dễ timeout/lag)
   await waitUntilNewBackupReady(page, base, beforeSnap, log);
-
-  // 2) Tải file về máy — chỉ khi tick option (không zip)
-  if (options.downloadBackup) {
-    log('Reload trang UpdraftPlus rồi tải file backup MỚI (không zip)...');
-    await page.goto(`${base}/wp-admin/options-general.php?page=updraftplus`, GOTO);
-    await sleepExact(1500);
-    await dismissBlockingAlerts(page, log);
-    await downloadUpdraftBackupParts(page, base, log, beforeSnap, options.projectName);
-  } else {
-    log('⏭ Bỏ qua tải file backup về máy (không tick option).');
-  }
+  log('✓ Backup trên site xong — không tải file về máy.');
 }
 
 /**
@@ -562,375 +526,11 @@ async function waitUntilNewBackupReady(page, base, beforeSnap, log) {
   // Hết giờ — kiểm tra lần cuối
   const newest = await snapshotNewestBackup(page);
   if (newest && beforeSnap && newest.timestamp > beforeSnap.timestamp) {
-    log(`Hết thời gian chờ nhưng đã có backup mới hơn (ts=${newest.timestamp}) — tiếp tục tải.`);
+    log(`Hết thời gian chờ nhưng đã có backup mới hơn (ts=${newest.timestamp}) — tiếp tục.`);
     return newest;
   }
 
   throw new Error(
-    'Timeout: backup mới chưa xong / chưa thấy hàng backup mới hơn bản cũ. Không tải backup cũ.'
+    'Timeout: backup mới chưa xong / chưa thấy hàng backup mới hơn bản cũ.'
   );
 }
-
-/**
- * Tìm nút Database/Plugins/... CHỈ trong hàng backup mới nhất (hoặc mới hơn beforeSnap).
- */
-async function findUpdraftPartButtons(page, beforeSnap = null) {
-  return page.evaluate((beforeTs) => {
-    const parts = ['Database', 'Plugins', 'Themes', 'Uploads', 'Others'];
-    const root =
-      document.querySelector('#updraft_existing_backups') ||
-      document.querySelector('#updraft-navtab-backups-content') ||
-      document.body;
-
-    const parseTs = (el) => {
-      const attrs = [
-        el.getAttribute('data-timestamp'),
-        el.getAttribute('data-nonce'),
-        el.dataset?.timestamp,
-        el.id,
-      ]
-        .filter(Boolean)
-        .join(' ');
-      const m = attrs.match(/(\d{9,13})/);
-      if (m) return Number(m[1]) > 1e12 ? Math.floor(Number(m[1]) / 1000) : Number(m[1]);
-      const text = (el.innerText || '').replace(/\s+/g, ' ');
-      const d = Date.parse(text.slice(0, 80));
-      if (!Number.isNaN(d)) return Math.floor(d / 1000);
-      const fm = text.match(/(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})(\d{2})/);
-      if (fm) {
-        const t = Date.parse(`${fm[1]}-${fm[2]}-${fm[3]}T${fm[4]}:${fm[5]}:${fm[6]}`);
-        if (!Number.isNaN(t)) return Math.floor(t / 1000);
-      }
-      return 0;
-    };
-
-    let rows = Array.from(
-      root.querySelectorAll(
-        'tr.updraft_existing_backups_row, tr[class*="updraft"], tr, .updraft_existing_backups_row'
-      )
-    ).filter((tr) => {
-      const t = tr.innerText || '';
-      return (
-        (/restore/i.test(t) || /delete/i.test(t)) &&
-        (/database/i.test(t) || /plugins/i.test(t))
-      );
-    });
-
-    // Chỉ giữ hàng mới hơn backup cũ (nếu có)
-    if (beforeTs != null && beforeTs > 0) {
-      const newer = rows.filter((r) => parseTs(r) > beforeTs);
-      if (newer.length) rows = newer;
-    }
-
-    // Chọn đúng 1 hàng mới nhất theo timestamp
-    let newestRow = null;
-    let newestTs = -1;
-    for (const row of rows) {
-      const ts = parseTs(row);
-      if (ts >= newestTs) {
-        newestTs = ts;
-        newestRow = row;
-      }
-    }
-    // Updraft thường để hàng mới nhất ở trên — nếu ts bằng nhau lấy rows[0]
-    if (!newestRow && rows.length) newestRow = rows[0];
-    if (newestRow && newestTs <= 0 && rows.length) newestRow = rows[0];
-
-    const scopes = newestRow ? [newestRow] : [];
-
-    const scoreEl = (el, part) => {
-      const text = (el.innerText || el.textContent || el.value || '')
-        .replace(/\s+/g, ' ')
-        .trim();
-      const title = (el.getAttribute('title') || '').trim();
-      const aria = (el.getAttribute('aria-label') || '').trim();
-      const dataWhat = (
-        el.getAttribute('data-what') ||
-        el.getAttribute('data-type') ||
-        ''
-      ).toLowerCase();
-      const onclick = (el.getAttribute('onclick') || '').toLowerCase();
-      const cls = (el.className || '').toString().toLowerCase();
-      const blob = `${text} ${title} ${aria}`.trim();
-
-      if (new RegExp(`^${part}$`, 'i').test(text)) return 100;
-      if (new RegExp(`^${part}$`, 'i').test(title) || new RegExp(`^${part}$`, 'i').test(aria))
-        return 90;
-      if (text.length < 40 && new RegExp(`^${part}\\b`, 'i').test(text)) return 80;
-      if (part === 'Database' && (dataWhat === 'db' || /['"]db['"]/.test(onclick))) return 70;
-      if (part === 'Plugins' && (dataWhat === 'plugins' || /plugins/.test(onclick))) return 70;
-      if (part === 'Themes' && (dataWhat === 'themes' || /themes/.test(onclick))) return 70;
-      if (part === 'Uploads' && (dataWhat === 'uploads' || /uploads/.test(onclick))) return 70;
-      if (part === 'Others' && (dataWhat === 'others' || /others/.test(onclick))) return 70;
-      if (cls.includes('updraft') && new RegExp(part, 'i').test(blob) && blob.length < 50) return 60;
-      return 0;
-    };
-
-    // Xóa mark cũ
-    document.querySelectorAll('[data-afp-part]').forEach((el) => el.removeAttribute('data-afp-part'));
-    if (newestRow) newestRow.setAttribute('data-afp-newest-row', '1');
-
-    const found = {};
-    for (const part of parts) {
-      let best = null;
-      let bestScore = 0;
-      for (const scope of scopes) {
-        const candidates = Array.from(
-          scope.querySelectorAll(
-            'a, button, span, input[type="button"], input[type="submit"], [onclick], [data-what], [title]'
-          )
-        );
-        for (const el of candidates) {
-          const s = scoreEl(el, part);
-          if (s > bestScore) {
-            bestScore = s;
-            best = el;
-          }
-        }
-      }
-      if (best && bestScore >= 60) {
-        best.setAttribute('data-afp-part', part.toLowerCase());
-        found[part] = {
-          score: bestScore,
-          text: (best.innerText || best.title || '').trim().slice(0, 40),
-        };
-      }
-    }
-
-    return {
-      ok: Object.keys(found).length >= 3,
-      count: Object.keys(found).length,
-      found,
-      newestTs,
-      debug: {
-        hasSection: !!document.querySelector('#updraft_existing_backups'),
-        rowCount: rows.length,
-        sample: (newestRow?.innerText || '').replace(/\s+/g, ' ').slice(0, 160),
-      },
-    };
-  }, beforeSnap?.timestamp ?? null);
-}
-
-async function waitForBackupRow(page, base, log, beforeSnap = null) {
-  const deadline = Date.now() + 120000;
-  let attempt = 0;
-
-  while (Date.now() < deadline) {
-    attempt += 1;
-
-    await page.evaluate(() => {
-      const el =
-        document.querySelector('#updraft_existing_backups') ||
-        Array.from(document.querySelectorAll('h2,h3,h4')).find((h) =>
-          /existing backups/i.test(h.innerText || '')
-        );
-      el?.scrollIntoView?.({ block: 'center' });
-    });
-    await sleep(200);
-
-    const info = await findUpdraftPartButtons(page, beforeSnap);
-    const isNewEnough =
-      !beforeSnap?.timestamp ||
-      (info.newestTs > 0 && info.newestTs > beforeSnap.timestamp);
-
-    if (info.ok && isNewEnough) {
-      log(
-        `Thấy ${info.count}/5 nút download trên backup mới nhất (#${attempt}, ts=${info.newestTs}): ${Object.keys(info.found).join(', ')}`
-      );
-      return true;
-    }
-
-    // Không parse được ts nhưng đã qua bước chờ backup mới — dùng hàng đầu Updraft (mới nhất)
-    if (info.ok && beforeSnap?.timestamp && info.newestTs === 0 && attempt >= 3) {
-      log(
-        `Thấy ${info.count}/5 nút (không đọc được timestamp) — dùng hàng đầu Existing Backups (#${attempt}).`
-      );
-      return true;
-    }
-
-    if (attempt <= 3 || attempt % 5 === 0) {
-      log(
-        `Chưa sẵn sàng tải (#${attempt}) — found=${info.count}, newestTs=${info.newestTs}, before=${beforeSnap?.timestamp ?? 'n/a'}, sample="${info.debug?.sample || ''}"`
-      );
-    }
-
-    if (attempt % 5 === 0) {
-      await page.goto(`${base}/wp-admin/options-general.php?page=updraftplus`, {
-        waitUntil: 'domcontentloaded',
-        timeout: 45000,
-      });
-      await sleep(800);
-      await page.evaluate(() => {
-        const btn = Array.from(document.querySelectorAll('a, button')).find((el) =>
-          /rescan|re-scan|refresh.*backup|scan.*backup/i.test((el.innerText || '').trim())
-        );
-        btn?.click();
-      });
-      await sleep(600);
-    } else {
-      await sleep(800);
-    }
-  }
-
-  return false;
-}
-
-/**
- * Sau backup: click 5 nút Database/Plugins/Themes/Uploads/Others
- * CHỈ trên hàng backup mới nhất (mới hơn beforeSnap).
- */
-async function downloadUpdraftBackupParts(page, base, log, beforeSnap = null, projectName = '') {
-  log('Tải backup: chỉ lấy hàng MỚI NHẤT theo thời gian...');
-  await dismissBlockingAlerts(page, log);
-
-  const newest = await snapshotNewestBackup(page);
-  if (beforeSnap?.timestamp && newest?.timestamp && newest.timestamp <= beforeSnap.timestamp) {
-    log(
-      `⚠ Backup mới nhất trên list (ts=${newest.timestamp}) không mới hơn bản trước Backup Now (ts=${beforeSnap.timestamp}) — không tải backup cũ.`
-    );
-    throw new Error('Chưa có backup mới hơn trên Existing Backups — bỏ qua download để tránh tải bản cũ.');
-  }
-  if (newest) {
-    log(`Sẽ tải backup: ${newest.label.slice(0, 100)} (ts=${newest.timestamp})`);
-  }
-
-  const ready = await waitForBackupRow(page, base, log, beforeSnap);
-  if (!ready) {
-    log('⚠ Timeout: không thấy nút Database/Plugins/... trên backup mới — bỏ qua download.');
-    return;
-  }
-
-  const bundleLabel = makeBackupBundleLabel(projectName);
-  const jobDir = path.join(DOWNLOADS_DIR, bundleLabel);
-  fs.mkdirSync(jobDir, { recursive: true });
-  log(`Thư mục tải file: ${path.resolve(jobDir)}`);
-
-  const client = await page.createCDPSession();
-  await client.send('Page.setDownloadBehavior', {
-    behavior: 'allow',
-    downloadPath: jobDir,
-  });
-
-  const parts = ['Database', 'Plugins', 'Themes', 'Uploads', 'Others'];
-  const clicked = [];
-
-  for (const label of parts) {
-    await findUpdraftPartButtons(page, beforeSnap);
-
-    let ok = false;
-    for (let tryN = 0; tryN < 4 && !ok; tryN += 1) {
-      ok = await page.evaluate((part) => {
-        const row =
-          document.querySelector('[data-afp-newest-row="1"]') ||
-          document.querySelector('#updraft_existing_backups');
-        const marked =
-          row?.querySelector(`[data-afp-part="${part.toLowerCase()}"]`) ||
-          document.querySelector(`[data-afp-part="${part.toLowerCase()}"]`);
-        if (marked) {
-          marked.scrollIntoView?.({ block: 'center' });
-          marked.click();
-          return true;
-        }
-        const scope = row || document.body;
-        const candidates = Array.from(
-          scope.querySelectorAll('a, button, span, input[type="button"], [onclick]')
-        );
-        const btn = candidates.find((el) => {
-          const text = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
-          return text.length < 40 && new RegExp(`^${part}\\b`, 'i').test(text);
-        });
-        if (btn) {
-          btn.scrollIntoView?.({ block: 'center' });
-          btn.click();
-          return true;
-        }
-        return false;
-      }, label);
-
-      if (!ok) {
-        await findUpdraftPartButtons(page, beforeSnap);
-        await sleep(400);
-      }
-    }
-
-    if (ok) {
-      clicked.push(label);
-      log(`  → đã chọn ${label}`);
-      await sleep(500);
-    } else {
-      log(`  ⚠ không thấy nút ${label}`);
-    }
-  }
-
-  if (!clicked.length) {
-    log('⚠ Không click được các phần backup — bỏ qua download.');
-    return;
-  }
-
-  log('Chờ panel File ready / Download to your computer...');
-  const need = clicked.length;
-  const deadline = Date.now() + 180000;
-  let readyCount = 0;
-  while (Date.now() < deadline) {
-    readyCount = await page.evaluate(() =>
-      Array.from(document.querySelectorAll('a, button')).filter((el) =>
-        /download to your computer/i.test((el.innerText || el.textContent || '').trim())
-      ).length
-    );
-    if (readyCount >= need) break;
-    await sleep(500);
-  }
-
-  if (readyCount === 0) {
-    log('⚠ Không thấy nút "Download to your computer" — bỏ qua tải file.');
-    return;
-  }
-
-  log(`Thấy ${readyCount}/${need} nút Download — tải về máy...`);
-
-  for (let i = 0; i < readyCount; i += 1) {
-    const clickedOne = await page.evaluate((index) => {
-      const btns = Array.from(document.querySelectorAll('a, button')).filter((el) =>
-        /download to your computer/i.test((el.innerText || el.textContent || '').trim())
-      );
-      const btn = btns[index];
-      if (!btn) return false;
-      btn.click();
-      return true;
-    }, i);
-    if (clickedOne) {
-      log(`  → Download to your computer (#${i + 1})`);
-      await sleep(700);
-    }
-  }
-
-  log('Chờ file về ổ đĩa...');
-  const waitUntil = Date.now() + 180000;
-  let files = [];
-  while (Date.now() < waitUntil) {
-    const all = fs.readdirSync(jobDir);
-    const stillDownloading = all.some((f) => f.endsWith('.crdownload') || f.endsWith('.tmp'));
-    files = all.filter(
-      (f) => !f.endsWith('.crdownload') && !f.endsWith('.tmp')
-    );
-    if (files.length > 0 && !stillDownloading) {
-      await sleep(500);
-      files = fs
-        .readdirSync(jobDir)
-        .filter((f) => !f.endsWith('.crdownload') && !f.endsWith('.tmp'));
-      break;
-    }
-    await sleep(500);
-  }
-
-  if (!files.length) {
-    log(`⚠ Thư mục trống: ${path.resolve(jobDir)}`);
-    return;
-  }
-
-  log(`Đã tải ${files.length} file vào: ${path.resolve(jobDir)}`);
-  for (const f of files) log(`  • ${f}`);
-}
-
-
-

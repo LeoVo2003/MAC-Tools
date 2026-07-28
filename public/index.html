@@ -49,7 +49,6 @@
       <nav class="tabs">
         <button type="button" class="tab active" data-tab="run">Run</button>
         <button type="button" class="tab" data-tab="reports" data-admin-only hidden>Báo cáo</button>
-        <button type="button" class="tab" data-tab="backups">Backup files</button>
       </nav>
 
       <div id="tab-run" class="run-workspace">
@@ -88,13 +87,6 @@
               <span>Link tài liệu hướng dẫn</span>
               <input name="docLink" type="url"
                 value="https://docs.google.com/document/d/1pMuhxjAfY4i6jOyk2CcAUYWBp8CdLbJ-7IpQaiYG0wo/edit?usp=sharing" />
-            </label>
-          </div>
-
-          <div class="checks">
-            <label class="check">
-              <input type="checkbox" name="downloadBackup" />
-              <span>Tải file backup về máy (không zip)</span>
             </label>
           </div>
 
@@ -280,18 +272,10 @@
         </section>
       </div>
 
-      <div id="tab-backups" hidden>
-        <section class="panel">
-          <div class="panel-head">
-            <h2>Backup files trên server</h2>
-            <button type="button" id="refreshBackupsBtn" class="secondary tiny">Refresh</button>
-          </div>
-          <p class="hint panel-desc">File tải từ UpdraftPlus (không zip). Bấm tên file để tải về máy.</p>
-          <div id="backupsList" class="backups-list"></div>
-        </section>
       </div>
     </div>
   </div>
+  <script src="/socket.io/socket.io.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

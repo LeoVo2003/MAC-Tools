@@ -24,9 +24,48 @@ async function fillNative(page, handle, value) {
 
 const WPM_BASE = 'https://wpm.macusaone.com';
 
+/** Session WPM còn sống (đã vào app, không còn form /login). */
+function isWpmAlreadyLoggedIn(diag = {}) {
+  const url = String(diag.url || '');
+  if (/wpm\.macusaone\.com/i.test(url) && !/\/login\b/i.test(url)) {
+    if (/\/(dashboard|projects|tasks|plugins)\b/i.test(url)) return true;
+  }
+  const blob = `${diag.title || ''} ${diag.body || ''}`;
+  // Dashboard đã login: có Logout + Dashboard / Project Management
+  if (/Logout/i.test(blob) && /Dashboard|Project Management|Web Logout/i.test(blob)) {
+    return true;
+  }
+  return false;
+}
+
+async function readWpmPageDiag(page) {
+  return page
+    .evaluate(() => ({
+      url: location.href,
+      title: document.title,
+      body: (document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 280),
+      inputCount: document.querySelectorAll('input').length,
+    }))
+    .catch(() => ({}));
+}
+
 export async function loginToWPM(page, { username, password }, log) {
+  // Resume / browser giữ cookie: đã ở Dashboard thì khỏi login lại
+  const before = await readWpmPageDiag(page);
+  if (isWpmAlreadyLoggedIn(before)) {
+    log('Đã login WPM (session còn — bỏ qua form login).');
+    return;
+  }
+
   log('Mở trang login WPM...');
   await page.goto(`${WPM_BASE}/login`, { ...GOTO, waitUntil: 'domcontentloaded' });
+
+  // Cookie còn → WPM redirect /login → /dashboard (không còn ô email/password)
+  const afterGoto = await readWpmPageDiag(page);
+  if (isWpmAlreadyLoggedIn(afterGoto) || !String(afterGoto.url || page.url() || '').includes('/login')) {
+    log('Đã login WPM (session còn — redirect khỏi /login).');
+    return;
+  }
 
   const userSels = [
     'input[name="email"]',
@@ -46,15 +85,12 @@ export async function loginToWPM(page, { username, password }, log) {
   try {
     await page.waitForSelector(userSels.join(', '), { visible: true, timeout: 30000 });
   } catch {
-    const diag = await page
-      .evaluate(() => ({
-        url: location.href,
-        title: document.title,
-        body: (document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 280),
-        inputCount: document.querySelectorAll('input').length,
-        statusHint: document.body?.innerText || '',
-      }))
-      .catch(() => ({}));
+    const diag = await readWpmPageDiag(page);
+
+    if (isWpmAlreadyLoggedIn(diag)) {
+      log('Đã login WPM (session còn).');
+      return;
+    }
 
     const blob = `${diag.title || ''} ${diag.body || ''}`;
     if (/403\s*forbidden/i.test(blob) || /403/.test(diag.title || '')) {

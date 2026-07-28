@@ -121,8 +121,17 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
     browser = hooks.reuseBrowser;
     hooks.setBrowser?.(browser);
     const pages = await browser.pages().catch(() => []);
+    const openPages = pages.filter((p) => p && !p.isClosed?.());
+    // Ưu tiên tab WPM (Resume thường còn Dashboard/project), không lấy nhầm tab WP
     wpmPage =
-      pages.find((p) => p && !p.isClosed?.()) ||
+      openPages.find((p) => {
+        try {
+          return /wpm\.macusaone\.com/i.test(p.url() || '');
+        } catch {
+          return false;
+        }
+      }) ||
+      openPages[0] ||
       (await browser.newPage());
     log('→ Resume: tái sử dụng Chrome Live đang mở.');
   } else {

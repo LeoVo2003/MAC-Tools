@@ -22,13 +22,13 @@ import {
 import { sessionMiddleware, requireAuth, requireAdmin, currentPublicUser } from './src/auth.js';
 import { createJobQueue } from './src/jobQueue.js';
 import { fillCustomerDataFromUrls } from './src/steps/fillData.js';
-import { listBackupFolders, listBackupFiles, resolveBackupFile } from './src/backupsApi.js';
 import { purgeOldBackups, buildHealthReport, detectStaleJobs } from './src/ops.js';
 import { mountChromeLiveRoutes, attachChromeLiveWs, chromeLiveEnabled } from './src/chromeLive.js';
 import { initLiveVncIdleCpu } from './src/liveVnc.js';
 import { acquireCpuBoost, releaseCpuBoost } from './src/dockerCpuScale.js';
 import { dispatchLiveInput, listLiveSessions, getLiveSession } from './src/liveSession.js';
 import { clearLiveBrowsersForUser, takeLiveBrowser } from './src/liveBrowser.js';
+import { attachRealtime } from './src/realtime.js';
 
 dotenv.config({ path: getEnvPath() });
 
@@ -36,21 +36,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3847;
 const VERSION = '2.0.0-dev';
 
-/** SSE clients: Map<res, { jobId?: string }> */
-const clients = new Map();
+/** Một instance session — Express + Socket.IO chung MemoryStore */
+const sharedSession = sessionMiddleware();
 
-function broadcast(event, data, { jobId, userId } = {}) {
-  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-  for (const [res, meta] of clients) {
-    if (jobId && meta.jobId && meta.jobId !== jobId) continue;
-    if (userId && meta.userId && meta.userId !== userId) continue;
-    try {
-      res.write(payload);
-    } catch {
-      /* ignore */
-    }
-  }
-}
+/** Gán sau khi attachRealtime(server) */
+let broadcast = (event, data, opts) => {
+  /* no-op until socket ready */
+};
 
 function openBrowser(url) {
   let cmd;
@@ -63,9 +55,10 @@ function openBrowser(url) {
 const queue = createJobQueue({
   onLog: (jobId, line) => {
     console.log(line);
-    broadcast('log', { line, jobId }, { jobId });
+    const job = queue.getJob(jobId);
+    broadcast('log', { line, jobId }, { jobId, userId: job?.meta?.userId });
   },
-  onChange: (snap) => broadcast('queue', snap),
+  onChange: () => broadcast('queue', null, { refreshQueues: true }),
   maxConcurrent: Number(process.env.MAX_CONCURRENT_JOBS) || 4,
 });
 
@@ -73,7 +66,7 @@ export function createApp() {
   const app = express();
   app.set('trust proxy', 1);
   app.use(express.json({ limit: '1mb' }));
-  app.use(sessionMiddleware());
+  app.use(sharedSession);
 
   app.get('/api/health', (_req, res) => {
     const snap = queue.snapshot();
@@ -99,8 +92,10 @@ export function createApp() {
     res.status(ok ? 200 : 503).json({ ok, version: VERSION, ...report });
   });
 
-  app.get('/api/queue', requireAuth, (_req, res) => {
-    res.json(queue.snapshot());
+  app.get('/api/queue', requireAuth, (req, res) => {
+    res.json(
+      queue.snapshotForUser(req.user.id, { admin: req.user.role === 'admin' })
+    );
   });
 
   app.post('/api/queue/:jobId/cancel', requireAuth, (req, res) => {
@@ -113,7 +108,7 @@ export function createApp() {
       return res.status(403).json({ error: 'Chỉ hủy job của bạn (hoặc admin).' });
     }
     const result = queue.cancel(jobId, { byUser: req.user.username });
-    broadcast('queue', queue.snapshot());
+    broadcast('queue', null, { refreshQueues: true });
     if (!result.ok) return res.status(404).json(result);
     res.json(result);
   });
@@ -260,9 +255,12 @@ export function createApp() {
 
   app.get('/api/status', requireAuth, (req, res) => {
     const jobId = String(req.query.jobId || '');
-    const job = jobId ? queue.getJob(jobId) : queue.active;
+    const job = jobId ? queue.getJob(jobId) : null;
+    if (job && String(job.meta?.userId || '') !== String(req.user.id) && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Không xem được job của người khác.' });
+    }
     res.json({
-      queue: queue.snapshot(),
+      queue: queue.snapshotForUser(req.user.id, { admin: req.user.role === 'admin' }),
       job: job
         ? {
             id: job.id,
@@ -272,38 +270,6 @@ export function createApp() {
             error: job.error,
           }
         : null,
-    });
-  });
-
-  app.get('/api/events', requireAuth, (req, res) => {
-    const jobId = String(req.query.jobId || '') || undefined;
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.flushHeaders?.();
-
-    clients.set(res, { jobId, userId: req.user.id });
-    res.write(
-      `event: hello\ndata: ${JSON.stringify({ ok: true, jobId: jobId || null, queue: queue.snapshot() })}\n\n`
-    );
-
-    if (jobId) {
-      const job = queue.getJob(jobId);
-      if (job) {
-        for (const line of (job.logs || []).slice(-80)) {
-          res.write(`event: log\ndata: ${JSON.stringify({ line, jobId })}\n\n`);
-        }
-        if (job.result) {
-          res.write(`event: result\ndata: ${JSON.stringify({ ...job.result, jobId })}\n\n`);
-        }
-        if (job.error && job.status === 'error') {
-          res.write(`event: error\ndata: ${JSON.stringify({ message: job.error, jobId })}\n\n`);
-        }
-      }
-    }
-
-    req.on('close', () => {
-      clients.delete(res);
     });
   });
 
@@ -323,9 +289,7 @@ export function createApp() {
         email: String(body.email || '').trim(),
       },
       packageTier: body.packageTier || 'F',
-      options: {
-        downloadBackup: Boolean(body.downloadBackup),
-      },
+      options: {},
       docLink: String(body.docLink || '').trim() || undefined,
       steps: Array.isArray(body.steps) ? body.steps.map(String) : undefined,
     };
@@ -358,29 +322,25 @@ export function createApp() {
     };
 
     const isResume = Boolean(body.resume);
+    const ownerId = req.user.id;
 
-    const { jobId, position, queue: qSnap } = queue.enqueue({
+    const { jobId, position } = queue.enqueue({
       meta: userMeta,
       run: async (pushLog, jobRef) => {
         const thisJobId = jobRef.id;
-        for (const [, meta] of clients) {
-          if (meta.userId === req.user.id && !meta.jobId) {
-            meta.jobId = thisJobId;
-          }
-        }
 
         // Run mới: clear Chrome Live cũ. Resume: tái sử dụng Chrome đang mở.
         let reuseBrowser = null;
         if (isResume) {
-          reuseBrowser = takeLiveBrowser(req.user.id) || queue.takeBrowserForUser?.(req.user.id);
+          reuseBrowser = takeLiveBrowser(ownerId) || queue.takeBrowserForUser?.(ownerId);
           if (reuseBrowser) {
             pushLog('[live] Resume — tái sử dụng Chrome đang mở (không clear).');
           } else {
             pushLog('[live] Resume — không còn Chrome cũ, mở mới.');
           }
         } else {
-          const clearedReg = await clearLiveBrowsersForUser(req.user.id);
-          const clearedQueue = await queue.closeBrowsersForUser(req.user.id);
+          const clearedReg = await clearLiveBrowsersForUser(ownerId);
+          const clearedQueue = await queue.closeBrowsersForUser(ownerId);
           const cleared = (clearedReg.closed || 0) + (clearedQueue || 0);
           if (cleared > 0) {
             pushLog(`[live] Đã clear ${cleared} Chrome cũ trước Run.`);
@@ -388,7 +348,7 @@ export function createApp() {
         }
 
         const runId = startRun({
-          userId: req.user.id,
+          userId: ownerId,
           toolUser: req.user.username,
           wpmUser: stored.username,
           wpmProjectUrl: jobPayload.wpmProjectUrl,
@@ -403,46 +363,53 @@ export function createApp() {
         });
 
         const onStep = (payload) =>
-          broadcast('step', { ...payload, jobId: thisJobId }, { jobId: thisJobId });
+          broadcast('step', { ...payload, jobId: thisJobId }, { jobId: thisJobId, userId: ownerId });
 
         try {
           pushLog('=== Bắt đầu job F User Guide Tool v2 ===');
           const result = await runJob(jobPayload, pushLog, onStep, {
             shouldCancel: () => Boolean(jobRef.cancelled),
             jobId: thisJobId,
-            liveUserId: req.user.id,
+            liveUserId: ownerId,
             reuseBrowser: reuseBrowser || undefined,
             setBrowser: (b) => {
               jobRef.browser = b;
             },
             onScreencast: (payload) => {
-              broadcast('screencast', { ...payload, jobId: thisJobId }, { jobId: thisJobId });
+              broadcast('screencast', { ...payload, jobId: thisJobId }, {
+                jobId: thisJobId,
+                userId: ownerId,
+              });
             },
           });
           if (jobRef.cancelled) throw new Error('Job đã bị hủy.');
           finishRun(runId, { status: 'success', result });
-          broadcast('result', { ...result, jobId: thisJobId }, { jobId: thisJobId });
+          broadcast('result', { ...result, jobId: thisJobId }, { jobId: thisJobId, userId: ownerId });
           pushLog('=== Hoàn tất ===');
-          broadcast('done', { running: false, jobId: thisJobId }, { jobId: thisJobId });
-          broadcast('queue', queue.snapshot());
+          broadcast('done', { running: false, jobId: thisJobId }, { jobId: thisJobId, userId: ownerId });
+          broadcast('queue', null, { refreshQueues: true });
           return result;
         } catch (err) {
           const message = err?.message || String(err);
           const cancelled = Boolean(jobRef.cancelled) || /đã bị hủy/i.test(message);
           finishRun(runId, { status: cancelled ? 'cancelled' : 'error', error: message });
-          broadcast('error', { message, jobId: thisJobId, cancelled }, { jobId: thisJobId });
-          broadcast('done', { running: false, jobId: thisJobId }, { jobId: thisJobId });
-          broadcast('queue', queue.snapshot());
+          broadcast('job-error', { message, jobId: thisJobId, cancelled }, {
+            jobId: thisJobId,
+            userId: ownerId,
+          });
+          broadcast('done', { running: false, jobId: thisJobId }, { jobId: thisJobId, userId: ownerId });
+          broadcast('queue', null, { refreshQueues: true });
           throw err;
         }
       },
       onDone: () => {
-        broadcast('queue', queue.snapshot());
+        broadcast('queue', null, { refreshQueues: true });
       },
     });
 
     const maxJobs = Number(process.env.MAX_CONCURRENT_JOBS) || 4;
-    broadcast('queue', qSnap);
+    const userSnap = queue.snapshotForUser(req.user.id, { admin: req.user.role === 'admin' });
+    broadcast('queue', null, { refreshQueues: true });
     res.json({
       ok: true,
       jobId,
@@ -451,7 +418,7 @@ export function createApp() {
         position > maxJobs
           ? `Đã xếp hàng (vị trí ${position}). Tối đa ${maxJobs} job chạy cùng lúc.`
           : 'Job đã bắt đầu (hoặc sắp chạy).',
-      queue: qSnap,
+      queue: userSnap,
     });
   });
 
@@ -497,37 +464,6 @@ export function createApp() {
     const days = Number(req.body?.days) || Number(process.env.BACKUP_RETENTION_DAYS) || 7;
     const result = purgeOldBackups(days);
     res.json({ ok: true, ...result });
-  });
-
-  app.get('/api/backups', requireAuth, (_req, res) => {
-    try {
-      res.json({
-        downloadDir: DOWNLOADS_DIR,
-        folders: listBackupFolders(),
-      });
-    } catch (err) {
-      res.status(500).json({ error: err?.message || String(err) });
-    }
-  });
-
-  app.get('/api/backups/:name/files', requireAuth, (req, res) => {
-    try {
-      res.json({
-        name: req.params.name,
-        files: listBackupFiles(req.params.name),
-      });
-    } catch (err) {
-      res.status(404).json({ error: err?.message || String(err) });
-    }
-  });
-
-  app.get('/api/backups/:name/file', requireAuth, (req, res) => {
-    try {
-      const filePath = resolveBackupFile(req.params.name, req.query.f);
-      res.download(filePath, path.basename(filePath));
-    } catch (err) {
-      res.status(404).json({ error: err?.message || String(err) });
-    }
   });
 
   mountChromeLiveRoutes(app);
@@ -583,6 +519,9 @@ export async function startServer({ openBrowser: shouldOpen } = {}) {
     if (chromeLiveEnabled()) initLiveVncIdleCpu();
     if (autoOpen) setTimeout(() => openBrowser(url), 400);
   });
+
+  const rt = attachRealtime(server, { sessionMiddleware: sharedSession, queue });
+  broadcast = rt.broadcast;
 
   attachChromeLiveWs(server);
 

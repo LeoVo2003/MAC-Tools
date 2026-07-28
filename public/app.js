@@ -25,7 +25,9 @@ const stepsNoneBtn = document.getElementById('stepsNoneBtn');
 
 let currentUser = null;
 let currentJobId = null;
-let eventSource = null;
+let socket = null;
+let watchJobId = null;
+
 const doneThisRun = new Set();
 
 function setCancelVisible(show) {
@@ -177,10 +179,7 @@ function showLoggedOut() {
   if (logoutBtn) logoutBtn.hidden = true;
   whoAmI.textContent = '';
   setBadge(loginStatus, 'idle', 'Guest');
-  if (eventSource) {
-    eventSource.close();
-    eventSource = null;
-  }
+  disconnectSocket();
 }
 
 function showApp(user) {
@@ -245,73 +244,111 @@ logoutBtn.addEventListener('click', async () => {
   showLoggedOut();
 });
 
-function connectEvents(jobId) {
-  if (eventSource) eventSource.close();
-  const q = jobId ? `?jobId=${encodeURIComponent(jobId)}` : '';
-  eventSource = new EventSource(`/api/events${q}`);
-  eventSource.addEventListener('log', (e) => {
-    const data = JSON.parse(e.data);
-    if (jobId && data.jobId && data.jobId !== jobId) return;
-    appendLog(data.line);
-  });
-  eventSource.addEventListener('step', (e) => {
-    const data = JSON.parse(e.data);
-    if (data?.id && data?.status) markStepUi(data.id, data.status);
-  });
-  eventSource.addEventListener('result', (e) => {
-    const data = JSON.parse(e.data);
-    showResult(data);
-    setRunBadge('done', 'Done');
-    runBtn.disabled = false;
-    setCancelVisible(false);
-    currentJobId = null;
-    if (resumeBtn) resumeBtn.hidden = true;
-    clearStepStyles();
-    doneThisRun.clear();
-    queueHint.textContent = '';
-    loadBackups();
-    refreshQueue();
-  });
-  eventSource.addEventListener('error', (e) => {
+function disconnectSocket() {
+  watchJobId = null;
+  if (socket) {
     try {
-      const data = JSON.parse(e.data);
-      const cancelled = Boolean(data.cancelled) || /đã bị hủy|hủy bởi/i.test(data.message || '');
-      appendLog(cancelled ? `⏹ ${data.message}` : `❌ ${data.message}`);
-      if (!cancelled) untickCompletedAfterError();
-      setRunBadge(cancelled ? 'idle' : 'error', cancelled ? 'Cancelled' : 'Error');
-      runBtn.disabled = false;
-      setCancelVisible(false);
-      currentJobId = null;
-      if (resumeBtn) {
-        if (cancelled) {
-          resumeBtn.hidden = true;
-        } else {
-          resumeBtn.hidden = false;
-          appendLog('↳ Bấm Resume để chạy các bước còn tick (hoặc tick lại rồi Run).');
-        }
-      }
-      queueHint.textContent = '';
-      refreshQueue();
-    } catch {
-      /* SSE reconnect */
-    }
-  });
-  eventSource.addEventListener('queue', (e) => {
-    try {
-      const q = JSON.parse(e.data);
-      renderQueue(q);
+      socket.removeAllListeners();
+      socket.disconnect();
     } catch {
       /* ignore */
     }
-  });
-  eventSource.addEventListener('open', () => {
-    refreshQueue();
-  });
-  eventSource.addEventListener('done', () => {
-    runBtn.disabled = false;
-    setCancelVisible(false);
-    refreshQueue();
-  });
+    socket = null;
+  }
+}
+
+function connectEvents(jobId) {
+  if (typeof io !== 'function') {
+    console.error('Socket.IO client chưa load');
+    return;
+  }
+
+  watchJobId = jobId || null;
+
+  if (!socket) {
+    socket = io({
+      path: '/socket.io',
+      withCredentials: true,
+      transports: ['websocket', 'polling'],
+    });
+
+    socket.on('connect', () => {
+      if (watchJobId) socket.emit('watch-job', watchJobId);
+      refreshQueue();
+    });
+
+    socket.on('hello', (data) => {
+      if (data?.queue) renderQueue(data.queue);
+    });
+
+    socket.on('log', (data) => {
+      if (watchJobId && data.jobId && data.jobId !== watchJobId) return;
+      if (data?.line) appendLog(data.line);
+    });
+
+    socket.on('step', (data) => {
+      if (data?.id && data?.status) markStepUi(data.id, data.status);
+    });
+
+    socket.on('result', (data) => {
+      if (watchJobId && data.jobId && data.jobId !== watchJobId) return;
+      showResult(data);
+      setRunBadge('done', 'Done');
+      runBtn.disabled = false;
+      setCancelVisible(false);
+      currentJobId = null;
+      watchJobId = null;
+      if (resumeBtn) resumeBtn.hidden = true;
+      clearStepStyles();
+      doneThisRun.clear();
+      queueHint.textContent = '';
+      refreshQueue();
+    });
+
+    socket.on('job-error', (data) => {
+      try {
+        if (!data?.message) return;
+        if (watchJobId && data.jobId && data.jobId !== watchJobId) return;
+        const cancelled = Boolean(data.cancelled) || /đã bị hủy|hủy bởi/i.test(data.message || '');
+        appendLog(cancelled ? `⏹ ${data.message}` : `❌ ${data.message}`);
+        if (!cancelled) untickCompletedAfterError();
+        setRunBadge(cancelled ? 'idle' : 'error', cancelled ? 'Cancelled' : 'Error');
+        runBtn.disabled = false;
+        setCancelVisible(false);
+        currentJobId = null;
+        watchJobId = null;
+        if (resumeBtn) {
+          if (cancelled) {
+            resumeBtn.hidden = true;
+          } else {
+            resumeBtn.hidden = false;
+            appendLog('↳ Bấm Resume để chạy các bước còn tick (hoặc tick lại rồi Run).');
+          }
+        }
+        queueHint.textContent = '';
+        refreshQueue();
+      } catch {
+        /* ignore */
+      }
+    });
+
+    socket.on('queue', (q) => {
+      renderQueue(q);
+    });
+
+    socket.on('done', (data) => {
+      if (watchJobId && data?.jobId && data.jobId !== watchJobId) return;
+      runBtn.disabled = false;
+      setCancelVisible(false);
+      refreshQueue();
+    });
+
+    socket.on('connect_error', (err) => {
+      console.warn('[socket]', err?.message || err);
+    });
+  } else if (socket.connected) {
+    socket.emit('watch-job', watchJobId);
+  }
 }
 
 function normalizeWpmProjectUrl(raw) {
@@ -580,7 +617,6 @@ form?.addEventListener('submit', async (e) => {
     password: cleanPass,
     email: fd.get('email'),
     docLink: fd.get('docLink'),
-    downloadBackup: fd.get('downloadBackup') === 'on',
     packageTier: 'F',
     steps,
     webTargetMode: getWebTargetMode(),
@@ -667,13 +703,12 @@ document.querySelectorAll('.tab').forEach((btn) => {
     btn.classList.add('active');
     const tab = btn.getAttribute('data-tab');
     document.getElementById('tab-run').hidden = tab !== 'run';
-    document.getElementById('tab-reports').hidden = tab !== 'reports';
-    document.getElementById('tab-backups').hidden = tab !== 'backups';
+    const reports = document.getElementById('tab-reports');
+    if (reports) reports.hidden = tab !== 'reports';
     if (tab === 'reports') {
       loadReports();
       loadHealth();
     }
-    if (tab === 'backups') loadBackups();
   });
 });
 
@@ -921,47 +956,6 @@ document.getElementById('refreshHealthBtn')?.addEventListener('click', loadHealt
 ['filterUser', 'filterFrom', 'filterTo', 'filterStatus'].forEach((id) => {
   document.getElementById(id)?.addEventListener('change', loadReports);
 });
-
-async function loadBackups() {
-  const box = document.getElementById('backupsList');
-  box.innerHTML = '<p class="hint">Đang tải…</p>';
-  try {
-    const res = await fetch('/api/backups');
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || res.statusText);
-    if (!data.folders?.length) {
-      box.innerHTML = '<p class="hint">Chưa có folder backup.</p>';
-      return;
-    }
-    box.innerHTML = '';
-    for (const folder of data.folders) {
-      const details = document.createElement('details');
-      details.className = 'backup-folder';
-      details.innerHTML = `<summary><strong>${folder.name}</strong> <span class="hint">(${folder.fileCount} files · ${formatVnDateTime(folder.mtime) || ''})</span></summary><div class="backup-files" data-name="${folder.name}">Loading…</div>`;
-      box.appendChild(details);
-      details.addEventListener('toggle', async () => {
-        if (!details.open) return;
-        const filesBox = details.querySelector('.backup-files');
-        if (filesBox.dataset.loaded) return;
-        const fr = await fetch(`/api/backups/${encodeURIComponent(folder.name)}/files`);
-        const fd = await fr.json();
-        filesBox.innerHTML = '';
-        for (const f of fd.files || []) {
-          const a = document.createElement('a');
-          a.href = `/api/backups/${encodeURIComponent(folder.name)}/file?f=${encodeURIComponent(f.name)}`;
-          a.textContent = `${f.name} (${Math.round((f.size || 0) / 1024)} KB)`;
-          a.className = 'backup-file-link';
-          filesBox.appendChild(a);
-        }
-        filesBox.dataset.loaded = '1';
-      });
-    }
-  } catch (err) {
-    box.innerHTML = `<p class="hint hint--error">${err.message}</p>`;
-  }
-}
-
-document.getElementById('refreshBackupsBtn')?.addEventListener('click', loadBackups);
 
 async function setupLiveChrome() {
   const panel = document.getElementById('liveChromePanel');

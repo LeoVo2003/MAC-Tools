@@ -38,7 +38,7 @@ Admin mặc định: `leo.vo@macusaone.com` (thêm email: `ADMIN_EMAILS=a@x.com,
 | `MAX_CONCURRENT_JOBS` | Số Chrome chạy song song (mặc định `4`) |
 | `PORT` | Mặc định `3847` |
 
-## Nginx mẫu (SSE + Live Chrome WebSocket)
+## Nginx mẫu (Socket.IO + Live Chrome WebSocket)
 
 ```nginx
 map $http_upgrade $connection_upgrade {
@@ -50,14 +50,14 @@ server {
   listen 80;
   server_name user-guide.keith;  # đổi domain
 
-  # SSE log — không dùng Upgrade
-  location /api/events {
+  # Socket.IO rooms (log/queue theo user) — BẮT BUỘC WebSocket
+  location /socket.io/ {
     proxy_pass http://127.0.0.1:3847;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header Connection '';
-    proxy_buffering off;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
     proxy_read_timeout 24h;
   }
 
@@ -85,6 +85,7 @@ server {
 ```
 
 Nếu Live hiện logo noVNC + "无法连接 / Failed to connect": gần như chắc **proxy chưa forward WebSocket** — thêm block `/chrome-live/` như trên rồi reload nginx.
+Nếu log/queue không realtime sau F5: thêm block `/socket.io/` như trên.
 
 ### Domain thật (FlashVPS)
 `https://user-guide.kietvh.io.vn` — nginx: `/etc/nginx/sites-available/user-guide`
@@ -95,8 +96,8 @@ cd /home/flashvps/User-Guide
 # 1) .env: CHROME_LIVE=true (hoặc false nếu team không cần Live), HEADLESS=false, secrets
 #    Live mặc định tắt trên UI — user bấm Mở Live mới start x11vnc; Đóng Live = tắt (tiết kiệm CPU)
 #    CPU: idle 0.3; Fill/Run hoặc Mở Live → ~1.5 (docker.sock); hết việc + Live đóng → 0.3
-# 2) nginx có /api/events + /chrome-live/ + nginx -t && systemctl reload nginx
-# 3) recreate để nhận docker.sock + shm 512m: docker compose up -d --force-recreate
+# 2) nginx có /socket.io/ + /chrome-live/ (WebSocket) + nginx -t && systemctl reload nginx
+# 3) recreate để nhận image + deps socket.io: docker compose up -d --force-recreate
 docker compose pull
 docker compose up -d --force-recreate
 docker compose ps
@@ -156,7 +157,8 @@ nano /home/flashvps/User-Guide/.env   # sau lần deploy đầu
 
 - User login WPM → Run dùng đúng tk đó; không còn form WPM trong Run.
 - Tracking: `data/runs.jsonl` — tab Báo cáo (admin).
-- Backup: tick option mới tải; tab **Backup files**.
+- Backup: bước Backup Now trên site (không tải file / không tab Backup files).
+- Realtime: Socket.IO room `user:<id>` — F5 vẫn join lại channel của mình.
 - Deploy từ `main`; test trên `develop`.
 
 ## Local (Windows/Mac)
