@@ -99,6 +99,18 @@ jobs:
               exit 1
             fi
 
+            # Perf defaults (không đụng SESSION/APP secret)
+            if grep -qE '^SPEED=' .env; then
+              sed -i 's/^SPEED=.*/SPEED=turbo/' .env
+            else
+              echo 'SPEED=turbo' >> .env
+            fi
+            if grep -qE '^DOCKER_CPU_LIVE=' .env; then
+              sed -i 's/^DOCKER_CPU_LIVE=.*/DOCKER_CPU_LIVE=2.5/' .env
+            else
+              echo 'DOCKER_CPU_LIVE=2.5' >> .env
+            fi
+
             if [ -n "$GHCR_TOKEN" ]; then
               echo "$GHCR_TOKEN" | docker login ghcr.io -u "${GHCR_USER:-$USER}" --password-stdin
             fi
