@@ -87,8 +87,39 @@ function setHintTone(el, tone = 'muted') {
 }
 
 function appendLog(line) {
-  logBox.textContent += (logBox.textContent ? '\n' : '') + line;
+  if (!logBox) return;
+  const row = document.createElement('div');
+  row.className = 'log-line';
+  const text = String(line ?? '');
+  // Link ảnh lỗi: /api/errors/....png
+  const parts = text.split(/(\/api\/errors\/[A-Za-z0-9._%-]+\.png)/g);
+  if (parts.length === 1) {
+    row.textContent = text;
+  } else {
+    for (const part of parts) {
+      if (/^\/api\/errors\/[A-Za-z0-9._%-]+\.png$/.test(part)) {
+        const a = document.createElement('a');
+        a.href = part;
+        a.target = '_blank';
+        a.rel = 'noopener';
+        a.className = 'log-shot-link';
+        a.textContent = '🖼 Mở ảnh lỗi';
+        row.appendChild(a);
+      } else if (part) {
+        row.appendChild(document.createTextNode(part));
+      }
+    }
+  }
+  logBox.appendChild(row);
   logBox.scrollTop = logBox.scrollHeight;
+}
+
+function appendScreenshotLinks(screenshots) {
+  if (!Array.isArray(screenshots) || !screenshots.length) return;
+  for (const s of screenshots) {
+    if (!s?.url) continue;
+    appendLog(`📸 Ảnh lỗi ${s.label || ''}: ${s.url}`.trim());
+  }
 }
 
 function stepInputs() {
@@ -322,7 +353,10 @@ function connectEvents(jobId) {
         if (watchJobId && data.jobId && data.jobId !== watchJobId) return;
         const cancelled = Boolean(data.cancelled) || /đã bị hủy|hủy bởi/i.test(data.message || '');
         appendLog(cancelled ? `⏹ ${data.message}` : `❌ ${data.message}`);
-        if (!cancelled) untickCompletedAfterError();
+        if (!cancelled) {
+          appendScreenshotLinks(data.screenshots);
+          untickCompletedAfterError();
+        }
         setRunBadge(cancelled ? 'idle' : 'error', cancelled ? 'Cancelled' : 'Error');
         runBtn.disabled = false;
         setCancelVisible(false);

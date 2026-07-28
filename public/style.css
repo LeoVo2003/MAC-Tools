@@ -944,9 +944,28 @@ button.danger:hover:not(:disabled) {
   font-family: var(--mono);
   font-size: var(--text-xs);
   line-height: 1.5;
-  white-space: pre-wrap;
+  white-space: normal;
   word-break: break-word;
   color: #b8c5d4;
+}
+
+.log-line {
+  white-space: pre-wrap;
+}
+
+.log-line + .log-line {
+  margin-top: 0.15em;
+}
+
+a.log-shot-link {
+  color: var(--orange);
+  font-weight: 600;
+  text-decoration: underline;
+  margin-left: 0.25em;
+}
+
+a.log-shot-link:hover {
+  color: #ff8a4c;
 }
 
 .result-grid {

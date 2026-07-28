@@ -157,16 +157,40 @@ export function originOf(url) {
 
 export async function screenshotError(page, label = 'error') {
   ensureDirs();
-  const file = path.join(ERRORS_DIR, `${label}-${Date.now()}.png`);
+  const name = `${label}-${Date.now()}.png`;
+  const file = path.join(ERRORS_DIR, name);
   try {
     if (page && !page.isClosed()) {
       await page.screenshot({ path: file, fullPage: true });
-      return file;
+      return { file, name, url: `/api/errors/${encodeURIComponent(name)}` };
     }
   } catch {
     /* ignore */
   }
   return null;
+}
+
+/**
+ * evaluate an toàn khi trang đang navigate (tránh "Execution context was destroyed").
+ */
+export async function evaluateSafe(page, fn, ...args) {
+  let lastErr;
+  for (let i = 0; i < 4; i += 1) {
+    try {
+      return await page.evaluate(fn, ...args);
+    } catch (err) {
+      lastErr = err;
+      const msg = err?.message || String(err);
+      if (!/Execution context was destroyed|Cannot find context|navigat/i.test(msg)) {
+        throw err;
+      }
+      await page
+        .waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 12000 })
+        .catch(() => {});
+      await sleep(150);
+    }
+  }
+  throw lastErr || new Error('Execution context was destroyed.');
 }
 
 /** Click first matching selector that exists and is visible. */

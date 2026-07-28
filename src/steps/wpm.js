@@ -5,6 +5,7 @@ import {
   sleep,
   sleepExact,
   GOTO,
+  evaluateSafe,
 } from '../utils.js';
 
 /** Điền input theo kiểu React/Vue (clear + type thật). */
@@ -305,7 +306,7 @@ export async function openWebsiteInformationTab(page, projectUrl, log = () => {}
   for (const url of candidates) {
     await page.goto(url, GOTO);
     await sleep(400);
-    await page.evaluate(() => {
+    await evaluateSafe(page, () => {
       const tab =
         document.querySelector(
           'a[href="#tab-web-info"], a[href*="tab-web-info"], [data-bs-target="#tab-web-info"], [data-toggle="tab"][href="#tab-web-info"]'
@@ -316,7 +317,7 @@ export async function openWebsiteInformationTab(page, projectUrl, log = () => {}
       tab?.click();
     });
     await sleep(300);
-    const ok = await page.evaluate(() => {
+    const ok = await evaluateSafe(page, () => {
       const pane = document.querySelector('#tab-web-info');
       return (
         !!document.querySelector('#web-info, #websContainer, .web-item, [id^="web_"]') ||
@@ -807,7 +808,7 @@ export async function syncAccountToWPM(page, projectUrl, account, log, targetOpt
   log('Mở Endpoint 1 trên target web...');
   let endpointReady = false;
   for (let attempt = 1; attempt <= 4; attempt += 1) {
-    const clickInfo = await page.evaluate((webId) => {
+    const clickInfo = await evaluateSafe(page, (webId) => {
       const root =
         document.getElementById(webId) ||
         document.querySelector(`#websContainer [id="${webId}"]`);
@@ -883,13 +884,13 @@ export async function syncAccountToWPM(page, projectUrl, account, log, targetOpt
       await page.waitForSelector(sel, { visible: true, timeout: 3000 });
       await page.click(sel);
     } catch {
-      await page.evaluate((mark) => {
+      await evaluateSafe(page, (mark) => {
         document.querySelector(`[data-afp-endpoint="${mark}"]`)?.click();
       }, clickInfo.mark);
     }
     await sleepExact(1000);
 
-    const openOk = await page.evaluate((webId) => {
+    const openOk = await evaluateSafe(page, (webId) => {
       const root =
         document.getElementById(webId) ||
         document.querySelector(`#websContainer [id="${webId}"]`);
@@ -921,7 +922,7 @@ export async function syncAccountToWPM(page, projectUrl, account, log, targetOpt
     );
   }
 
-  const countBefore = await page.evaluate((webId) => {
+  const countBefore = await evaluateSafe(page, (webId) => {
     const root =
       document.getElementById(webId) ||
       document.querySelector(`#websContainer [id="${webId}"]`) ||
@@ -944,7 +945,7 @@ export async function syncAccountToWPM(page, projectUrl, account, log, targetOpt
   }, targetWeb.id);
   log(`Add Account... (đang có ~${countBefore} account visible trong Endpoint)`);
 
-  const added = await page.evaluate((webId) => {
+  const added = await evaluateSafe(page, (webId) => {
     const root =
       document.getElementById(webId) ||
       document.querySelector(`#websContainer [id="${webId}"]`) ||
@@ -975,7 +976,7 @@ export async function syncAccountToWPM(page, projectUrl, account, log, targetOpt
   try {
     await page.click(`[data-afp-add-account="${added.mark}"]`);
   } catch {
-    await page.evaluate((mark) => {
+    await evaluateSafe(page, (mark) => {
       document.querySelector(`[data-afp-add-account="${mark}"]`)?.click();
     }, added.mark);
   }
@@ -983,7 +984,7 @@ export async function syncAccountToWPM(page, projectUrl, account, log, targetOpt
   let appeared = false;
   const waitUntil = Date.now() + 15000;
   while (Date.now() < waitUntil) {
-    const info = await page.evaluate((webId, before) => {
+    const info = await evaluateSafe(page, (webId, before) => {
       const root =
         document.getElementById(webId) ||
         document.querySelector(`#websContainer [id="${webId}"]`) ||

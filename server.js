@@ -381,6 +381,9 @@ export function createApp() {
             setBrowser: (b) => {
               jobRef.browser = b;
             },
+            onScreenshots: (shots) => {
+              jobRef.screenshots = shots;
+            },
             onScreencast: (payload) => {
               broadcast('screencast', { ...payload, jobId: thisJobId }, {
                 jobId: thisJobId,
@@ -398,11 +401,13 @@ export function createApp() {
         } catch (err) {
           const message = err?.message || String(err);
           const cancelled = Boolean(jobRef.cancelled) || /đã bị hủy/i.test(message);
+          const screenshots = Array.isArray(jobRef.screenshots) ? jobRef.screenshots : [];
           finishRun(runId, { status: cancelled ? 'cancelled' : 'error', error: message });
-          broadcast('job-error', { message, jobId: thisJobId, cancelled }, {
-            jobId: thisJobId,
-            userId: ownerId,
-          });
+          broadcast(
+            'job-error',
+            { message, jobId: thisJobId, cancelled, screenshots },
+            { jobId: thisJobId, userId: ownerId }
+          );
           broadcast('done', { running: false, jobId: thisJobId }, { jobId: thisJobId, userId: ownerId });
           broadcast('queue', null, { refreshQueues: true });
           throw err;
@@ -432,6 +437,39 @@ export function createApp() {
     const file = path.join(getAppRoot(), 'output-latest.json');
     if (!fs.existsSync(file)) return res.status(404).json({ error: 'Chưa có output.' });
     res.sendFile(file);
+  });
+
+  /** Ảnh screenshot lỗi job — bấm link trong Log để xem */
+  app.get('/api/errors/:name', requireAuth, (req, res) => {
+    const name = path.basename(String(req.params.name || ''));
+    if (!/^[a-zA-Z0-9._-]+\.png$/i.test(name)) {
+      return res.status(400).json({ error: 'Tên file không hợp lệ.' });
+    }
+    const file = path.join(getAppRoot(), 'errors', name);
+    if (!fs.existsSync(file)) return res.status(404).json({ error: 'Không tìm thấy ảnh.' });
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.type('png');
+    res.sendFile(file);
+  });
+
+  app.get('/api/errors', requireAuth, (_req, res) => {
+    const dir = path.join(getAppRoot(), 'errors');
+    if (!fs.existsSync(dir)) return res.json({ files: [] });
+    const files = fs
+      .readdirSync(dir)
+      .filter((f) => /\.png$/i.test(f))
+      .map((f) => {
+        const st = fs.statSync(path.join(dir, f));
+        return {
+          name: f,
+          url: `/api/errors/${encodeURIComponent(f)}`,
+          mtime: st.mtimeMs,
+          size: st.size,
+        };
+      })
+      .sort((a, b) => b.mtime - a.mtime)
+      .slice(0, 40);
+    res.json({ files });
   });
 
   app.get('/api/runs', requireAuth, requireAdmin, (req, res) => {

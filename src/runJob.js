@@ -388,15 +388,23 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
       primary,
       onWpm ? 'job-error-wpm' : 'job-error-wp'
     );
-    if (shot1) log(`Screenshot lỗi (${onWpm ? 'WPM' : 'WordPress'}, bước ${currentStep}): ${shot1}`);
+    const shots = [];
+    if (shot1?.url) {
+      shots.push({ label: onWpm ? 'WPM' : 'WordPress', ...shot1 });
+      log(`📸 Xem ảnh lỗi (${onWpm ? 'WPM' : 'WordPress'}, bước ${currentStep}): ${shot1.url}`);
+    }
 
     if (secondary && secondary !== primary && !secondary.isClosed?.()) {
       const shot2 = await screenshotError(
         secondary,
         onWpm ? 'job-error-wp-ref' : 'job-error-wpm-ref'
       );
-      if (shot2) log(`Screenshot tham chiếu (${onWpm ? 'WordPress' : 'WPM'}): ${shot2}`);
+      if (shot2?.url) {
+        shots.push({ label: onWpm ? 'WordPress' : 'WPM', ...shot2 });
+        log(`📸 Xem ảnh tham chiếu (${onWpm ? 'WordPress' : 'WPM'}): ${shot2.url}`);
+      }
     }
+    if (shots.length) hooks.onScreenshots?.(shots);
 
     if (process.env.HEADLESS === 'true') {
       await stopLiveSession(liveId).catch(() => {});
