@@ -343,6 +343,7 @@ function connectEvents(jobId) {
 
     socket.on('result', (data) => {
       if (watchJobId && data.jobId && data.jobId !== watchJobId) return;
+      clearLiveShots();
       showResult(data);
       setRunBadge('done', 'Done');
       runBtn.disabled = false;
@@ -360,6 +361,7 @@ function connectEvents(jobId) {
       try {
         if (!data?.message) return;
         if (watchJobId && data.jobId && data.jobId !== watchJobId) return;
+        clearLiveShots();
         const cancelled = Boolean(data.cancelled) || /đã bị hủy|hủy bởi/i.test(data.message || '');
         appendLog(cancelled ? `⏹ ${data.message}` : `❌ ${data.message}`);
         if (!cancelled) {
@@ -392,6 +394,7 @@ function connectEvents(jobId) {
 
     socket.on('done', (data) => {
       if (watchJobId && data?.jobId && data.jobId !== watchJobId) return;
+      clearLiveShots();
       runBtn.disabled = false;
       setCancelVisible(false);
       refreshQueue();
@@ -677,6 +680,18 @@ function applyLiveShot(imageB64) {
   shot.src = `data:image/jpeg;base64,${imageB64}`;
   shot.hidden = false;
   if (empty) empty.hidden = true;
+}
+
+/** Xóa ảnh Live khi job xong / lỗi / hủy */
+function clearLiveShots() {
+  if (liveChromeMode === 'novnc') return;
+  const shot = document.getElementById('liveShot');
+  const empty = document.getElementById('liveShotEmpty');
+  if (shot) {
+    shot.hidden = true;
+    shot.removeAttribute('src');
+  }
+  if (empty && liveChromeOpen) empty.hidden = false;
 }
 
 form?.addEventListener('submit', async (e) => {
