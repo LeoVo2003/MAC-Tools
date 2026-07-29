@@ -192,6 +192,63 @@ export async function dismissBlockingAlerts(page, log = () => {}) {
   return closed;
 }
 
+/**
+ * Gỡ beforeunload / "Leave site?" — form WP (user-new) hay kẹt khi goto bước sau.
+ * @param {import('puppeteer').Page} page
+ */
+export async function clearUnloadGuard(page) {
+  try {
+    await page.evaluate(() => {
+      try {
+        window.onbeforeunload = null;
+      } catch {
+        /* ignore */
+      }
+      try {
+        window.onunload = null;
+      } catch {
+        /* ignore */
+      }
+      try {
+        if (typeof window.jQuery === 'function') {
+          window.jQuery(window).off('beforeunload');
+        }
+      } catch {
+        /* ignore */
+      }
+    });
+  } catch {
+    /* context destroyed */
+  }
+}
+
+/**
+ * Accept mọi native dialog (alert/confirm/beforeunload) trong lúc chạy fn.
+ * @template T
+ * @param {import('puppeteer').Page} page
+ * @param {() => Promise<T>} fn
+ * @param {(msg: string) => void} [log]
+ * @returns {Promise<T>}
+ */
+export async function withAcceptedDialogs(page, fn, log = () => {}) {
+  const onDialog = async (dialog) => {
+    const msg = dialog.message() || '';
+    log(`Dialog: "${msg.slice(0, 80)}" → OK/Leave`);
+    try {
+      await dialog.accept();
+    } catch {
+      /* ignore */
+    }
+  };
+  page.on('dialog', onDialog);
+  try {
+    await clearUnloadGuard(page);
+    return await fn();
+  } finally {
+    page.off('dialog', onDialog);
+  }
+}
+
 export function originOf(url) {
   return new URL(url).origin;
 }

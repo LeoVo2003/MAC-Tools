@@ -72,21 +72,6 @@ export async function wpFetch(url, opts) {
   };
 }
 
-/** Lấy value input hidden theo name (nonce WP). */
-export function extractInputValue(html, name) {
-  const n = String(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const patterns = [
-    new RegExp(`name=["']${n}["'][^>]*value=["']([^"']+)["']`, 'i'),
-    new RegExp(`value=["']([^"']+)["'][^>]*name=["']${n}["']`, 'i'),
-    new RegExp(`id=["']${n}["'][^>]*value=["']([^"']+)["']`, 'i'),
-  ];
-  for (const re of patterns) {
-    const m = html.match(re);
-    if (m?.[1]) return m[1];
-  }
-  return '';
-}
-
 export function stripHtmlText(html) {
   return String(html || '')
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')

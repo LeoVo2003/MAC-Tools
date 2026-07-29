@@ -34,7 +34,7 @@ dotenv.config({ path: getEnvPath() });
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3847;
-const VERSION = '2.1.0-dev';
+const VERSION = '2.1.0';
 
 /** Một instance session — Express + Socket.IO chung MemoryStore */
 const sharedSession = sessionMiddleware();

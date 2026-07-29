@@ -272,7 +272,11 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
     if (enabled.has('macCore')) {
       currentStep = 'wp-mac-core';
       mark('macCore', 'start');
-      log('▶ Mac Core → cài Mac Role...');
+      log(
+        isHttpStepsEnabled()
+          ? '▶ Mac Core → cài Mac Role (HTTP ưu tiên, fallback Chrome)...'
+          : '▶ Mac Core → cài Mac Role...'
+      );
       await wpPage.bringToFront().catch(() => {});
       await dismissBlockingAlerts(wpPage, log);
       await installMacRoleViaMacCore(wpPage, log);
@@ -285,7 +289,11 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
     if (enabled.has('macRole')) {
       currentStep = 'wp-mac-role';
       mark('macRole', 'start');
-      log('▶ Mac Role → Create from "F Package User"...');
+      log(
+        isHttpStepsEnabled()
+          ? '▶ Mac Role → Create F (HTTP ưu tiên, fallback Chrome)...'
+          : '▶ Mac Role → Create from "F Package User"...'
+      );
       await wpPage.bringToFront().catch(() => {});
       await dismissBlockingAlerts(wpPage, log);
       await configureFPackageUser(wpPage, packageTier, log);
@@ -300,7 +308,11 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
     if (enabled.has('webInfo')) {
       currentStep = 'wp-web-info';
       mark('webInfo', 'start');
-      log('▶ Web Info (Jet Engine edit web-info)...');
+      log(
+        isHttpStepsEnabled()
+          ? '▶ Web Info (HTTP/DOM ưu tiên, fallback Chrome)...'
+          : '▶ Web Info (Jet Engine edit web-info)...'
+      );
       await pullWebInfoToDashboard(wpPage, log);
       mark('webInfo', 'done');
     } else {

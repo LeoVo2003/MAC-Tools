@@ -7,6 +7,7 @@ import {
   waitForAnyText,
   gotoWithRetry,
 } from '../utils.js';
+import { isHttpStepsEnabled } from '../http/wpSession.js';
 
 const GOTO = { waitUntil: 'domcontentloaded', timeout: 60000 };
 
@@ -147,7 +148,6 @@ async function setCxSelect(page, labelText, valueOr) {
     /parent/i.test(labelText) ? 'parent' : /position/i.test(labelText) ? 'position' : ''
   );
 
-  // Puppeteer page.select — kích hoạt tốt hơn với một số framework
   try {
     const targetValue =
       valueOr && typeof valueOr === 'object'
@@ -164,7 +164,6 @@ async function setCxSelect(page, labelText, valueOr) {
     /* empty option đôi khi cần evaluate */
   }
 
-  // Đọc lại
   const again = await findSelectByLabel(page, labelText);
   return {
     ...result,
@@ -225,6 +224,177 @@ async function clickUpdatePage(page, log) {
   await sleepExact(1500);
 }
 
+/**
+ * Patch Vue page object + POST admin-ajax (hoặc gọi vue.save / click Update).
+ * @param {Record<string, string>} patch eg { parent: '', menu_position: '3', position: '3' }
+ */
+async function saveWebInfoViaDomAjax(page, patch, log) {
+  const ajaxWait = page
+    .waitForResponse(
+      (res) => {
+        try {
+          const u = res.url();
+          if (!/admin-ajax\.php/i.test(u)) return false;
+          if (res.request().method() !== 'POST') return false;
+          const data = res.request().postData() || '';
+          return /jet_engine|option.?page|save/i.test(data) || data.length > 40;
+        } catch {
+          return false;
+        }
+      },
+      { timeout: 25000 }
+    )
+    .catch(() => null);
+
+  const result = await page.evaluate(async (patch) => {
+    const tryVue = (node) => node?.__vue__ || node?.__vueParentComponent?.ctx || null;
+
+    let pageObj = null;
+    let vueHost = null;
+    const nodes = Array.from(document.querySelectorAll('body *'));
+    for (const el of nodes) {
+      const v0 = tryVue(el);
+      if (!v0) continue;
+      let p = v0;
+      for (let i = 0; i < 24 && p; i += 1) {
+        const data = p.$data || p;
+        const candidate = data?.page || p.page;
+        if (
+          candidate &&
+          typeof candidate === 'object' &&
+          ('parent' in candidate || 'slug' in candidate || 'menu_position' in candidate)
+        ) {
+          pageObj = candidate;
+          vueHost = p;
+          break;
+        }
+        p = p.$parent;
+      }
+      if (pageObj) break;
+    }
+
+    if (!pageObj) return { ok: false, reason: 'no-vue-page' };
+
+    for (const [k, v] of Object.entries(patch || {})) {
+      if (k in pageObj || k === 'parent' || k === 'menu_position' || k === 'position') {
+        pageObj[k] = v;
+      }
+    }
+    if ('menu_position' in patch) pageObj.menu_position = patch.menu_position;
+    if ('position' in patch) pageObj.position = patch.position;
+    if ('parent' in patch) pageObj.parent = patch.parent;
+
+    for (const name of ['save', 'savePage', 'updatePage', 'onSave', 'submit']) {
+      if (typeof vueHost?.[name] === 'function') {
+        try {
+          await vueHost[name]();
+          return { ok: true, via: `vue.${name}`, slug: pageObj.slug || '' };
+        } catch {
+          /* try next */
+        }
+      }
+    }
+
+    const ajaxurl = window.ajaxurl || '/wp-admin/admin-ajax.php';
+    const cfgKeys = Object.keys(window).filter((k) => /jet/i.test(k));
+    let nonce = '';
+    let action = 'jet_engine_ajax';
+    let handler = '';
+    for (const k of cfgKeys) {
+      const cfg = window[k];
+      if (!cfg || typeof cfg !== 'object') continue;
+      nonce = nonce || cfg.nonce || cfg._nonce || cfg.ajaxNonce || '';
+      handler = handler || cfg.handler || '';
+      if (cfg.action) action = cfg.action;
+    }
+    if (!nonce) {
+      nonce =
+        document.querySelector('input[name="_wpnonce"]')?.value ||
+        document.querySelector('#_wpnonce')?.value ||
+        '';
+    }
+
+    if (!nonce) {
+      for (const s of Array.from(document.querySelectorAll('script:not([src])'))) {
+        const t = s.textContent || '';
+        const m =
+          t.match(/["']nonce["']\s*:\s*["']([a-zA-Z0-9]+)["']/) ||
+          t.match(/nonce["']?\s*[=:]\s*["']([a-zA-Z0-9]+)["']/);
+        if (m?.[1]) {
+          nonce = m[1];
+          break;
+        }
+      }
+    }
+
+    if (nonce) {
+      const handlers = handler
+        ? [handler]
+        : ['save_page', 'save_option_page', 'options_page_save', 'save-page'];
+      for (const h of handlers) {
+        try {
+          const body = new URLSearchParams();
+          body.set('action', action);
+          body.set('handler', h);
+          body.set('nonce', nonce);
+          body.set('_nonce', nonce);
+          body.set('data', JSON.stringify(pageObj));
+          body.set('page', JSON.stringify(pageObj));
+          const res = await fetch(ajaxurl, {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+              Accept: 'application/json, text/javascript, */*; q=0.01',
+              'X-Requested-With': 'XMLHttpRequest',
+            },
+            body: body.toString(),
+          });
+          const text = await res.text();
+          let json = null;
+          try {
+            json = JSON.parse(text);
+          } catch {
+            /* html */
+          }
+          const success =
+            res.ok &&
+            (json?.success === true ||
+              json?.success === 'true' ||
+              /page updated|success/i.test(text));
+          if (success) {
+            return { ok: true, via: `ajax:${action}/${h}`, slug: pageObj.slug || '' };
+          }
+        } catch {
+          /* next handler */
+        }
+      }
+    }
+
+    const btns = Array.from(document.querySelectorAll('button, a, input[type="submit"]'));
+    const hit =
+      btns.find((el) => /update\s*page|^update$/i.test((el.innerText || el.value || '').trim())) ||
+      document.querySelector('button.cx-vui-button--style-accent, .cx-vui-button--style-accent');
+    if (!hit) return { ok: false, reason: 'no-update-btn', hasNonce: Boolean(nonce) };
+    hit.click();
+    return { ok: true, via: 'click-update', slug: pageObj.slug || '', hasNonce: Boolean(nonce) };
+  }, patch);
+
+  const ajaxRes = await ajaxWait;
+  if (ajaxRes) {
+    log(`✓ AJAX save: ${ajaxRes.status()} ${ajaxRes.url().split('?')[0]}`);
+  }
+
+  if (!result?.ok) {
+    throw new Error(`Web Info DOM/AJAX save fail: ${result?.reason || 'unknown'}`);
+  }
+  log(`✓ Lưu Web Info via ${result.via}`);
+
+  await waitForAnyText(page, ['Page updated'], { timeout: 20000 }).catch(() => null);
+  await sleepExact(800);
+  return result;
+}
+
 async function openWebInfoEdit(page, base, log) {
   const listUrl = `${base}/wp-admin/admin.php?page=jet-engine-options-pages`;
   log('Mở Jet Engine Options Pages list...');
@@ -266,7 +436,6 @@ async function openWebInfoEdit(page, base, log) {
         return true;
       }
     }
-    // Fallback rộng hơn
     for (const row of Array.from(document.querySelectorAll('div'))) {
       const text = (row.innerText || '').replace(/\s+/g, ' ');
       if (text.length > 400) continue;
@@ -321,24 +490,13 @@ async function webInfoTopLevel(page) {
   });
 }
 
-/**
- * Luồng đúng (2 lần Update):
- * 1) Detect Web Info dưới Settings
- * 2) /wp-admin/admin.php?page=jet-engine-options-pages → Edit slug web-info
- * 3) Parent page → "" → Update Page → chờ Page updated
- * 4) Menu position → Dashboard (value 3) → Update Page → chờ Page updated
- * 5) Reload wp-admin → Web Info phải ở ngoài (top-level), không còn dưới Settings
- */
-export async function pullWebInfoToDashboard(page, log) {
-  const base = originOf(page.url());
-
+async function detectWebInfoUnderSettings(page, base, log) {
   log('Kiểm tra Web Info trong menu Settings...');
-  // Sau Mac Role (cài plugin) WP hay còn redirect → ERR_ABORTED nếu goto 1 lần
   await gotoWithRetry(page, `${base}/wp-admin/index.php`, { attempts: 5, log });
   await sleepExact(800);
   await dismissBlockingAlerts(page, log);
 
-  const detection = await page.evaluate(() => {
+  return page.evaluate(() => {
     const settingsMenu = document.querySelector('#menu-settings');
     if (!settingsMenu) {
       return { underSettings: false, reason: 'không có #menu-settings' };
@@ -362,6 +520,104 @@ export async function pullWebInfoToDashboard(page, log) {
       text: (webInfoLink.textContent || '').trim(),
     };
   });
+}
+
+async function verifyWebInfoMoved(page, base, log) {
+  log('Reload kiểm tra menu...');
+  await sleepExact(2500);
+  await gotoWithRetry(page, `${base}/wp-admin/index.php`, { attempts: 4, log });
+  await sleepExact(1000);
+  await page.reload(GOTO).catch(() => {});
+  await sleepExact(1200);
+  await dismissBlockingAlerts(page, log);
+  const under = await webInfoStillUnderSettings(page);
+  const onTop = await webInfoTopLevel(page);
+  return { under, onTop };
+}
+
+/**
+ * 2.1 HTTP/DOM: patch Vue + POST/AJAX (hoặc click Update), không điền select chậm như cũ.
+ */
+export async function pullWebInfoViaHttp(page, log) {
+  const base = originOf(page.url());
+  const detection = await detectWebInfoUnderSettings(page, base, log);
+
+  if (!detection.underSettings) {
+    log(`Web Info không nằm dưới Settings (${detection.reason}) — bỏ qua bước này.`);
+    return { skipped: true, via: 'http' };
+  }
+
+  log(`Phát hiện Web Info dưới Settings ("${detection.text}") — HTTP/DOM...`);
+  await openWebInfoEdit(page, base, log);
+
+  log('HTTP/DOM lần 1: Parent → trống...');
+  await setCxSelect(page, 'Parent page', { empty: true });
+  await saveWebInfoViaDomAjax(page, { parent: '' }, log);
+
+  log('HTTP/DOM lần 2: chờ Menu position...');
+  const posDeadline = Date.now() + 20000;
+  let posInfo = null;
+  while (Date.now() < posDeadline) {
+    posInfo = await findSelectByLabel(page, 'Menu position');
+    if (posInfo) break;
+    await setCxSelect(page, 'Parent page', { empty: true });
+    await sleepExact(400);
+  }
+  if (!posInfo) {
+    log('⚠ Menu position chưa hiện — mở lại Edit...');
+    await openWebInfoEdit(page, base, log);
+    await setCxSelect(page, 'Parent page', { empty: true });
+    await saveWebInfoViaDomAjax(page, { parent: '' }, log);
+    posInfo = await findSelectByLabel(page, 'Menu position');
+  }
+  if (!posInfo) {
+    throw new Error('HTTP/DOM: không thấy Menu position sau khi Parent trống.');
+  }
+
+  log('HTTP/DOM: Menu position → Dashboard (3)...');
+  let posSet = await setCxSelect(page, 'Menu position', { text: 'Dashboard' });
+  if (!posSet.ok) posSet = await setCxSelect(page, 'Menu position', { value: '3' });
+  await setCxSelect(page, 'Parent page', { empty: true });
+  await saveWebInfoViaDomAjax(
+    page,
+    { parent: '', menu_position: '3', position: '3' },
+    log
+  );
+
+  let { under, onTop } = await verifyWebInfoMoved(page, base, log);
+  if (under || !onTop) {
+    log(`⚠ Chưa chắc (under=${under}, top=${onTop}) — save lại 1 vòng HTTP/DOM...`);
+    await openWebInfoEdit(page, base, log);
+    await setCxSelect(page, 'Parent page', { empty: true });
+    await setCxSelect(page, 'Menu position', { value: '3' });
+    await saveWebInfoViaDomAjax(
+      page,
+      { parent: '', menu_position: '3', position: '3' },
+      log
+    );
+    ({ under, onTop } = await verifyWebInfoMoved(page, base, log));
+  }
+
+  if (under) {
+    throw new Error('HTTP/DOM: Web Info vẫn còn dưới Settings sau 2 lần save.');
+  }
+  if (!onTop) {
+    log(
+      'Web Info không còn dưới Settings, nhưng chưa thấy top-level — chấp nhận ra khỏi Settings.'
+    );
+  } else {
+    log('Xong (HTTP/DOM): Web Info top-level, không còn dưới Settings.');
+  }
+  return { skipped: false, via: 'http' };
+}
+
+/**
+ * Luồng Chrome cũ (2 lần Update + sleep dài).
+ */
+export async function pullWebInfoViaBrowser(page, log) {
+  const base = originOf(page.url());
+
+  const detection = await detectWebInfoUnderSettings(page, base, log);
 
   if (!detection.underSettings) {
     log(`Web Info không nằm dưới Settings (${detection.reason}) — bỏ qua bước này.`);
@@ -371,16 +627,13 @@ export async function pullWebInfoToDashboard(page, log) {
   log(`Phát hiện Web Info dưới Settings ("${detection.text}").`);
   await openWebInfoEdit(page, base, log);
 
-  // ——— LẦN 1: Parent page → trống → Update ———
   log('Lần 1: Đổi Parent page → trống (option value="")...');
   let parentInfo = await findSelectByLabel(page, 'Parent page');
   if (!parentInfo) throw new Error('Không thấy select Parent page.');
   log(`Parent hiện tại: value="${parentInfo.value}" text="${parentInfo.text}"`);
 
-  // Nếu đang Settings → phải đổi; nếu đã "" vẫn Update để chắc
   let parentSet = await setCxSelect(page, 'Parent page', { empty: true });
   if (!parentSet.ok || /settings/i.test(parentSet.finalText || '')) {
-    // Ép selectedIndex 0 (option value="")
     await page.evaluate(() => {
       const comps = Array.from(document.querySelectorAll('.cx-vui-component'));
       for (const comp of comps) {
@@ -422,20 +675,17 @@ export async function pullWebInfoToDashboard(page, log) {
   log('Update Page (lần 1 — lưu Parent)...');
   await clickUpdatePage(page, log);
 
-  // ——— LẦN 2: chờ Menu position → Dashboard → Update ———
   log('Lần 2: Chờ Menu position hiện sau khi Parent trống...');
   const posDeadline = Date.now() + 25000;
   let posInfo = null;
   while (Date.now() < posDeadline) {
     posInfo = await findSelectByLabel(page, 'Menu position');
     if (posInfo) break;
-    // Parent có thể bị Vue reset — set lại trống
     await setCxSelect(page, 'Parent page', { empty: true });
     await sleepExact(500);
   }
 
   if (!posInfo) {
-    // Reload lại edit page rồi thử
     log('⚠ Menu position chưa hiện — mở lại Edit web-info...');
     await openWebInfoEdit(page, base, log);
     await setCxSelect(page, 'Parent page', { empty: true });
@@ -461,7 +711,6 @@ export async function pullWebInfoToDashboard(page, log) {
   }
   log(`Menu position → value="${posInfo.value}" text="${posInfo.text}"`);
 
-  // Đảm bảo Parent vẫn trống trước Update 2
   await setCxSelect(page, 'Parent page', { empty: true });
 
   log('Update Page (lần 2 — lưu Menu position)...');
@@ -513,4 +762,23 @@ export async function pullWebInfoToDashboard(page, log) {
   } else {
     log('Xong: Web Info đã ra ngoài (top-level), không còn dưới Settings.');
   }
+}
+
+/**
+ * Web Info → Dashboard.
+ * 2.1: ưu tiên HTTP/DOM (Vue + AJAX), fail → Chrome cũ.
+ */
+export async function pullWebInfoToDashboard(page, log) {
+  if (isHttpStepsEnabled()) {
+    try {
+      await pullWebInfoViaHttp(page, log);
+      return;
+    } catch (err) {
+      const msg = err?.message || String(err);
+      log(`⚠ HTTP/DOM Web Info thất bại (${msg.slice(0, 160)}) — fallback Chrome...`);
+      await pullWebInfoViaBrowser(page, log);
+      return;
+    }
+  }
+  await pullWebInfoViaBrowser(page, log);
 }

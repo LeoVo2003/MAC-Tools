@@ -5,10 +5,10 @@ import {
   sleep,
   sanitizeWpUsername,
   sanitizeCustomerPassword,
+  clearUnloadGuard,
 } from '../utils.js';
 import {
   cookieHeaderFromPage,
-  extractInputValue,
   isHttpStepsEnabled,
   stripHtmlText,
   wpFetch,
@@ -324,7 +324,121 @@ function interpretCreateUserError(errText, username, emailClean) {
 }
 
 /**
- * Tạo user WP qua HTTP POST user-new.php (cookie từ Quick Login).
+ * Đọc form user-new từ DOM Chrome (tránh Node fetch bị WAF/HTML khác).
+ * @returns {Promise<{ nonce: string, nonceName: string, referer: string, origin: string, formUrl: string }>}
+ */
+async function loadCreateUserFormFromPage(page, log) {
+  const base = originOf(page.url());
+  if (!base) throw new Error('Không xác định origin WP.');
+  const formUrl = `${base}/wp-admin/user-new.php`;
+  await page.goto(formUrl, GOTO);
+  await sleep(350);
+
+  const info = await page.evaluate(() => {
+    const pick = (name) => {
+      const el =
+        document.querySelector(`input[name="${name}"]`) ||
+        document.getElementById(name);
+      return (el?.value || '').trim();
+    };
+
+    let nonceName = '_wpnonce_create-user';
+    let nonce = pick(nonceName);
+    if (!nonce) {
+      const hit = Array.from(document.querySelectorAll('input[type="hidden"]')).find((el) => {
+        const n = (el.name || '').toLowerCase();
+        return n.includes('nonce') && (n.includes('create') || n.includes('user'));
+      });
+      if (hit?.value) {
+        nonce = hit.value.trim();
+        nonceName = hit.name;
+      }
+    }
+    if (!nonce) {
+      nonce = pick('_wpnonce');
+      if (nonce) nonceName = '_wpnonce';
+    }
+
+    return {
+      nonce,
+      nonceName,
+      referer: pick('_wp_http_referer') || '/wp-admin/user-new.php',
+      hasLoginField: Boolean(document.querySelector('#user_login, input[name="user_login"]')),
+      url: location.href,
+      title: document.title || '',
+    };
+  });
+
+  if (/wp-login\.php/i.test(info.url)) {
+    throw new Error('Bị đẩy về wp-login — session WP không còn.');
+  }
+  if (!info.hasLoginField) {
+    throw new Error(
+      `Không thấy form tạo user trên page (title="${info.title.slice(0, 60)}").`
+    );
+  }
+  if (!info.nonce) {
+    throw new Error('Không tìm thấy nonce trên form user-new.php (DOM).');
+  }
+
+  log(`✓ Nonce form OK (${info.nonceName})`);
+  return {
+    nonce: info.nonce,
+    nonceName: info.nonceName,
+    referer: info.referer,
+    origin: base,
+    formUrl,
+  };
+}
+
+/**
+ * POST tạo user từ trong Chrome (credentials include) — nhanh hơn điền từng ô.
+ */
+async function postCreateUserInPage(page, form, { username, password, emailClean }) {
+  return page.evaluate(
+    async (payload) => {
+      const body = new URLSearchParams();
+      body.set('action', 'createuser');
+      body.set(payload.nonceName, payload.nonce);
+      body.set('_wp_http_referer', payload.referer);
+      body.set('user_login', payload.username);
+      body.set('email', payload.emailClean);
+      body.set('first_name', '');
+      body.set('last_name', '');
+      body.set('url', '');
+      body.set('pass1', payload.password);
+      body.set('pass2', payload.password);
+      body.set('pw_weak', 'on');
+      body.set('role', 'editor');
+      body.set('createuser', 'Add New User');
+
+      const res = await fetch(payload.formUrl, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
+        },
+        body: body.toString(),
+        redirect: 'follow',
+      });
+      const text = await res.text();
+      return { status: res.status, url: res.url, text };
+    },
+    {
+      formUrl: form.formUrl,
+      nonce: form.nonce,
+      nonceName: form.nonceName,
+      referer: form.referer,
+      username,
+      password,
+      emailClean,
+    }
+  );
+}
+
+/**
+ * Tạo user WP qua POST (nonce lấy từ DOM Chrome — tránh Node fetch miss nonce).
  */
 export async function createCustomerAccountViaHttp(page, customer, log) {
   const { rawUser, rawPass, emailClean, username: user0, password } = normalizeCustomer(customer);
@@ -337,8 +451,16 @@ export async function createCustomerAccountViaHttp(page, customer, log) {
     log(`Password format: đã bỏ dấu nháy '`);
   }
 
-  const session = await cookieHeaderFromPage(page);
-  const existing = await emailAlreadyRegisteredHttp(session, emailClean, log);
+  // Check email: ưu tiên HTTP; fail → dùng list Users trên Chrome
+  let existing = { found: false, username: '' };
+  try {
+    const session = await cookieHeaderFromPage(page);
+    existing = await emailAlreadyRegisteredHttp(session, emailClean, log);
+  } catch (e) {
+    log(`⚠ Check email HTTP lỗi (${String(e?.message || e).slice(0, 80)}) — dùng Chrome...`);
+    existing = await emailAlreadyRegistered(page, emailClean, log);
+  }
+
   if (existing.found) {
     const existingUser = existing.username || username;
     log(
@@ -356,53 +478,12 @@ export async function createCustomerAccountViaHttp(page, customer, log) {
     };
   }
 
-  const formUrl = `${session.origin}/wp-admin/user-new.php`;
-  log(`Tạo user (HTTP): ${username} (${emailClean}) — role Editor...`);
+  log(`Tạo user (HTTP/DOM): ${username} (${emailClean}) — role Editor...`);
+  let form = await loadCreateUserFormFromPage(page, log);
 
-  const formPage = await wpFetch(formUrl, { cookieHeader: session.cookieHeader });
-  if (/wp-login\.php/i.test(formPage.url) || /name=["']log["']/i.test(formPage.text)) {
-    throw new Error('Cookie WP hết hạn — không mở được user-new.php qua HTTP.');
-  }
-
-  let nonce = extractInputValue(formPage.text, '_wpnonce_create-user');
-  if (!nonce) {
-    nonce = extractInputValue(formPage.text, '_wpnonce');
-  }
-  if (!nonce) {
-    throw new Error('Không tìm thấy _wpnonce_create-user trên user-new.php (HTTP).');
-  }
-
-  const referer = extractInputValue(formPage.text, '_wp_http_referer') || '/wp-admin/user-new.php';
-
-  async function postCreate(userLogin) {
-    const body = new URLSearchParams();
-    body.set('action', 'createuser');
-    body.set('_wpnonce_create-user', nonce);
-    body.set('_wp_http_referer', referer);
-    body.set('user_login', userLogin);
-    body.set('email', emailClean);
-    body.set('first_name', '');
-    body.set('last_name', '');
-    body.set('url', '');
-    body.set('pass1', password);
-    body.set('pass2', password);
-    body.set('pw_weak', 'on');
-    body.set('role', 'editor');
-    // Không gửi send_user_notification → không mail khách
-    body.set('createuser', 'Add New User');
-
-    return wpFetch(formUrl, {
-      method: 'POST',
-      cookieHeader: session.cookieHeader,
-      body,
-      headers: { Referer: formUrl, Origin: session.origin },
-    });
-  }
-
-  let res = await postCreate(username);
+  let res = await postCreateUserInPage(page, form, { username, password, emailClean });
   let errText = parseCreateUserErrorFromHtml(res.text);
 
-  // Thành công: redirect users.php?update=add&id=
   const successUrl =
     /users\.php/i.test(res.url) && /update=add|id=\d+/i.test(res.url);
   const successBody =
@@ -414,20 +495,19 @@ export async function createCustomerAccountViaHttp(page, customer, log) {
   if (verdict.kind === 'invalid_user') {
     const retryUser = sanitizeWpUsername(username);
     log(
-      `⚠ WP báo username invalid ("${errText.split('\n')[0].slice(0, 100)}") — thử lại HTTP với "${retryUser}"...`
+      `⚠ WP báo username invalid ("${errText.split('\n')[0].slice(0, 100)}") — thử lại với "${retryUser}"...`
     );
     username = retryUser;
-    // Nonce 1 lần — lấy form mới
-    const form2 = await wpFetch(formUrl, { cookieHeader: session.cookieHeader });
-    nonce = extractInputValue(form2.text, '_wpnonce_create-user') || nonce;
-    res = await postCreate(username);
+    form = await loadCreateUserFormFromPage(page, log);
+    res = await postCreateUserInPage(page, form, { username, password, emailClean });
     errText = parseCreateUserErrorFromHtml(res.text);
     verdict = interpretCreateUserError(errText, username, emailClean);
   }
 
   if (verdict.kind === 'exists') {
     log(`⏭ WP báo email/user đã tồn tại — bỏ qua tạo user và sync WPM.`);
-    const again = await emailAlreadyRegisteredHttp(session, emailClean, log);
+    const again = await emailAlreadyRegistered(page, emailClean, log);
+    await leaveUserNewForm(page, log);
     return {
       username: again.username || username,
       password: '',
@@ -449,14 +529,14 @@ export async function createCustomerAccountViaHttp(page, customer, log) {
   }
 
   if (!successUrl && !successBody) {
-    // Không rõ — kiểm tra lại list users
-    const check = await emailAlreadyRegisteredHttp(session, emailClean, log);
+    const check = await emailAlreadyRegistered(page, emailClean, log);
     if (!check.found) {
       throw new Error(
         `HTTP tạo user không xác nhận được thành công (status ${res.status}, url ${res.url}).`
       );
     }
     log(`Đã tạo tài khoản khách (Editor) qua HTTP — xác nhận trên Users.`);
+    await leaveUserNewForm(page, log);
     return {
       username: check.username || username,
       password,
@@ -467,7 +547,33 @@ export async function createCustomerAccountViaHttp(page, customer, log) {
   }
 
   log('Đã tạo tài khoản khách (Editor) qua HTTP.');
+  await leaveUserNewForm(page, log);
   return { username, password, email: emailClean, skipped: false, via: 'http' };
+}
+
+/** Rời user-new.php — tránh kẹt popup "Leave site?" khi sang Mac Core. */
+async function leaveUserNewForm(page, log) {
+  await clearUnloadGuard(page);
+  const onDialog = async (dialog) => {
+    const msg = dialog.message() || '';
+    log(`Leave site?: "${msg.slice(0, 60)}" → Leave`);
+    try {
+      await dialog.accept();
+    } catch {
+      /* ignore */
+    }
+  };
+  page.on('dialog', onDialog);
+  try {
+    const base = originOf(page.url());
+    await page.goto(`${base}/wp-admin/users.php`, {
+      waitUntil: 'domcontentloaded',
+      timeout: 30000,
+    }).catch(() => {});
+    await clearUnloadGuard(page);
+  } finally {
+    page.off('dialog', onDialog);
+  }
 }
 
 /**

@@ -1,7 +1,7 @@
 {
   "name": "f-user-guide-tool",
-  "version": "2.1.0-dev",
-  "description": "F User Guide Tool v2.1 — hybrid HTTP createUser + Chrome fallback",
+  "version": "2.1.0",
+  "description": "F User Guide Tool v2.1 — HTTP/DOM hybrid (createUser, Mac Role, Web Info) + Chrome fallback",
   "type": "module",
   "scripts": {
     "start": "node server.js",

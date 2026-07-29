@@ -5,28 +5,25 @@ import {
   sleepExact,
   dismissBlockingAlerts,
   evaluateSafe,
+  clearUnloadGuard,
+  withAcceptedDialogs,
 } from '../utils.js';
+import { isHttpStepsEnabled } from '../http/wpSession.js';
 
-/**
- * Mac Role qua Mac Core:
- * Refresh Plugin List → OK alert → chờ reload page
- * → Mac Role Install Now → OK alert (nếu có) → reload page
- * → Activate
- */
-export async function installMacRoleViaMacCore(page, log) {
+const GOTO = { waitUntil: 'domcontentloaded', timeout: 60000 };
+
+const MAC_CORE_URLS = (base) => [
+  `${base}/wp-admin/admin.php?page=mac-core`,
+  `${base}/wp-admin/admin.php?page=mac_core`,
+  `${base}/wp-admin/admin.php?page=maccore`,
+  `${base}/wp-admin/admin.php?page=mac-core-dashboard`,
+];
+
+async function openMacCorePage(page, log) {
   const base = originOf(page.url());
-  const GOTO = { waitUntil: 'domcontentloaded', timeout: 60000 };
-
   log('Mở Mac Core...');
-  const macCoreUrls = [
-    `${base}/wp-admin/admin.php?page=mac-core`,
-    `${base}/wp-admin/admin.php?page=mac_core`,
-    `${base}/wp-admin/admin.php?page=maccore`,
-    `${base}/wp-admin/admin.php?page=mac-core-dashboard`,
-  ];
-
   let opened = false;
-  for (const url of macCoreUrls) {
+  for (const url of MAC_CORE_URLS(base)) {
     await page.goto(url, GOTO).catch(() => {});
     await sleep(200);
     const ok = await evaluateSafe(page, () => {
@@ -63,111 +60,327 @@ export async function installMacRoleViaMacCore(page, log) {
   if (!opened) {
     throw new Error('Không tìm thấy trang Mac Core. Kiểm tra plugin Mac Core đã active chưa.');
   }
+  return base;
+}
 
-  const onDialog = async (dialog) => {
-    const msg = dialog.message() || '';
-    log(`Mac Core alert: "${msg}" → OK`);
-    try {
-      await dialog.accept();
-    } catch {
-      /* already handled */
+/** Nonce AJAX + link Activate từ DOM Mac Core. */
+async function readMacCoreTokens(page) {
+  return page.evaluate(() => {
+    let ajaxNonce = '';
+    for (const k of Object.keys(window)) {
+      if (!/mac/i.test(k)) continue;
+      const o = window[k];
+      if (!o || typeof o !== 'object') continue;
+      ajaxNonce =
+        ajaxNonce ||
+        o.nonce ||
+        o._nonce ||
+        o.ajaxNonce ||
+        o.ajax_nonce ||
+        (o.data && (o.data.nonce || o.data._nonce)) ||
+        '';
     }
-  };
-  page.on('dialog', onDialog);
-
-  try {
-    log('Bấm Refresh Plugin List...');
-    let refreshed = false;
-    for (const label of [
-      'Refresh Plugin List',
-      'Refresh Plugins List',
-      'Refresh plugin list',
-    ]) {
-      try {
-        await clickByText(page, label, { timeout: 4000 });
-        refreshed = true;
-        break;
-      } catch {
-        /* next */
+    if (!ajaxNonce) {
+      for (const s of Array.from(document.querySelectorAll('script:not([src])'))) {
+        const t = s.textContent || '';
+        const m =
+          t.match(/["']nonce["']\s*:\s*["']([a-f0-9]+)["']/i) ||
+          t.match(/nonce["']?\s*[=:]\s*["']([a-f0-9]+)["']/i);
+        if (m?.[1]) {
+          ajaxNonce = m[1];
+          break;
+        }
       }
     }
-    if (!refreshed) {
-      refreshed = await evaluateSafe(page, () => {
-        const btn = Array.from(document.querySelectorAll('button, a, input[type="button"]')).find(
-          (el) => /refresh\s+plugin\s*list/i.test((el.innerText || el.value || '').trim())
-        );
-        if (btn) {
-          btn.click();
-          return true;
+    for (const el of Array.from(document.querySelectorAll('[data-nonce], [data-ajax-nonce]'))) {
+      ajaxNonce =
+        ajaxNonce ||
+        el.getAttribute('data-nonce') ||
+        el.getAttribute('data-ajax-nonce') ||
+        '';
+    }
+
+    const act = Array.from(document.querySelectorAll('a[href]')).find((a) => {
+      const h = a.getAttribute('href') || '';
+      return /action=activate/i.test(h) && /mac-role|addon=mac-role/i.test(h);
+    });
+    let activateHref = '';
+    let activateNonce = '';
+    if (act) {
+      try {
+        const u = new URL(act.href, location.href);
+        activateHref = u.href;
+        activateNonce = u.searchParams.get('_wpnonce') || '';
+      } catch {
+        activateHref = act.href;
+      }
+    }
+
+    const rowText = (() => {
+      const titles = Array.from(
+        document.querySelectorAll('h1,h2,h3,h4,h5,strong,.card-title,.addon-title,div,span')
+      );
+      for (const title of titles) {
+        if (!/^mac\s*role$/i.test((title.textContent || '').trim())) continue;
+        const row =
+          title.closest('.card, .addon, .plugin-card, .col, article, li, tr, section') ||
+          title.parentElement?.parentElement;
+        return (row?.innerText || '').replace(/\s+/g, ' ');
+      }
+      return '';
+    })();
+
+    return {
+      ajaxNonce,
+      activateHref,
+      activateNonce,
+      alreadyActive: /installed\s*&\s*active/i.test(rowText),
+      hasInstall: /install now/i.test(rowText),
+      hasActivate: /\bactivate\b/i.test(rowText) && !/installed\s*&\s*active/i.test(rowText),
+      ajaxurl: window.ajaxurl || '/wp-admin/admin-ajax.php',
+    };
+  });
+}
+
+async function macCoreAjax(page, fields) {
+  return page.evaluate(async (fields) => {
+    const ajaxurl = window.ajaxurl || '/wp-admin/admin-ajax.php';
+    const body = new URLSearchParams(fields);
+    const res = await fetch(ajaxurl, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        Accept: '*/*',
+        'X-Requested-With': 'XMLHttpRequest',
+      },
+      body: body.toString(),
+    });
+    const text = await res.text();
+    let json = null;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      /* ignore */
+    }
+    return { status: res.status, ok: res.ok, text: text.slice(0, 3000), json };
+  }, fields);
+}
+
+function macCoreSuccess(res) {
+  if (!res) return false;
+  if (res.json?.success === true || res.json?.success === 'true') return true;
+  if (res.json?.data && res.status >= 200 && res.status < 300) return true;
+  if (res.ok && /success|installed|activated/i.test(res.text || '')) return true;
+  return false;
+}
+
+/**
+ * HTTP: check status → install_plugin → GET activate (nonce từ DOM).
+ */
+export async function installMacRoleViaHttp(page, log) {
+  // Dialog TRƯỚC goto — tránh treo "Leave site?" còn từ user-new.php
+  return withAcceptedDialogs(
+    page,
+    async () => {
+      await clearUnloadGuard(page);
+      const base = await openMacCorePage(page, log);
+
+      let tokens = await readMacCoreTokens(page);
+      if (tokens.alreadyActive) {
+        log('MAC Role đã Installed & Active (DOM) — bỏ qua HTTP install.');
+        return { via: 'http', skipped: true };
+      }
+
+      if (!tokens.ajaxNonce) {
+        throw new Error('Không lấy được nonce Mac Core trên trang (HTTP).');
+      }
+      log(`✓ Mac Core nonce OK (${tokens.ajaxNonce.slice(0, 6)}…)`);
+
+      log('HTTP: check_install_status (mac-role)...');
+      const statusRes = await macCoreAjax(page, {
+        action: 'mac_core_check_install_status',
+        nonce: tokens.ajaxNonce,
+        plugin_slug: 'mac-role',
+      });
+      const statusData = statusRes.json?.data || {};
+      // Chỉ tin boolean — KHÔNG regex JSON (chữ "installed"/"active" trong key cũng khớp).
+      const installed =
+        statusData.installed === true || statusData.is_installed === true;
+      const active = statusData.active === true || statusData.is_active === true;
+      log(
+        `→ status: installed=${installed}, active=${active} | ${JSON.stringify(statusData).slice(0, 160)}`
+      );
+
+      if (!installed) {
+        log('HTTP: mac_core_install_plugin...');
+        const installRes = await macCoreAjax(page, {
+          action: 'mac_core_install_plugin',
+          nonce: tokens.ajaxNonce,
+          plugin_slug: 'mac-role',
+        });
+        if (!macCoreSuccess(installRes)) {
+          throw new Error(
+            `Install HTTP fail (status ${installRes.status}): ${(installRes.text || '').slice(0, 180)}`
+          );
         }
-        return false;
-      }).catch(() => false);
-    }
-    if (!refreshed) {
-      throw new Error('Không tìm thấy nút "Refresh Plugin List" trên Mac Core.');
-    }
+        log('✓ Install plugin OK (HTTP).');
+        await sleepExact(800);
+        await page.goto(MAC_CORE_URLS(base)[0], GOTO).catch(() => page.reload(GOTO));
+        await sleepExact(600);
+        tokens = await readMacCoreTokens(page);
+      } else if (active || tokens.alreadyActive) {
+        log('⏭ MAC Role đã cài & active — bỏ qua Install/Activate.');
+        return { via: 'http', skipped: true };
+      } else {
+        log('⏭ Plugin đã cài — sang Activate.');
+      }
 
-    log('Chờ OK alert + page reload sau Refresh...');
-    await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
-    await sleep(600);
+      tokens = await readMacCoreTokens(page);
+      if (tokens.alreadyActive) {
+        log('MAC Role đã Active sau install.');
+        return { via: 'http', skipped: false };
+      }
 
-    const stillMacCore = await evaluateSafe(page, () =>
-      /mac core/i.test(`${document.title} ${document.body?.innerText || ''}`)
-    ).catch(() => false);
-    if (!stillMacCore) {
-      await page.goto(macCoreUrls[0], GOTO);
-      await sleep(300);
-    }
+      let activateUrl = tokens.activateHref;
+      if (!activateUrl && tokens.activateNonce) {
+        activateUrl = `${base}/wp-admin/admin.php?page=mac-core&action=activate&addon=mac-role&_wpnonce=${tokens.activateNonce}`;
+      }
+      if (!activateUrl) {
+        await page.reload(GOTO);
+        await sleep(400);
+        tokens = await readMacCoreTokens(page);
+        activateUrl = tokens.activateHref;
+        if (!activateUrl && tokens.activateNonce) {
+          activateUrl = `${base}/wp-admin/admin.php?page=mac-core&action=activate&addon=mac-role&_wpnonce=${tokens.activateNonce}`;
+        }
+      }
+      if (!activateUrl) {
+        throw new Error('Không tìm thấy URL Activate (addon=mac-role&_wpnonce=...).');
+      }
 
-    log('Tìm MAC Role → Install Now...');
-    const installState = await clickMacRoleButton(page, 'install');
-    if (installState === 'already-active') {
-      log('MAC Role đã Installed & Active.');
-      return;
-    }
-    if (installState === 'need-activate') {
-      log('MAC Role đã cài — sẽ Activate sau reload.');
-    } else if (!installState) {
-      throw new Error('Không tìm thấy MAC Role / nút Install Now sau khi Refresh.');
-    } else {
-      log('Đã bấm Install Now cho MAC Role.');
-    }
+      log(`HTTP: Activate GET …action=activate&addon=mac-role…`);
+      await page.goto(activateUrl, GOTO);
+      await sleepExact(800);
+      await page.goto(MAC_CORE_URLS(base)[0], GOTO).catch(() => {});
+      await sleep(400);
+      tokens = await readMacCoreTokens(page);
+      if (tokens.alreadyActive || !tokens.hasActivate) {
+        log('✓ Activate MAC Role OK (HTTP).');
+      } else {
+        log(
+          '⚠ Sau Activate chưa thấy Installed & Active — vẫn tiếp tục (menu có thể hiện sau).'
+        );
+      }
+      return { via: 'http', skipped: false };
+    },
+    log
+  );
+}
 
-    log('Chờ OK alert (nếu có) + reload page sau Install...');
-    await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 90000 }).catch(() => {});
-    await sleep(700);
+/**
+ * Mac Role qua Mac Core (Chrome click — fallback).
+ */
+export async function installMacRoleViaBrowser(page, log) {
+  return withAcceptedDialogs(
+    page,
+    async () => {
+      await clearUnloadGuard(page);
+      const base = await openMacCorePage(page, log);
+      const macCoreUrls = MAC_CORE_URLS(base);
 
-    if (
-      !(await evaluateSafe(page, () =>
-        /mac core/i.test(document.title + (document.body?.innerText || ''))
-      ).catch(() => false))
-    ) {
-      await page.goto(macCoreUrls[0], GOTO);
-      await sleep(300);
-    } else {
-      log('Reload Mac Core trước khi Activate...');
+      log('Bấm Refresh Plugin List...');
+      let refreshed = false;
+      for (const label of [
+        'Refresh Plugin List',
+        'Refresh Plugins List',
+        'Refresh plugin list',
+      ]) {
+        try {
+          await clickByText(page, label, { timeout: 4000 });
+          refreshed = true;
+          break;
+        } catch {
+          /* next */
+        }
+      }
+      if (!refreshed) {
+        refreshed = await evaluateSafe(page, () => {
+          const btn = Array.from(
+            document.querySelectorAll('button, a, input[type="button"]')
+          ).find((el) => /refresh\s+plugin\s*list/i.test((el.innerText || el.value || '').trim()));
+          if (btn) {
+            btn.click();
+            return true;
+          }
+          return false;
+        }).catch(() => false);
+      }
+      if (!refreshed) {
+        throw new Error('Không tìm thấy nút "Refresh Plugin List" trên Mac Core.');
+      }
+
+      log('Chờ OK alert + page reload sau Refresh...');
+      await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+      await sleep(600);
+
+      const stillMacCore = await evaluateSafe(page, () =>
+        /mac core/i.test(`${document.title} ${document.body?.innerText || ''}`)
+      ).catch(() => false);
+      if (!stillMacCore) {
+        await page.goto(macCoreUrls[0], GOTO);
+        await sleep(300);
+      }
+
+      log('Tìm MAC Role → Install Now...');
+      const installState = await clickMacRoleButton(page, 'install');
+      if (installState === 'already-active') {
+        log('MAC Role đã Installed & Active.');
+        return;
+      }
+      if (installState === 'need-activate') {
+        log('MAC Role đã cài — sẽ Activate sau reload.');
+      } else if (!installState) {
+        throw new Error('Không tìm thấy MAC Role / nút Install Now sau khi Refresh.');
+      } else {
+        log('Đã bấm Install Now cho MAC Role.');
+      }
+
+      log('Chờ OK alert (nếu có) + reload page sau Install...');
+      await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 90000 }).catch(() => {});
+      await sleep(700);
+
+      if (
+        !(await evaluateSafe(page, () =>
+          /mac core/i.test(document.title + (document.body?.innerText || ''))
+        ).catch(() => false))
+      ) {
+        await page.goto(macCoreUrls[0], GOTO);
+        await sleep(300);
+      } else {
+        log('Reload Mac Core trước khi Activate...');
+        await page.reload(GOTO);
+        await sleep(400);
+      }
+
+      log('Activate MAC Role...');
+      const actState = await clickMacRoleButton(page, 'activate');
+      if (actState === 'already-active') {
+        log('MAC Role đã Active.');
+      } else if (!actState) {
+        throw new Error('Không tìm thấy nút Activate cho MAC Role sau Install + reload.');
+      } else {
+        log('Đã bấm Activate MAC Role.');
+        await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+        await sleep(400);
+      }
+
+      log('Reload để hiện menu Mac Role...');
       await page.reload(GOTO);
       await sleep(400);
-    }
-
-    log('Activate MAC Role...');
-    const actState = await clickMacRoleButton(page, 'activate');
-    if (actState === 'already-active') {
-      log('MAC Role đã Active.');
-    } else if (!actState) {
-      throw new Error('Không tìm thấy nút Activate cho MAC Role sau Install + reload.');
-    } else {
-      log('Đã bấm Activate MAC Role.');
-      await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
-      await sleep(400);
-    }
-
-    log('Reload để hiện menu Mac Role...');
-    await page.reload(GOTO);
-    await sleep(400);
-  } finally {
-    page.off('dialog', onDialog);
-  }
+    },
+    log
+  );
 }
 
 async function clickMacRoleButton(page, mode) {
@@ -218,13 +431,203 @@ async function clickMacRoleButton(page, mode) {
   );
 }
 
+/** @param {string} packageTier */
+function templateIdForTier(packageTier) {
+  const t = String(packageTier || 'F').trim().toUpperCase();
+  if (t === 'F') return 'f_package_user';
+  // fallback phổ biến
+  return `${t.toLowerCase()}_package_user`;
+}
+
+async function readMacRoleCreateNonce(page, templateId) {
+  return page.evaluate((wantTemplate) => {
+    let nonce = '';
+    for (const k of Object.keys(window)) {
+      if (!/rud|mac.?role|role/i.test(k)) continue;
+      const o = window[k];
+      if (!o || typeof o !== 'object') continue;
+      nonce = nonce || o.nonce || o._nonce || o.ajaxNonce || '';
+    }
+    if (!nonce) {
+      for (const s of Array.from(document.querySelectorAll('script:not([src])'))) {
+        const t = s.textContent || '';
+        if (!/rud_apply_template|f_package_user|nonce/i.test(t)) continue;
+        const m =
+          t.match(/["']nonce["']\s*:\s*["']([a-f0-9]+)["']/i) ||
+          t.match(/nonce["']?\s*[=:]\s*["']([a-f0-9]+)["']/i);
+        if (m?.[1]) {
+          nonce = m[1];
+          break;
+        }
+      }
+    }
+    for (const el of Array.from(
+      document.querySelectorAll('[data-nonce], [data-template-id], [data-template]')
+    )) {
+      nonce = nonce || el.getAttribute('data-nonce') || '';
+      const tid = el.getAttribute('data-template-id') || el.getAttribute('data-template') || '';
+      if (tid && tid === wantTemplate && el.getAttribute('data-nonce')) {
+        nonce = el.getAttribute('data-nonce');
+      }
+    }
+    const hasCreateBtn = Array.from(
+      document.querySelectorAll('a, button, input[type="button"], input[type="submit"]')
+    ).some((el) =>
+      /create from\s*["']?f[\s-]*package\s*user["']?/i.test(
+        (el.innerText || el.value || el.textContent || '').trim()
+      )
+    );
+    return { nonce, hasCreateBtn, ajaxurl: window.ajaxurl || '/wp-admin/admin-ajax.php' };
+  }, templateId);
+}
+
 /**
- * Vào /wp-admin/admin.php?page=mac-role
- * → bấm Create from "F Package User" → chờ load xong (có heartbeat log).
+ * HTTP: POST rud_apply_template (template_id=f_package_user).
  */
-export async function configureFPackageUser(page, packageTier = 'F', log) {
+export async function configureFPackageUserViaHttp(page, packageTier = 'F', log) {
   const base = originOf(page.url());
-  const GOTO = { waitUntil: 'domcontentloaded', timeout: 60000 };
+  const url = `${base}/wp-admin/admin.php?page=mac-role`;
+  const templateId = templateIdForTier(packageTier);
+
+  const onDialog = async (dialog) => {
+    const msg = dialog.message() || '';
+    log(`Mac Role dialog: "${msg.slice(0, 120)}" → OK`);
+    try {
+      await dialog.accept();
+    } catch {
+      /* ignore */
+    }
+  };
+  page.on('dialog', onDialog);
+
+  try {
+    log(`Mở Mac Role (HTTP): ${url.replace(base, '')}`);
+    await page.goto(url, GOTO);
+    await sleep(400);
+    await dismissBlockingAlerts(page, log);
+
+    const tokens = await readMacRoleCreateNonce(page, templateId);
+    if (!tokens.hasCreateBtn) {
+      const bodyHint = await evaluateSafe(page, () => {
+        const body = (document.body?.innerText || '').replace(/\s+/g, ' ');
+        return /f\s*package\s*user/i.test(body);
+      }).catch(() => false);
+      if (bodyHint) {
+        log('F Package User đã có sẵn — bỏ qua Create (HTTP).');
+        return { via: 'http', skipped: true };
+      }
+    }
+
+    if (!tokens.nonce) {
+      throw new Error('Không lấy được nonce rud_apply_template trên Mac Role.');
+    }
+    log(`HTTP: rud_apply_template (${templateId})...`);
+
+    const res = await page.evaluate(
+      async (payload) => {
+        const body = new URLSearchParams();
+        body.set('action', 'rud_apply_template');
+        body.set('nonce', payload.nonce);
+        body.set('template_id', payload.templateId);
+        const res = await fetch(payload.ajaxurl, {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            Accept: '*/*',
+            'X-Requested-With': 'XMLHttpRequest',
+          },
+          body: body.toString(),
+        });
+        const text = await res.text();
+        let json = null;
+        try {
+          json = JSON.parse(text);
+        } catch {
+          /* ignore */
+        }
+        return { status: res.status, ok: res.ok, text: text.slice(0, 3000), json };
+      },
+      { nonce: tokens.nonce, templateId, ajaxurl: tokens.ajaxurl }
+    );
+
+    const ok =
+      res.json?.success === true ||
+      res.json?.success === 'true' ||
+      (res.ok && /success|created|applied|ok/i.test(res.text || ''));
+    if (!ok) {
+      throw new Error(
+        `Create F HTTP fail (status ${res.status}): ${(res.text || '').slice(0, 180)}`
+      );
+    }
+    log('✓ rud_apply_template OK — chờ WP settle...');
+
+    // Chờ xử lý sau apply (cài plugin / reload)
+    const started = Date.now();
+    let lastBeat = 0;
+    while (Date.now() - started < 75000) {
+      const elapsed = Math.round((Date.now() - started) / 1000);
+      if (elapsed >= 5 && elapsed - lastBeat >= 5) {
+        lastBeat = elapsed;
+        log(`… Mac Role vẫn đang xử lý Create HTTP (${elapsed}s)`);
+      }
+      await sleep(800);
+      const state = await evaluateSafe(page, () => {
+        const busy = !!document.querySelector(
+          '.spinner.is-active, .updating-message, .is-loading'
+        );
+        const text = (document.body?.innerText || '').replace(/\s+/g, ' ');
+        const stillCreateBtn = Array.from(
+          document.querySelectorAll('a, button, input[type="button"]')
+        ).some((el) =>
+          /create from\s*["']?f[\s-]*package\s*user["']?/i.test(
+            (el.innerText || el.value || '').trim()
+          )
+        );
+        return {
+          busy,
+          stillCreateBtn,
+          okHint: /created|updated|role saved|success|applied/i.test(text),
+        };
+      }).catch(() => null);
+
+      if (state?.okHint) break;
+      if (state && !state.busy && !state.stillCreateBtn && elapsed >= 3) break;
+      // Reload nhẹ để thấy trạng thái mới
+      if (elapsed === 8 || elapsed === 20) {
+        await page.reload(GOTO).catch(() => {});
+      }
+    }
+
+    log('Chờ WordPress ổn định sau Create (plugin có thể còn cài)...');
+    for (let i = 0; i < 8; i += 1) {
+      await sleepExact(1000);
+      const loading = await evaluateSafe(page, () => {
+        const t = (document.body?.innerText || '').toLowerCase();
+        return (
+          /đang tạo|installing|activating|please wait|updating plugins/i.test(t) ||
+          !!document.querySelector('.updating-message, .spinner.is-active')
+        );
+      }).catch(() => false);
+      if (!loading) break;
+      if (i % 2 === 1) log(`… vẫn chờ plugin/Mac Role settle (${i + 1}s)`);
+    }
+    await page
+      .goto(`${base}/wp-admin/`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+      .catch(() => {});
+    await sleepExact(800);
+    log('Mac Role: F Package User đã tạo xong (HTTP).');
+    return { via: 'http', skipped: false };
+  } finally {
+    page.off('dialog', onDialog);
+  }
+}
+
+/**
+ * Chrome: Create from F Package User (fallback).
+ */
+export async function configureFPackageUserViaBrowser(page, packageTier = 'F', log) {
+  const base = originOf(page.url());
   const url = `${base}/wp-admin/admin.php?page=mac-role`;
 
   const withTimeout = (promise, ms, label) =>
@@ -235,7 +638,6 @@ export async function configureFPackageUser(page, packageTier = 'F', log) {
       }),
     ]);
 
-  // Create hay hiện confirm() — không accept thì page.click treo mãi
   const onDialog = async (dialog) => {
     const msg = dialog.message() || '';
     log(`Mac Role dialog: "${msg.slice(0, 120)}" → OK`);
@@ -307,7 +709,6 @@ export async function configureFPackageUser(page, packageTier = 'F', log) {
 
     log('Bấm Create from "F Package User"...');
 
-    // Click bằng evaluate (không treo như page.click khi có dialog/overlay)
     const clickResult = await evaluateSafe(page, () => {
       const btns = Array.from(
         document.querySelectorAll(
@@ -320,7 +721,6 @@ export async function configureFPackageUser(page, packageTier = 'F', log) {
         )
       );
       if (!hit) {
-        // fallback: chỉ cần chứa "create from" + "package"
         const loose = btns.find((el) => {
           const t = (el.innerText || el.value || el.textContent || '').replace(/\s+/g, ' ').trim();
           return /create from/i.test(t) && /package/i.test(t) && /user/i.test(t);
@@ -335,7 +735,6 @@ export async function configureFPackageUser(page, packageTier = 'F', log) {
       return { ok: true, label: (hit.innerText || hit.value || '').trim().slice(0, 80) };
     }).catch((err) => {
       const msg = err?.message || String(err);
-      // Click gây navigate ngay → coi như đã bấm
       if (/Execution context was destroyed|Cannot find context|navigat/i.test(msg)) {
         return { ok: true, label: 'Create (navigated)', navigated: true };
       }
@@ -343,7 +742,6 @@ export async function configureFPackageUser(page, packageTier = 'F', log) {
     });
 
     if (!clickResult?.ok) {
-      // Fallback text click với timeout ngắn
       let fallbackOk = false;
       for (const label of [
         `Create from "${packageTier} Package User"`,
@@ -370,7 +768,6 @@ export async function configureFPackageUser(page, packageTier = 'F', log) {
       log(`Đã bấm "${clickResult.label || 'Create'}" — chờ Mac Role xử lý...`);
     }
 
-    // Chờ xử lý: navigation HOẶC AJAX — có heartbeat, tối đa ~75s
     const started = Date.now();
     let lastBeat = 0;
     const navWait = page
@@ -385,10 +782,7 @@ export async function configureFPackageUser(page, packageTier = 'F', log) {
         log(`… Mac Role vẫn đang xử lý Create (${elapsed}s)`);
       }
 
-      const raced = await Promise.race([
-        navWait,
-        sleep(800).then(() => 'tick'),
-      ]);
+      const raced = await Promise.race([navWait, sleep(800).then(() => 'tick')]);
       if (raced === 'nav') {
         log('Mac Role đã reload sau Create.');
         break;
@@ -417,7 +811,6 @@ export async function configureFPackageUser(page, packageTier = 'F', log) {
         log('Thấy thông báo success trên Mac Role.');
         break;
       }
-      // Nút Create biến mất + không busy → coi như xong (sau vài giây)
       if (state && !state.busy && !state.stillCreateBtn && elapsed >= 4) {
         log('Nút Create đã biến mất — coi như F Package User đã tạo.');
         break;
@@ -425,7 +818,6 @@ export async function configureFPackageUser(page, packageTier = 'F', log) {
     }
 
     await sleep(800);
-    // Create template hay cài plugin → còn redirect; chờ ổn định trước bước sau
     log('Chờ WordPress ổn định sau Create (plugin có thể còn cài)...');
     for (let i = 0; i < 8; i += 1) {
       await sleepExact(1000);
@@ -447,4 +839,42 @@ export async function configureFPackageUser(page, packageTier = 'F', log) {
   } finally {
     page.off('dialog', onDialog);
   }
+}
+
+/**
+ * Mac Core → cài + Activate Mac Role.
+ * 2.1: HTTP ưu tiên, fallback Chrome.
+ */
+export async function installMacRoleViaMacCore(page, log) {
+  if (isHttpStepsEnabled()) {
+    try {
+      await installMacRoleViaHttp(page, log);
+      return;
+    } catch (err) {
+      const msg = err?.message || String(err);
+      log(`⚠ HTTP Mac Core thất bại (${msg.slice(0, 160)}) — fallback Chrome...`);
+      await installMacRoleViaBrowser(page, log);
+      return;
+    }
+  }
+  await installMacRoleViaBrowser(page, log);
+}
+
+/**
+ * Mac Role → Create F Package User.
+ * 2.1: HTTP rud_apply_template, fallback Chrome.
+ */
+export async function configureFPackageUser(page, packageTier = 'F', log) {
+  if (isHttpStepsEnabled()) {
+    try {
+      await configureFPackageUserViaHttp(page, packageTier, log);
+      return;
+    } catch (err) {
+      const msg = err?.message || String(err);
+      log(`⚠ HTTP Create F thất bại (${msg.slice(0, 160)}) — fallback Chrome...`);
+      await configureFPackageUserViaBrowser(page, packageTier, log);
+      return;
+    }
+  }
+  await configureFPackageUserViaBrowser(page, packageTier, log);
 }
