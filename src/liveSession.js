@@ -1,5 +1,5 @@
 /**
- * Live view: snapshot (JPEG định kỳ) hoặc CDP screencast — không cần noVNC/x11vnc.
+ * Live view: snapshot theo từng dòng Log (hiện ảnh log trước) hoặc CDP screencast.
  * Input HTTP vẫn hỗ trợ (phase sau / screencast).
  */
 
@@ -10,6 +10,8 @@
  *   onFrame?: (payload: object) => void,
  *   stop?: () => Promise<void>,
  *   mode?: string,
+ *   pendingImage?: string|null,
+ *   captureChain?: Promise<void>,
  * }>} */
 const sessions = new Map();
 
@@ -27,100 +29,104 @@ export function isFrameLiveMode() {
   return m === 'snapshot' || m === 'screencast';
 }
 
-function snapshotIntervalMs() {
-  const n = Number(process.env.LIVE_SNAPSHOT_MS);
-  return Number.isFinite(n) && n >= 400 ? Math.round(n) : 1500;
-}
-
 function snapshotQuality() {
   const n = Number(process.env.LIVE_SNAPSHOT_QUALITY);
   return Number.isFinite(n) && n >= 20 && n <= 90 ? Math.round(n) : 50;
 }
 
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
 /**
- * Snapshot loop: page.screenshot JPEG mỗi LIVE_SNAPSHOT_MS.
- * @param {string} sessionId
- * @param {import('puppeteer').Browser} browser
- * @param {import('puppeteer').Page} page
- * @param {(payload: object) => void} onFrame
+ * Đăng ký session snapshot — không poll theo giây.
+ * Mỗi lần log → pushSnapshotOnLog: hiện ảnh log trước, chụp ảnh mới để lần sau.
  */
 export async function startSnapshotLive(sessionId, browser, page, onFrame) {
   await stopLiveSession(sessionId);
-
-  const intervalMs = snapshotIntervalMs();
-  const quality = snapshotQuality();
-  let stopped = false;
-  let timer = null;
-  let inFlight = false;
 
   const entry = {
     browser,
     page,
     onFrame,
     mode: 'snapshot',
+    pendingImage: null,
+    captureChain: Promise.resolve(),
     stop: null,
   };
   sessions.set(sessionId, entry);
 
-  const tick = async () => {
-    if (stopped || inFlight) return;
-    const cur = sessions.get(sessionId);
-    if (!cur || cur.page !== page) return;
-    if (!page || page.isClosed?.()) return;
-
-    inFlight = true;
-    try {
+  // Chụp sẵn 1 frame nền (chưa đẩy UI) — log đầu tiên sẽ hiện frame này
+  try {
+    if (page && !page.isClosed?.()) {
       const buf = await page.screenshot({
         type: 'jpeg',
-        quality,
+        quality: snapshotQuality(),
         encoding: 'base64',
         captureBeyondViewport: false,
       });
-      if (stopped) return;
-      const image = typeof buf === 'string' ? buf : Buffer.from(buf).toString('base64');
-      onFrame({
+      entry.pendingImage =
+        typeof buf === 'string' ? buf : Buffer.from(buf).toString('base64');
+    }
+  } catch {
+    /* ignore */
+  }
+
+  entry.stop = async () => {
+    entry.pendingImage = null;
+  };
+
+  return entry;
+}
+
+/**
+ * Gọi sau mỗi dòng log: đẩy ảnh pending (log trước) lên Live, rồi chụp mới.
+ * Không block caller — xếp hàng tuần tự để không loạn thứ tự ảnh.
+ */
+export function scheduleSnapshotOnLog(sessionId) {
+  const cur = sessions.get(sessionId);
+  if (!cur || cur.mode !== 'snapshot' || !cur.onFrame) return;
+  cur.captureChain = (cur.captureChain || Promise.resolve())
+    .then(() => pushSnapshotOnLog(sessionId))
+    .catch(() => {});
+}
+
+export async function pushSnapshotOnLog(sessionId) {
+  const cur = sessions.get(sessionId);
+  if (!cur || cur.mode !== 'snapshot' || !cur.onFrame) return;
+
+  // 1) Hiện ảnh của log trước (nếu có)
+  if (cur.pendingImage) {
+    try {
+      cur.onFrame({
         sessionId,
-        image,
+        image: cur.pendingImage,
         meta: {
           mode: 'snapshot',
-          intervalMs,
-          quality,
+          lag: 'prev-log',
+          quality: snapshotQuality(),
           timestamp: Date.now(),
         },
       });
     } catch {
-      /* page navigating / closed — bỏ frame */
-    } finally {
-      inFlight = false;
+      /* ignore */
     }
-  };
+  }
 
-  // Frame đầu ngay lập tức
-  await tick();
-
-  const loop = async () => {
-    while (!stopped && sessions.get(sessionId)?.page === page) {
-      await sleep(intervalMs);
-      if (stopped) break;
-      await tick();
-    }
-  };
-
-  loop().catch(() => {});
-
-  entry.stop = async () => {
-    stopped = true;
-    if (timer) {
-      clearTimeout(timer);
-      timer = null;
-    }
-  };
-
-  return entry;
+  // 2) Chụp ảnh mới → pending cho log kế
+  const page = cur.page;
+  if (!page || page.isClosed?.()) {
+    cur.pendingImage = null;
+    return;
+  }
+  try {
+    const buf = await page.screenshot({
+      type: 'jpeg',
+      quality: snapshotQuality(),
+      encoding: 'base64',
+      captureBeyondViewport: false,
+    });
+    cur.pendingImage =
+      typeof buf === 'string' ? buf : Buffer.from(buf).toString('base64');
+  } catch {
+    /* page navigating — giữ pending cũ */
+  }
 }
 
 /**

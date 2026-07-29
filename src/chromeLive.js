@@ -192,7 +192,7 @@ export function mountChromeLiveRoutes(app) {
         autoOpen: false,
         hint:
           mode === 'snapshot'
-            ? `Live = ảnh JPEG mỗi ~${Math.round(intervalMs / 1000)}s (không cần noVNC). Mở Live rồi Fill/Run.`
+            ? 'Live = mỗi dòng Log chụp 1 ảnh; màn hình hiện ảnh của dòng log trước. Mở Live rồi Fill/Run.'
             : 'Live = stream ảnh Chrome. Mở Live rồi Fill/Run.',
         backend: { screencast: true, novnc: false },
         cpuScale: cpuScaleConfig(),
@@ -219,7 +219,7 @@ export function mountChromeLiveRoutes(app) {
         mode,
         message:
           mode === 'snapshot'
-            ? 'Snapshot Live — xem ảnh khi Fill/Run đang chạy.'
+            ? 'Snapshot theo Log — mỗi log = 1 ảnh (hiện ảnh log trước).'
             : 'Screencast không cần x11vnc.',
       });
     }

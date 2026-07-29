@@ -1186,11 +1186,10 @@ async function setupLiveChrome() {
       }
       setUiOpen();
       if (hintEl) {
-        const sec = Math.round((liveSnapshotMs || 1500) / 1000);
         hintEl.textContent =
           liveChromeMode === 'novnc'
             ? 'Live đang bật (x11vnc). Đóng Live khi không xem để tiết kiệm CPU.'
-            : `Live snapshot (~${sec}s/ảnh). Chạy Fill/Run để thấy Chrome — không click được trên ảnh.`;
+            : 'Live theo Log: mỗi dòng log = 1 ảnh; màn hình hiện ảnh của dòng trước.';
       }
     } catch (err) {
       setUiClosed();

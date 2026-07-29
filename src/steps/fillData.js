@@ -14,7 +14,7 @@ import {
   openWebsiteInformationTab,
   resolveTargetWeb,
 } from './wpm.js';
-import { startLiveSession, stopLiveSession, isFrameLiveMode, getLiveMode } from '../liveSession.js';
+import { startLiveSession, stopLiveSession, isFrameLiveMode, getLiveMode, scheduleSnapshotOnLog } from '../liveSession.js';
 import { registerLiveBrowser, unregisterLiveBrowser } from '../liveBrowser.js';
 import { isLiveVncActive } from '../liveVnc.js';
 
@@ -215,13 +215,6 @@ export async function fillCustomerDataFromUrls(
   },
   onLog = () => {}
 ) {
-  const log = (msg) =>
-    onLog(
-      `[${new Date().toLocaleTimeString('vi-VN', {
-        timeZone: 'Asia/Ho_Chi_Minh',
-        hour12: false,
-      })}] ${msg}`
-    );
   const projectUrl = normalizeWpmProjectUrl(String(wpmProjectUrl || '').trim());
   if (!projectUrl) throw new Error('Thiếu WPM Project URL.');
   if (!wpmCredentials?.username || !wpmCredentials?.password) {
@@ -230,10 +223,22 @@ export async function fillCustomerDataFromUrls(
 
   const webTargetMode = rawMode === 'website' ? 'website' : 'main';
   const preferUrl = normalizeHttpUrl(preferWebsite);
+  const sid = liveSessionId || '';
+
+  const log = (msg) => {
+    onLog(
+      `[${new Date().toLocaleTimeString('vi-VN', {
+        timeZone: 'Asia/Ho_Chi_Minh',
+        hour12: false,
+      })}] ${msg}`
+    );
+    if (sid && getLiveMode() === 'snapshot') {
+      scheduleSnapshotOnLog(sid);
+    }
+  };
 
   const { browser, page } = await launchBrowser();
   const warnings = [];
-  const sid = liveSessionId || '';
   const headed = shouldRunHeaded();
 
   try {
@@ -241,10 +246,9 @@ export async function fillCustomerDataFromUrls(
       await startLiveSession(sid, browser, page, onScreencast).catch((e) =>
         log(`⚠ Live ${getLiveMode()}: ${e?.message || e}`)
       );
-      const ms = Number(process.env.LIVE_SNAPSHOT_MS) || 1500;
       log(
         getLiveMode() === 'snapshot'
-          ? `→ Live snapshot (~${ms}ms/ảnh) — Mở Live trên UI để xem.`
+          ? '→ Live snapshot theo Log (màn hình = ảnh của dòng log trước).'
           : '→ Live screencast bật — mở panel Live trên UI.'
       );
     } else if (process.env.CHROME_LIVE === 'true' && !headed && getLiveMode() === 'novnc') {
