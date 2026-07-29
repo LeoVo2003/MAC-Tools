@@ -227,188 +227,206 @@ export async function configureFPackageUser(page, packageTier = 'F', log) {
   const GOTO = { waitUntil: 'domcontentloaded', timeout: 60000 };
   const url = `${base}/wp-admin/admin.php?page=mac-role`;
 
-  log(`Mở Mac Role: ${url.replace(base, '')}`);
-  await page.goto(url, GOTO);
-  await sleep(400);
-  await dismissBlockingAlerts(page, log);
+  const withTimeout = (promise, ms, label) =>
+    Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error(`Timeout ${ms}ms: ${label}`)), ms);
+      }),
+    ]);
 
-  const onPage = await evaluateSafe(page, () => {
-    const t = (document.body?.innerText || '').toLowerCase();
-    return (
-      t.includes('role url links') ||
-      t.includes('quick create from template') ||
-      t.includes('f package user') ||
-      t.includes('mac role')
-    );
-  }).catch(() => false);
+  // Create hay hiện confirm() — không accept thì page.click treo mãi
+  const onDialog = async (dialog) => {
+    const msg = dialog.message() || '';
+    log(`Mac Role dialog: "${msg.slice(0, 120)}" → OK`);
+    try {
+      await dialog.accept();
+    } catch {
+      /* ignore */
+    }
+  };
+  page.on('dialog', onDialog);
 
-  if (!onPage) {
-    const menuClicked = await evaluateSafe(page, () => {
-      const hit = Array.from(document.querySelectorAll('#adminmenu a, a')).find((a) =>
-        /mac role|role url/i.test((a.textContent || '').trim())
+  try {
+    log(`Mở Mac Role: ${url.replace(base, '')}`);
+    await page.goto(url, GOTO);
+    await sleep(400);
+    await dismissBlockingAlerts(page, log);
+
+    const onPage = await evaluateSafe(page, () => {
+      const t = (document.body?.innerText || '').toLowerCase();
+      return (
+        t.includes('role url links') ||
+        t.includes('quick create from template') ||
+        t.includes('f package user') ||
+        t.includes('mac role')
       );
-      if (hit) {
-        hit.click();
+    }).catch(() => false);
+
+    if (!onPage) {
+      const menuClicked = await evaluateSafe(page, () => {
+        const hit = Array.from(document.querySelectorAll('#adminmenu a, a')).find((a) =>
+          /mac role|role url/i.test((a.textContent || '').trim())
+        );
+        if (hit) {
+          hit.click();
+          return true;
+        }
+        return false;
+      }).catch(() => false);
+      if (menuClicked) {
+        await page.waitForNavigation(GOTO).catch(() => {});
+        await sleep(300);
+      }
+    }
+
+    const alreadyDone = await evaluateSafe(page, () => {
+      const body = (document.body?.innerText || '').replace(/\s+/g, ' ');
+      const hasCreateBtn = Array.from(
+        document.querySelectorAll('a, button, input[type="button"], input[type="submit"]')
+      ).some((el) =>
+        /create from\s*["']?f[\s-]*package\s*user["']?/i.test(
+          (el.innerText || el.value || el.textContent || '').trim()
+        )
+      );
+      if (!hasCreateBtn && /f\s*package\s*user/i.test(body)) return true;
+      if (
+        !/quick create from template/i.test(body) &&
+        /f\s*package\s*user/i.test(body) &&
+        /role url|capabilities|edit role/i.test(body)
+      ) {
         return true;
       }
       return false;
     }).catch(() => false);
-    if (menuClicked) {
-      await page.waitForNavigation(GOTO).catch(() => {});
-      await sleep(300);
-    }
-  }
 
-  const alreadyDone = await evaluateSafe(page, () => {
-    const body = (document.body?.innerText || '').replace(/\s+/g, ' ');
-    const hasCreateBtn = Array.from(
-      document.querySelectorAll('a, button, input[type="button"], input[type="submit"]')
-    ).some((el) =>
-      /create from\s*["']?f[\s-]*package\s*user["']?/i.test(
-        (el.innerText || el.value || el.textContent || '').trim()
-      )
-    );
-    if (!hasCreateBtn && /f\s*package\s*user/i.test(body)) return true;
-    if (
-      !/quick create from template/i.test(body) &&
-      /f\s*package\s*user/i.test(body) &&
-      /role url|capabilities|edit role/i.test(body)
-    ) {
-      return true;
-    }
-    return false;
-  }).catch(() => false);
-
-  if (alreadyDone) {
-    log('F Package User đã có sẵn — bỏ qua Create.');
-    return;
-  }
-
-  const altLabels = [
-    `Create from "${packageTier} Package User"`,
-    'Create from "F Package User"',
-    'Create from "F-Package User"',
-    'Create from F Package User',
-  ];
-
-  log('Bấm Create from "F Package User"...');
-
-  const mark = await evaluateSafe(page, () => {
-    const btns = Array.from(
-      document.querySelectorAll(
-        'a, button, input[type="button"], input[type="submit"], [role="button"]'
-      )
-    );
-    const hit = btns.find((el) =>
-      /create from\s*["']?f[\s-]*package\s*user["']?/i.test(
-        (el.innerText || el.value || el.textContent || '').trim()
-      )
-    );
-    if (!hit) return null;
-    const id = `afp-create-fpkg-${Date.now()}`;
-    hit.setAttribute('data-afp-create', id);
-    hit.scrollIntoView?.({ block: 'center' });
-    return id;
-  }).catch(() => null);
-
-  let clicked = false;
-  if (mark) {
-    const sel = `[data-afp-create="${mark}"]`;
-    const navWait = page
-      .waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 90000 })
-      .catch(() => null);
-    try {
-      await page.click(sel, { delay: 20 });
-      clicked = true;
-    } catch {
-      clicked = await evaluateSafe(
-        page,
-        (m) => {
-          const el = document.querySelector(`[data-afp-create="${m}"]`);
-          if (!el) return false;
-          el.click();
-          return true;
-        },
-        mark
-      ).catch(() => false);
+    if (alreadyDone) {
+      log('F Package User đã có sẵn — bỏ qua Create.');
+      return;
     }
 
-    if (clicked) {
-      log('Đã bấm Create — chờ Mac Role xử lý (có thể 30–90s, đừng F5)...');
-      const started = Date.now();
-      let navDone = false;
-      navWait.then(() => {
-        navDone = true;
-      });
-      let lastBeat = 0;
-      while (Date.now() - started < 90000) {
-        if (navDone) break;
-        const elapsed = Math.round((Date.now() - started) / 1000);
-        if (elapsed >= 10 && elapsed - lastBeat >= 10) {
-          lastBeat = elapsed;
-          log(`… Mac Role vẫn đang xử lý Create (${elapsed}s)`);
-        }
-        await sleep(500);
-        const state = await evaluateSafe(page, () => {
-          const busy = !!document.querySelector(
-            '.spinner.is-active, .updating-message, .is-loading'
-          );
-          const text = (document.body?.innerText || '').replace(/\s+/g, ' ');
-          const stillCreateBtn = Array.from(
-            document.querySelectorAll('a, button, input[type="button"]')
-          ).some((el) =>
-            /create from\s*["']?f[\s-]*package\s*user["']?/i.test(
-              (el.innerText || el.value || '').trim()
-            )
-          );
-          return {
-            busy,
-            stillCreateBtn,
-            okHint: /created|updated|role saved|success/i.test(text),
-          };
-        }).catch(() => null);
-        if (
-          state?.okHint ||
-          (state && !state.busy && !state.stillCreateBtn && elapsed > 3)
-        ) {
+    log('Bấm Create from "F Package User"...');
+
+    // Click bằng evaluate (không treo như page.click khi có dialog/overlay)
+    const clickResult = await evaluateSafe(page, () => {
+      const btns = Array.from(
+        document.querySelectorAll(
+          'a, button, input[type="button"], input[type="submit"], [role="button"], .button'
+        )
+      );
+      const hit = btns.find((el) =>
+        /create from\s*["']?f[\s-]*package\s*user["']?/i.test(
+          (el.innerText || el.value || el.textContent || '').trim()
+        )
+      );
+      if (!hit) {
+        // fallback: chỉ cần chứa "create from" + "package"
+        const loose = btns.find((el) => {
+          const t = (el.innerText || el.value || el.textContent || '').replace(/\s+/g, ' ').trim();
+          return /create from/i.test(t) && /package/i.test(t) && /user/i.test(t);
+        });
+        if (!loose) return { ok: false, reason: 'no-button' };
+        loose.scrollIntoView?.({ block: 'center' });
+        loose.click();
+        return { ok: true, label: (loose.innerText || loose.value || '').trim().slice(0, 80) };
+      }
+      hit.scrollIntoView?.({ block: 'center' });
+      hit.click();
+      return { ok: true, label: (hit.innerText || hit.value || '').trim().slice(0, 80) };
+    }).catch((err) => {
+      const msg = err?.message || String(err);
+      // Click gây navigate ngay → coi như đã bấm
+      if (/Execution context was destroyed|Cannot find context|navigat/i.test(msg)) {
+        return { ok: true, label: 'Create (navigated)', navigated: true };
+      }
+      return { ok: false, reason: msg };
+    });
+
+    if (!clickResult?.ok) {
+      // Fallback text click với timeout ngắn
+      let fallbackOk = false;
+      for (const label of [
+        `Create from "${packageTier} Package User"`,
+        'Create from "F Package User"',
+        'Create from "F-Package User"',
+        'Create from F Package User',
+      ]) {
+        try {
+          log(`Thử click text: ${label}`);
+          await withTimeout(clickByText(page, label, { timeout: 4000 }), 6000, `click ${label}`);
+          fallbackOk = true;
           break;
+        } catch (e) {
+          log(`⚠ ${e?.message || e}`);
         }
       }
-      await navWait;
+      if (!fallbackOk) {
+        throw new Error(
+          `Không tìm thấy / click được Create from "F Package User" (${clickResult?.reason || '?'}).`
+        );
+      }
+      log('Đã bấm Create (fallback text).');
+    } else {
+      log(`Đã bấm "${clickResult.label || 'Create'}" — chờ Mac Role xử lý...`);
     }
-  }
 
-  if (!clicked) {
-    for (const label of altLabels) {
-      try {
-        const navWait = page
-          .waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 90000 })
-          .catch(() => null);
-        await clickByText(page, label, { timeout: 5000 });
-        clicked = true;
-        log('Đã bấm Create (fallback text) — chờ xử lý...');
-        await navWait;
+    // Chờ xử lý: navigation HOẶC AJAX — có heartbeat, tối đa ~75s
+    const started = Date.now();
+    let lastBeat = 0;
+    const navWait = page
+      .waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 75000 })
+      .then(() => 'nav')
+      .catch(() => null);
+
+    while (Date.now() - started < 75000) {
+      const elapsed = Math.round((Date.now() - started) / 1000);
+      if (elapsed >= 5 && elapsed - lastBeat >= 5) {
+        lastBeat = elapsed;
+        log(`… Mac Role vẫn đang xử lý Create (${elapsed}s)`);
+      }
+
+      const raced = await Promise.race([
+        navWait,
+        sleep(800).then(() => 'tick'),
+      ]);
+      if (raced === 'nav') {
+        log('Mac Role đã reload sau Create.');
         break;
-      } catch {
-        /* next */
+      }
+
+      const state = await evaluateSafe(page, () => {
+        const busy = !!document.querySelector(
+          '.spinner.is-active, .updating-message, .is-loading, .notice-success'
+        );
+        const text = (document.body?.innerText || '').replace(/\s+/g, ' ');
+        const stillCreateBtn = Array.from(
+          document.querySelectorAll('a, button, input[type="button"]')
+        ).some((el) =>
+          /create from\s*["']?f[\s-]*package\s*user["']?/i.test(
+            (el.innerText || el.value || '').trim()
+          )
+        );
+        return {
+          busy,
+          stillCreateBtn,
+          okHint: /created|updated|role saved|success|new user created/i.test(text),
+        };
+      }).catch(() => null);
+
+      if (state?.okHint) {
+        log('Thấy thông báo success trên Mac Role.');
+        break;
+      }
+      // Nút Create biến mất + không busy → coi như xong (sau vài giây)
+      if (state && !state.busy && !state.stillCreateBtn && elapsed >= 4) {
+        log('Nút Create đã biến mất — coi như F Package User đã tạo.');
+        break;
       }
     }
-  }
 
-  if (!clicked) {
-    throw new Error('Không tìm thấy nút Create from "F Package User" trên trang Mac Role.');
+    await sleep(400);
+    log('Mac Role: F Package User đã tạo xong.');
+  } finally {
+    page.off('dialog', onDialog);
   }
-
-  await sleep(600);
-  const deadline = Date.now() + 45000;
-  while (Date.now() < deadline) {
-    const busy = await evaluateSafe(
-      page,
-      () => !!document.querySelector('.spinner.is-active, .updating-message, .is-loading')
-    ).catch(() => false);
-    if (!busy) break;
-    await sleep(300);
-  }
-
-  log('Mac Role: F Package User đã tạo xong.');
 }

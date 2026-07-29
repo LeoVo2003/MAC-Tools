@@ -1389,80 +1389,120 @@ export async function syncAccountToWPM(page, projectUrl, account, log, targetOpt
   log(`Đã điền form (role=${roleOk}, notes=${notesOk}). Lưu...`);
 
   // Đọc lại value vừa type (trước Submit) — xác nhận điền được
-  const typedOk = await page.evaluate(
+  const typedOk = await evaluateSafe(
+    page,
     (userSel, user) => {
       const el = document.querySelector(`[data-afp="${userSel}"]`);
       return el && String(el.value || '').trim() === user;
     },
     fieldIds.username,
     account.username
-  );
+  ).catch(() => false);
   if (!typedOk) {
     log('⚠ Ô Username chưa giữ đúng giá trị sau khi type — vẫn Submit thử...');
   }
 
-  const submitted = await page.evaluate(() => {
-    const texts = [/^\s*submit\s*$/i, /^\s*save\s*$/i, /^\s*update\s*$/i, /^\s*create\s*$/i];
-    const btns = Array.from(
-      document.querySelectorAll('button, input[type="submit"], a.btn, [role="button"]')
-    );
-    for (const re of texts) {
-      const hit = btns.find((el) => {
-        const t = (el.innerText || el.value || el.textContent || '').replace(/\s+/g, ' ').trim();
-        return re.test(t) && el.offsetParent !== null;
-      });
-      if (hit) {
-        hit.scrollIntoView?.({ block: 'center' });
-        hit.click();
-        return (hit.innerText || hit.value || '').trim();
+  let submitted = null;
+  try {
+    const navWait = page
+      .waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 })
+      .catch(() => null);
+    submitted = await evaluateSafe(page, () => {
+      const texts = [/^\s*submit\s*$/i, /^\s*save\s*$/i, /^\s*update\s*$/i, /^\s*create\s*$/i];
+      const btns = Array.from(
+        document.querySelectorAll('button, input[type="submit"], a.btn, [role="button"]')
+      );
+      for (const re of texts) {
+        const hit = btns.find((el) => {
+          const t = (el.innerText || el.value || el.textContent || '').replace(/\s+/g, ' ').trim();
+          return re.test(t) && el.offsetParent !== null;
+        });
+        if (hit) {
+          hit.scrollIntoView?.({ block: 'center' });
+          hit.click();
+          return (hit.innerText || hit.value || '').trim();
+        }
       }
+      return null;
+    });
+    if (submitted) await navWait;
+  } catch (err) {
+    const msg = err?.message || String(err);
+    if (/Execution context was destroyed|Cannot find context|navigat/i.test(msg)) {
+      submitted = submitted || 'Submit';
+      log('Submit đã kích hoạt navigate — tiếp tục verify...');
+    } else {
+      throw err;
     }
-    return null;
-  });
+  }
 
   if (submitted) {
     log(`Đã bấm "${submitted}" trên WPM (sync account).`);
   } else {
     try {
+      const navWait = page
+        .waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 })
+        .catch(() => null);
       await clickByText(page, 'Submit', { timeout: 2500 });
+      await navWait;
+      submitted = 'Submit';
       log('Đã bấm Submit trên WPM (fallback).');
     } catch {
       log('⚠ Không thấy Submit/Save — WPM có thể tự lưu khi đổi field.');
     }
   }
 
-  await sleepExact(2000);
+  // Đợi thêm nếu navigate đã xong sớm / SPA update
+  await sleepExact(800);
 
-  // Verify: reload tab Website Information rồi tìm username (kể cả input ẩn / text)
   const checkUserOnWpm = async () =>
-    page.evaluate((user) => {
-      const inInputs = Array.from(document.querySelectorAll('input, textarea')).some(
-        (el) => String(el.value || '').trim() === user
-      );
-      const inText = (document.body?.innerText || '').includes(user);
-      return inInputs || inText;
-    }, account.username);
+    evaluateSafe(
+      page,
+      (user) => {
+        const inInputs = Array.from(document.querySelectorAll('input, textarea')).some(
+          (el) => String(el.value || '').trim() === user
+        );
+        const inText = (document.body?.innerText || '').includes(user);
+        return inInputs || inText;
+      },
+      account.username
+    ).catch(() => false);
 
-  let verified = await checkUserOnWpm();
-  if (!verified) {
-    log('Chưa thấy username trên form sau Submit — reload tab Website Information kiểm tra...');
-    await openWebsiteInformationTab(page, projectUrl, log);
-    await sleepExact(400);
-    const again = await resolveTargetWeb(page, { mode: webTargetMode, preferUrl }, log);
-    if (again?.id) {
-      await focusOnlyWebCard(page, again.id, log);
-      await sleepExact(400);
-      await page.evaluate((webId) => {
-        const root =
-          document.getElementById(webId) ||
-          document.querySelector(`#websContainer [id="${webId}"]`) ||
-          document.body;
-        const headers = Array.from(root.querySelectorAll('.card-header'));
-        (headers[1] || headers[0])?.click();
-      }, again.id);
-      await sleepExact(600);
-    }
+  let verified = false;
+  try {
     verified = await checkUserOnWpm();
+    if (!verified) {
+      log('Chưa thấy username trên form sau Submit — reload tab Website Information kiểm tra...');
+      await openWebsiteInformationTab(page, projectUrl, log);
+      await sleepExact(400);
+      const again = await resolveTargetWeb(page, { mode: webTargetMode, preferUrl }, log);
+      if (again?.id) {
+        await focusOnlyWebCard(page, again.id, log);
+        await sleepExact(400);
+        await evaluateSafe(page, (webId) => {
+          const root =
+            document.getElementById(webId) ||
+            document.querySelector(`#websContainer [id="${webId}"]`) ||
+            document.body;
+          const headers = Array.from(root.querySelectorAll('.card-header'));
+          (headers[1] || headers[0])?.click();
+        }, again.id).catch(() => {});
+        await sleepExact(600);
+      }
+      verified = await checkUserOnWpm();
+    }
+  } catch (err) {
+    const msg = err?.message || String(err);
+    if (
+      (submitted || typedOk) &&
+      /Execution context was destroyed|Cannot find context|Target closed|navigat/i.test(msg)
+    ) {
+      log(
+        `⚠ Sau Submit trang WPM navigate (context destroyed) — coi như đã sync "${account.username}".`
+      );
+      return;
+    }
+    throw err;
   }
 
   if (verified) {
