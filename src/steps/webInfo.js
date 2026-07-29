@@ -5,6 +5,7 @@ import {
   clickByText,
   dismissBlockingAlerts,
   waitForAnyText,
+  gotoWithRetry,
 } from '../utils.js';
 
 const GOTO = { waitUntil: 'domcontentloaded', timeout: 60000 };
@@ -332,7 +333,8 @@ export async function pullWebInfoToDashboard(page, log) {
   const base = originOf(page.url());
 
   log('Kiểm tra Web Info trong menu Settings...');
-  await page.goto(`${base}/wp-admin/index.php`, GOTO);
+  // Sau Mac Role (cài plugin) WP hay còn redirect → ERR_ABORTED nếu goto 1 lần
+  await gotoWithRetry(page, `${base}/wp-admin/index.php`, { attempts: 5, log });
   await sleepExact(800);
   await dismissBlockingAlerts(page, log);
 
@@ -468,9 +470,9 @@ export async function pullWebInfoToDashboard(page, log) {
   log('Chờ 5 giây rồi reload kiểm tra menu...');
   await sleepExact(5000);
 
-  await page.goto(`${base}/wp-admin/index.php`, GOTO);
+  await gotoWithRetry(page, `${base}/wp-admin/index.php`, { attempts: 4, log });
   await sleepExact(1000);
-  await page.reload(GOTO);
+  await page.reload(GOTO).catch(() => {});
   await sleepExact(1500);
   await dismissBlockingAlerts(page, log);
 
@@ -491,9 +493,9 @@ export async function pullWebInfoToDashboard(page, log) {
     await setCxSelect(page, 'Parent page', { empty: true });
     await clickUpdatePage(page, log);
     await sleepExact(5000);
-    await page.goto(`${base}/wp-admin/index.php`, GOTO);
+    await gotoWithRetry(page, `${base}/wp-admin/index.php`, { attempts: 4, log });
     await sleepExact(1000);
-    await page.reload(GOTO);
+    await page.reload(GOTO).catch(() => {});
     await sleepExact(1500);
     under = await webInfoStillUnderSettings(page);
     onTop = await webInfoTopLevel(page);

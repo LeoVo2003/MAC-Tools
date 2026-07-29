@@ -51,6 +51,47 @@ export function sleepExact(ms) {
 export const GOTO = { waitUntil: 'domcontentloaded', timeout: 45000 };
 
 /**
+ * Goto có retry — tránh net::ERR_ABORTED khi WP vừa cài plugin / đang redirect.
+ * @param {import('puppeteer').Page} page
+ * @param {string} url
+ * @param {{ attempts?: number, timeout?: number, log?: (msg: string) => void }} [opts]
+ */
+export async function gotoWithRetry(page, url, opts = {}) {
+  const attempts = Math.max(1, Number(opts.attempts) || 4);
+  const timeout = Number(opts.timeout) || 60000;
+  const log = opts.log || (() => {});
+  const gotoOpts = { waitUntil: 'domcontentloaded', timeout };
+  let lastErr;
+
+  for (let i = 1; i <= attempts; i += 1) {
+    try {
+      try {
+        await page.evaluate(() => {
+          try {
+            window.stop();
+          } catch {
+            /* ignore */
+          }
+        });
+      } catch {
+        /* ignore */
+      }
+      await sleepExact(i === 1 ? 300 : 800 * i);
+      await page.goto(url, gotoOpts);
+      return true;
+    } catch (err) {
+      lastErr = err;
+      const msg = err?.message || String(err);
+      if (!/ERR_ABORTED|ERR_FAILED|ERR_CONNECTION|Navigation timeout|frame was detached|detached Frame|net::ERR_/i.test(msg)) {
+        throw err;
+      }
+      log(`⚠ Goto lần ${i}/${attempts} lỗi (${msg.slice(0, 80)}) — thử lại...`);
+    }
+  }
+  throw lastErr || new Error(`Không mở được: ${url}`);
+}
+
+/**
  * Chuẩn hoá WPM Project URL: sau /projects/{id} phải có /edit.
  * vd. .../projects/627  hoặc .../projects/627/  → .../projects/627/edit
  */

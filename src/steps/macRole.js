@@ -424,7 +424,25 @@ export async function configureFPackageUser(page, packageTier = 'F', log) {
       }
     }
 
-    await sleep(400);
+    await sleep(800);
+    // Create template hay cài plugin → còn redirect; chờ ổn định trước bước sau
+    log('Chờ WordPress ổn định sau Create (plugin có thể còn cài)...');
+    for (let i = 0; i < 8; i += 1) {
+      await sleepExact(1000);
+      const loading = await evaluateSafe(page, () => {
+        const t = (document.body?.innerText || '').toLowerCase();
+        return (
+          /đang tạo|installing|activating|please wait|updating plugins/i.test(t) ||
+          !!document.querySelector('.updating-message, .spinner.is-active')
+        );
+      }).catch(() => false);
+      if (!loading) break;
+      if (i % 2 === 1) log(`… vẫn chờ plugin/Mac Role settle (${i + 1}s)`);
+    }
+    await page
+      .goto(`${base}/wp-admin/`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+      .catch(() => {});
+    await sleepExact(800);
     log('Mac Role: F Package User đã tạo xong.');
   } finally {
     page.off('dialog', onDialog);

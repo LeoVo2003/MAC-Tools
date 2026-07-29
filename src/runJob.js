@@ -8,6 +8,7 @@ import {
   ROOT,
   dismissBlockingAlerts,
   normalizeWpmProjectUrl,
+  sleepExact,
 } from './utils.js';
 import { loginToWPM, openProjectAndQuickLogin, syncAccountToWPM } from './steps/wpm.js';
 import { installAndBackupUpdraftPlus } from './steps/backup.js';
@@ -21,6 +22,7 @@ import {
   setLivePage,
   isFrameLiveMode,
   getLiveMode,
+  scheduleSnapshotOnLog,
 } from './liveSession.js';
 import { registerLiveBrowser, unregisterLiveBrowser } from './liveBrowser.js';
 import { isLiveVncActive } from './liveVnc.js';
@@ -50,12 +52,17 @@ function normalizeSteps(raw) {
  * @param {{ shouldCancel?: () => boolean, setBrowser?: (b: import('puppeteer').Browser) => void, jobId?: string, liveUserId?: string, reuseBrowser?: import('puppeteer').Browser, forceHeaded?: boolean, onScreencast?: (payload: object) => void, onScreenshots?: (shots: object[]) => void }} [hooks]
  */
 export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {}) {
+  const liveIdEarly = hooks.jobId || 'run';
   const log = (msg) => {
     const line = `[${new Date().toLocaleTimeString('vi-VN', {
       timeZone: 'Asia/Ho_Chi_Minh',
       hour12: false,
     })}] ${msg}`;
     onLog(line);
+    // Snapshot: mỗi log → hiện ảnh log trước + chụp mới
+    if (getLiveMode() === 'snapshot') {
+      scheduleSnapshotOnLog(liveIdEarly);
+    }
   };
 
   const throwIfCancelled = () => {
@@ -165,10 +172,9 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
     await startLiveSession(liveId, browser, wpmPage, pushFrame).catch((e) =>
       log(`⚠ Live ${getLiveMode()}: ${e?.message || e}`)
     );
-    const ms = Number(process.env.LIVE_SNAPSHOT_MS) || 1500;
     log(
       getLiveMode() === 'snapshot'
-        ? `→ Live snapshot (~${ms}ms/ảnh) — Mở Live trên UI để xem.`
+        ? '→ Live snapshot theo Log (màn hình = ảnh của dòng log trước).'
         : '→ Live screencast — Mở Live trên UI để xem.'
     );
   } else if (process.env.CHROME_LIVE === 'true') {
@@ -279,6 +285,9 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
       await dismissBlockingAlerts(wpPage, log);
       await configureFPackageUser(wpPage, packageTier, log);
       mark('macRole', 'done');
+      // Buffer thêm trước Web Info — tránh ERR_ABORTED khi dashboard còn redirect
+      await sleepExact(1500);
+      await dismissBlockingAlerts(wpPage, log);
     } else {
       log('⏭ Bỏ qua Mac Role');
     }
