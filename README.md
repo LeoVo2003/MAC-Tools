@@ -2,6 +2,8 @@
 
 Công cụ web tự động hóa gói F trên WordPress qua WPM (login project → backup → tạo user → sync → Mac Role → Web Info).
 
+**Version:** `2.1.0-dev` — tạo user ưu tiên HTTP (`USE_HTTP_STEPS`), fallback Chrome. Mốc ổn định: tag `v2.0.0`.
+
 **Branch:** deploy từ `main` · phát triển trên `develop`.
 
 ## Chạy local

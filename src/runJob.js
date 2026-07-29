@@ -13,6 +13,7 @@ import {
 import { loginToWPM, openProjectAndQuickLogin, syncAccountToWPM } from './steps/wpm.js';
 import { installAndBackupUpdraftPlus } from './steps/backup.js';
 import { createCustomerAccount } from './steps/user.js';
+import { isHttpStepsEnabled } from './http/wpSession.js';
 import { installMacRoleViaMacCore, configureFPackageUser } from './steps/macRole.js';
 import { pullWebInfoToDashboard } from './steps/webInfo.js';
 import { fillTaskOutputFields } from './steps/task.js';
@@ -233,7 +234,11 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
     if (enabled.has('createUser')) {
       currentStep = 'wp-create-user';
       mark('createUser', 'start');
-      log('▶ Tạo tài khoản khách...');
+      log(
+        isHttpStepsEnabled()
+          ? '▶ Tạo tài khoản khách (HTTP ưu tiên, fallback Chrome)...'
+          : '▶ Tạo tài khoản khách (Chrome)...'
+      );
       account = await createCustomerAccount(wpPage, customer, log);
       if (account.skipped && account.reason === 'email_exists') {
         accountExistsOnWeb = true;
