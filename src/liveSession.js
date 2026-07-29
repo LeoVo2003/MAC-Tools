@@ -1,23 +1,136 @@
 /**
- * Live view qua CDP screencast (SSE) + input HTTP — không cần WebSocket/noVNC.
+ * Live view: snapshot (JPEG định kỳ) hoặc CDP screencast — không cần noVNC/x11vnc.
+ * Input HTTP vẫn hỗ trợ (phase sau / screencast).
  */
-/** @type {Map<string, { browser: import('puppeteer').Browser, page: import('puppeteer').Page|null, client: any, stop?: () => Promise<void> }>} */
+
+/** @type {Map<string, {
+ *   browser: import('puppeteer').Browser,
+ *   page: import('puppeteer').Page|null,
+ *   client?: any,
+ *   onFrame?: (payload: object) => void,
+ *   stop?: () => Promise<void>,
+ *   mode?: string,
+ * }>} */
 const sessions = new Map();
 
 let lastFrameAt = 0;
-const MIN_FRAME_MS = 250; // ~4 fps
+const MIN_FRAME_MS = 250; // CDP screencast throttle
+
+export function getLiveMode() {
+  const m = (process.env.CHROME_LIVE_MODE || 'snapshot').toLowerCase();
+  if (m === 'novnc' || m === 'screencast' || m === 'snapshot') return m;
+  return 'snapshot';
+}
+
+export function isFrameLiveMode() {
+  const m = getLiveMode();
+  return m === 'snapshot' || m === 'screencast';
+}
+
+function snapshotIntervalMs() {
+  const n = Number(process.env.LIVE_SNAPSHOT_MS);
+  return Number.isFinite(n) && n >= 400 ? Math.round(n) : 1500;
+}
+
+function snapshotQuality() {
+  const n = Number(process.env.LIVE_SNAPSHOT_QUALITY);
+  return Number.isFinite(n) && n >= 20 && n <= 90 ? Math.round(n) : 50;
+}
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
 
 /**
+ * Snapshot loop: page.screenshot JPEG mỗi LIVE_SNAPSHOT_MS.
  * @param {string} sessionId
  * @param {import('puppeteer').Browser} browser
  * @param {import('puppeteer').Page} page
  * @param {(payload: object) => void} onFrame
  */
-export async function startLiveSession(sessionId, browser, page, onFrame) {
+export async function startSnapshotLive(sessionId, browser, page, onFrame) {
+  await stopLiveSession(sessionId);
+
+  const intervalMs = snapshotIntervalMs();
+  const quality = snapshotQuality();
+  let stopped = false;
+  let timer = null;
+  let inFlight = false;
+
+  const entry = {
+    browser,
+    page,
+    onFrame,
+    mode: 'snapshot',
+    stop: null,
+  };
+  sessions.set(sessionId, entry);
+
+  const tick = async () => {
+    if (stopped || inFlight) return;
+    const cur = sessions.get(sessionId);
+    if (!cur || cur.page !== page) return;
+    if (!page || page.isClosed?.()) return;
+
+    inFlight = true;
+    try {
+      const buf = await page.screenshot({
+        type: 'jpeg',
+        quality,
+        encoding: 'base64',
+        captureBeyondViewport: false,
+      });
+      if (stopped) return;
+      const image = typeof buf === 'string' ? buf : Buffer.from(buf).toString('base64');
+      onFrame({
+        sessionId,
+        image,
+        meta: {
+          mode: 'snapshot',
+          intervalMs,
+          quality,
+          timestamp: Date.now(),
+        },
+      });
+    } catch {
+      /* page navigating / closed — bỏ frame */
+    } finally {
+      inFlight = false;
+    }
+  };
+
+  // Frame đầu ngay lập tức
+  await tick();
+
+  const loop = async () => {
+    while (!stopped && sessions.get(sessionId)?.page === page) {
+      await sleep(intervalMs);
+      if (stopped) break;
+      await tick();
+    }
+  };
+
+  loop().catch(() => {});
+
+  entry.stop = async () => {
+    stopped = true;
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+  };
+
+  return entry;
+}
+
+/**
+ * CDP screencast (~4fps) — mode=screencast.
+ */
+export async function startScreencastLive(sessionId, browser, page, onFrame) {
   await stopLiveSession(sessionId);
 
   const client = await page.createCDPSession();
-  const entry = { browser, page, client, stop: null };
+  const entry = { browser, page, client, onFrame, mode: 'screencast', stop: null };
   sessions.set(sessionId, entry);
 
   const onScreencastFrame = async (evt) => {
@@ -33,6 +146,7 @@ export async function startLiveSession(sessionId, browser, page, onFrame) {
       sessionId,
       image: evt.data,
       meta: {
+        mode: 'screencast',
         deviceWidth: evt.metadata?.deviceWidth,
         deviceHeight: evt.metadata?.deviceHeight,
         offsetTop: evt.metadata?.offsetTop,
@@ -65,12 +179,30 @@ export async function startLiveSession(sessionId, browser, page, onFrame) {
   return entry;
 }
 
+/**
+ * Start live theo CHROME_LIVE_MODE (snapshot | screencast).
+ * novnc không dùng hàm này.
+ */
+export async function startLiveSession(sessionId, browser, page, onFrame) {
+  const mode = getLiveMode();
+  if (mode === 'snapshot') {
+    return startSnapshotLive(sessionId, browser, page, onFrame);
+  }
+  if (mode === 'screencast') {
+    return startScreencastLive(sessionId, browser, page, onFrame);
+  }
+  // novnc: không stream qua socket
+  return null;
+}
+
 /** Đổi tab đang stream (vd WPM → WP). */
 export async function setLivePage(sessionId, page, onFrame) {
   const cur = sessions.get(sessionId);
   if (!cur?.browser) return;
+  const frameCb = onFrame || cur.onFrame;
+  if (!frameCb) return;
   if (cur.stop) await cur.stop().catch(() => {});
-  await startLiveSession(sessionId, cur.browser, page, onFrame);
+  await startLiveSession(sessionId, cur.browser, page, frameCb);
 }
 
 export async function stopLiveSession(sessionId) {

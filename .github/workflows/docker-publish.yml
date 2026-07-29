@@ -110,6 +110,16 @@ jobs:
             else
               echo 'DOCKER_CPU_LIVE=2.5' >> .env
             fi
+            if grep -qE '^CHROME_LIVE_MODE=' .env; then
+              sed -i 's/^CHROME_LIVE_MODE=.*/CHROME_LIVE_MODE=snapshot/' .env
+            else
+              echo 'CHROME_LIVE_MODE=snapshot' >> .env
+            fi
+            if grep -qE '^LIVE_SNAPSHOT_MS=' .env; then
+              sed -i 's/^LIVE_SNAPSHOT_MS=.*/LIVE_SNAPSHOT_MS=1500/' .env
+            else
+              echo 'LIVE_SNAPSHOT_MS=1500' >> .env
+            fi
 
             if [ -n "$GHCR_TOKEN" ]; then
               echo "$GHCR_TOKEN" | docker login ghcr.io -u "${GHCR_USER:-$USER}" --password-stdin

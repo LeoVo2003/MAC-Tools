@@ -14,7 +14,7 @@ import {
   openWebsiteInformationTab,
   resolveTargetWeb,
 } from './wpm.js';
-import { startLiveSession, stopLiveSession } from '../liveSession.js';
+import { startLiveSession, stopLiveSession, isFrameLiveMode, getLiveMode } from '../liveSession.js';
 import { registerLiveBrowser, unregisterLiveBrowser } from '../liveBrowser.js';
 import { isLiveVncActive } from '../liveVnc.js';
 
@@ -237,12 +237,17 @@ export async function fillCustomerDataFromUrls(
   const headed = shouldRunHeaded();
 
   try {
-    if (sid && onScreencast && process.env.CHROME_LIVE === 'true' && headed) {
+    if (sid && onScreencast && process.env.CHROME_LIVE === 'true' && isFrameLiveMode()) {
       await startLiveSession(sid, browser, page, onScreencast).catch((e) =>
-        log(`⚠ Live screencast: ${e?.message || e}`)
+        log(`⚠ Live ${getLiveMode()}: ${e?.message || e}`)
       );
-      log('→ Live screencast bật — mở panel Live trên UI.');
-    } else if (process.env.CHROME_LIVE === 'true' && !headed) {
+      const ms = Number(process.env.LIVE_SNAPSHOT_MS) || 1500;
+      log(
+        getLiveMode() === 'snapshot'
+          ? `→ Live snapshot (~${ms}ms/ảnh) — Mở Live trên UI để xem.`
+          : '→ Live screencast bật — mở panel Live trên UI.'
+      );
+    } else if (process.env.CHROME_LIVE === 'true' && !headed && getLiveMode() === 'novnc') {
       log('→ Chạy headless (Live tắt) — nhanh hơn. Mở Live trước Fill/Run nếu cần xem.');
     }
 

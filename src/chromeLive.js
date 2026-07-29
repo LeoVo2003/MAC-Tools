@@ -10,6 +10,7 @@ import httpProxy from 'http-proxy';
 import { requireAuth } from './auth.js';
 import { acquireLiveVnc, releaseLiveVnc, probeLiveVnc, ensureLiveVnc } from './liveVnc.js';
 import { cpuScaleConfig } from './dockerCpuScale.js';
+import { getLiveMode, isFrameLiveMode } from './liveSession.js';
 
 const NOVNC_CANDIDATES = [
   process.env.NOVNC_PATH,
@@ -178,18 +179,27 @@ export function mountChromeLiveRoutes(app) {
   });
 
   app.get('/api/chrome-live', requireAuth, async (_req, res) => {
-    const backend = await probeLiveVnc();
-    const mode = (process.env.CHROME_LIVE_MODE || 'novnc').toLowerCase();
-    if (mode === 'screencast') {
+    const mode = getLiveMode();
+    const intervalMs = Number(process.env.LIVE_SNAPSHOT_MS) || 1500;
+
+    if (isFrameLiveMode()) {
       return res.json({
         enabled: true,
-        mode: 'screencast',
+        mode,
         iframeSrc: null,
+        snapshot: true,
+        intervalMs,
         autoOpen: false,
-        hint: 'Live = stream ảnh Chrome (SSE). Bấm Mở Live rồi Fill/Run.',
-        backend: { ...backend, screencast: true },
+        hint:
+          mode === 'snapshot'
+            ? `Live = ảnh JPEG mỗi ~${Math.round(intervalMs / 1000)}s (không cần noVNC). Mở Live rồi Fill/Run.`
+            : 'Live = stream ảnh Chrome. Mở Live rồi Fill/Run.',
+        backend: { screencast: true, novnc: false },
+        cpuScale: cpuScaleConfig(),
       });
     }
+
+    const backend = await probeLiveVnc();
     res.json({
       enabled: true,
       mode: 'novnc',
@@ -202,9 +212,16 @@ export function mountChromeLiveRoutes(app) {
   });
 
   app.post('/api/chrome-live/start', requireAuth, async (_req, res) => {
-    const mode = (process.env.CHROME_LIVE_MODE || 'novnc').toLowerCase();
-    if (mode === 'screencast') {
-      return res.json({ ok: true, mode: 'screencast', message: 'Screencast không cần x11vnc.' });
+    const mode = getLiveMode();
+    if (isFrameLiveMode()) {
+      return res.json({
+        ok: true,
+        mode,
+        message:
+          mode === 'snapshot'
+            ? 'Snapshot Live — xem ảnh khi Fill/Run đang chạy.'
+            : 'Screencast không cần x11vnc.',
+      });
     }
     try {
       const result = await acquireLiveVnc();
@@ -221,9 +238,9 @@ export function mountChromeLiveRoutes(app) {
   });
 
   app.post('/api/chrome-live/stop', requireAuth, async (_req, res) => {
-    const mode = (process.env.CHROME_LIVE_MODE || 'novnc').toLowerCase();
-    if (mode === 'screencast') {
-      return res.json({ ok: true, mode: 'screencast', stopped: false });
+    const mode = getLiveMode();
+    if (isFrameLiveMode()) {
+      return res.json({ ok: true, mode, stopped: false });
     }
     try {
       const result = await releaseLiveVnc();

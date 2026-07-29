@@ -335,6 +335,12 @@ function connectEvents(jobId) {
       if (data?.id && data?.status) markStepUi(data.id, data.status);
     });
 
+    socket.on('screencast', (data) => {
+      if (!data?.image) return;
+      if (watchJobId && data.jobId && data.jobId !== watchJobId) return;
+      applyLiveShot(data.image);
+    });
+
     socket.on('result', (data) => {
       if (watchJobId && data.jobId && data.jobId !== watchJobId) return;
       showResult(data);
@@ -611,6 +617,8 @@ fillDataBtn?.addEventListener('click', async () => {
 let pendingResume = false;
 let liveChromeOpen = false;
 let liveChromeSrc = '';
+let liveChromeMode = 'snapshot'; // snapshot | screencast | novnc
+let liveSnapshotMs = 1500;
 let runSubmitting = false;
 /** @type {null | (() => Promise<void>)} */
 let openLiveChromeFn = null;
@@ -631,18 +639,44 @@ resumeBtn?.addEventListener('click', async () => {
 
 function resetLiveFrameBlank() {
   const frame = document.getElementById('liveChromeFrame');
+  const shot = document.getElementById('liveShot');
+  const empty = document.getElementById('liveShotEmpty');
   const wrap = document.getElementById('liveChromeFrameWrap');
-  if (!frame || !liveChromeOpen) return;
-  // Về trắng trước khi job mới — rồi reload embed
-  frame.src = 'about:blank';
+  if (!liveChromeOpen) return;
   if (wrap) wrap.hidden = false;
-  const src = liveChromeSrc.startsWith('http')
-    ? liveChromeSrc
-    : `${window.location.origin}${liveChromeSrc || '/chrome-live/embed'}`;
-  setTimeout(() => {
-    if (!liveChromeOpen) return;
-    frame.src = `${src}${src.includes('?') ? '&' : '?'}_=${Date.now()}`;
-  }, 400);
+  if (liveChromeMode === 'novnc') {
+    if (!frame) return;
+    frame.hidden = false;
+    frame.src = 'about:blank';
+    const src = liveChromeSrc.startsWith('http')
+      ? liveChromeSrc
+      : `${window.location.origin}${liveChromeSrc || '/chrome-live/embed'}`;
+    setTimeout(() => {
+      if (!liveChromeOpen) return;
+      frame.src = `${src}${src.includes('?') ? '&' : '?'}_=${Date.now()}`;
+    }, 400);
+    return;
+  }
+  if (shot) {
+    shot.hidden = true;
+    shot.removeAttribute('src');
+  }
+  if (empty) empty.hidden = false;
+  if (frame) {
+    frame.hidden = true;
+    frame.src = 'about:blank';
+  }
+}
+
+function applyLiveShot(imageB64) {
+  if (!liveChromeOpen || !imageB64) return;
+  if (liveChromeMode === 'novnc') return;
+  const shot = document.getElementById('liveShot');
+  const empty = document.getElementById('liveShotEmpty');
+  if (!shot) return;
+  shot.src = `data:image/jpeg;base64,${imageB64}`;
+  shot.hidden = false;
+  if (empty) empty.hidden = true;
 }
 
 form?.addEventListener('submit', async (e) => {
@@ -1037,6 +1071,8 @@ async function setupLiveChrome() {
   const badge = document.getElementById('liveChromeBadge');
   const wrap = document.getElementById('liveChromeFrameWrap');
   const frame = document.getElementById('liveChromeFrame');
+  const shot = document.getElementById('liveShot');
+  const empty = document.getElementById('liveShotEmpty');
   const newTab = document.getElementById('liveChromeNewTab');
   const hintEl = panel?.querySelector('.live-chrome-hint');
   if (!panel || !toggle) return;
@@ -1058,7 +1094,15 @@ async function setupLiveChrome() {
   const setUiClosed = () => {
     liveChromeOpen = false;
     document.body.classList.remove('live-layout');
-    if (frame) frame.src = 'about:blank';
+    if (frame) {
+      frame.src = 'about:blank';
+      frame.hidden = true;
+    }
+    if (shot) {
+      shot.hidden = true;
+      shot.removeAttribute('src');
+    }
+    if (empty) empty.hidden = false;
     if (wrap) wrap.hidden = true;
     toggle.disabled = false;
     toggle.textContent = 'Mở Live';
@@ -1071,16 +1115,6 @@ async function setupLiveChrome() {
   const setUiOpen = () => {
     liveChromeOpen = true;
     document.body.classList.add('live-layout');
-    const src = liveChromeSrc.startsWith('http')
-      ? liveChromeSrc
-      : `${window.location.origin}${liveChromeSrc}`;
-    if (frame) {
-      frame.removeAttribute('sandbox');
-      frame.src = 'about:blank';
-      requestAnimationFrame(() => {
-        frame.src = `${src}${src.includes('?') ? '&' : '?'}_=${Date.now()}`;
-      });
-    }
     if (wrap) wrap.hidden = false;
     toggle.disabled = false;
     toggle.textContent = 'Đóng Live';
@@ -1088,6 +1122,31 @@ async function setupLiveChrome() {
       badge.textContent = 'LIVE';
       badge.classList.add('on');
     }
+
+    if (liveChromeMode === 'novnc') {
+      if (shot) shot.hidden = true;
+      if (empty) empty.hidden = true;
+      if (frame) {
+        frame.hidden = false;
+        const src = liveChromeSrc.startsWith('http')
+          ? liveChromeSrc
+          : `${window.location.origin}${liveChromeSrc}`;
+        frame.removeAttribute('sandbox');
+        frame.src = 'about:blank';
+        requestAnimationFrame(() => {
+          frame.src = `${src}${src.includes('?') ? '&' : '?'}_=${Date.now()}`;
+        });
+      }
+      return;
+    }
+
+    // snapshot / screencast
+    if (frame) {
+      frame.hidden = true;
+      frame.src = 'about:blank';
+    }
+    if (shot) shot.hidden = true;
+    if (empty) empty.hidden = false;
   };
 
   const openLive = async () => {
@@ -1095,7 +1154,12 @@ async function setupLiveChrome() {
     starting = true;
     toggle.disabled = true;
     toggle.textContent = 'Đang bật…';
-    if (hintEl) hintEl.textContent = 'Đang bật x11vnc — đợi vài giây…';
+    if (hintEl) {
+      hintEl.textContent =
+        liveChromeMode === 'novnc'
+          ? 'Đang bật x11vnc — đợi vài giây…'
+          : 'Đang mở Live snapshot…';
+    }
     try {
       const res = await fetch('/api/chrome-live/start', {
         method: 'POST',
@@ -1107,8 +1171,11 @@ async function setupLiveChrome() {
       }
       setUiOpen();
       if (hintEl) {
+        const sec = Math.round((liveSnapshotMs || 1500) / 1000);
         hintEl.textContent =
-          'Live đang bật (x11vnc). Đóng Live khi không xem để tiết kiệm CPU.';
+          liveChromeMode === 'novnc'
+            ? 'Live đang bật (x11vnc). Đóng Live khi không xem để tiết kiệm CPU.'
+            : `Live snapshot (~${sec}s/ảnh). Chạy Fill/Run để thấy Chrome — không click được trên ảnh.`;
       }
     } catch (err) {
       setUiClosed();
@@ -1129,7 +1196,9 @@ async function setupLiveChrome() {
     stopLiveBackend();
     if (hintEl) {
       hintEl.textContent =
-        'Live tắt — tiết kiệm CPU. Bấm Mở Live khi cần xem/click Chrome.';
+        liveChromeMode === 'novnc'
+          ? 'Live tắt — tiết kiệm CPU. Bấm Mở Live khi cần xem/click Chrome.'
+          : 'Live tắt. Bấm Mở Live để xem ảnh snapshot khi Fill/Run.';
     }
   };
 
@@ -1147,29 +1216,33 @@ async function setupLiveChrome() {
       return;
     }
     panel.hidden = false;
+    liveChromeMode = data.mode || 'snapshot';
+    liveSnapshotMs = Number(data.intervalMs) || 1500;
     liveChromeSrc = data.iframeSrc || '/chrome-live/embed';
     if (hintEl) {
       hintEl.textContent =
         data.hint ||
-        'Live mặc định tắt (tiết kiệm CPU). Bấm Mở Live khi cần xem/click Chrome.';
+        'Live mặc định tắt. Snapshot = xem ảnh định kỳ khi Fill/Run.';
     }
     if (newTab) {
-      newTab.hidden = false;
-      newTab.href = '/chrome-live/';
-      newTab.addEventListener('click', async (e) => {
-        e.preventDefault();
-        try {
-          await fetch('/api/chrome-live/start', {
-            method: 'POST',
-            credentials: 'same-origin',
-          });
-        } catch {
-          /* vẫn thử mở */
-        }
-        window.open('/chrome-live/', '_blank', 'noopener');
-      });
+      const showNovncTab = liveChromeMode === 'novnc';
+      newTab.hidden = !showNovncTab;
+      if (showNovncTab) {
+        newTab.href = '/chrome-live/';
+        newTab.addEventListener('click', async (e) => {
+          e.preventDefault();
+          try {
+            await fetch('/api/chrome-live/start', {
+              method: 'POST',
+              credentials: 'same-origin',
+            });
+          } catch {
+            /* vẫn thử mở */
+          }
+          window.open('/chrome-live/', '_blank', 'noopener');
+        });
+      }
     }
-    // Mặc định ĐÓNG — user tự bật khi cần (không auto-open, không live-layout)
     setUiClosed();
   } catch {
     panel.hidden = true;

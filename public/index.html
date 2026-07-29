@@ -198,13 +198,21 @@
               <a id="liveChromeNewTab" class="hint" href="/chrome-live/" target="_blank" rel="noopener" hidden>Mở tab mới</a>
             </div>
           </div>
-          <p class="hint live-chrome-hint">Live mặc định tắt (tiết kiệm CPU). Bấm Mở Live khi cần xem/click Chrome.</p>
+          <p class="hint live-chrome-hint">Live mặc định tắt. Snapshot = xem ảnh định kỳ khi Fill/Run (không click).</p>
           <div class="live-chrome-frame-wrap" id="liveChromeFrameWrap" hidden>
+            <img
+              id="liveShot"
+              class="live-shot"
+              alt="Live Chrome snapshot"
+              hidden
+            />
             <iframe
               id="liveChromeFrame"
               title="Live Chrome noVNC"
               allow="clipboard-read; clipboard-write; fullscreen"
+              hidden
             ></iframe>
+            <p class="hint live-shot-empty" id="liveShotEmpty">Chưa có ảnh — chạy Fill/Run khi Live đang mở.</p>
           </div>
         </section>
       </div>

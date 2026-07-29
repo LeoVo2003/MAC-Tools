@@ -19,6 +19,8 @@ import {
   startLiveSession,
   stopLiveSession,
   setLivePage,
+  isFrameLiveMode,
+  getLiveMode,
 } from './liveSession.js';
 import { registerLiveBrowser, unregisterLiveBrowser } from './liveBrowser.js';
 import { isLiveVncActive } from './liveVnc.js';
@@ -159,15 +161,16 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
       /* ignore */
     }
   };
-  if (
-    process.env.CHROME_LIVE === 'true' &&
-    process.env.CHROME_LIVE_MODE === 'screencast' &&
-    hooks.onScreencast
-  ) {
+  if (process.env.CHROME_LIVE === 'true' && isFrameLiveMode() && hooks.onScreencast) {
     await startLiveSession(liveId, browser, wpmPage, pushFrame).catch((e) =>
-      log(`⚠ Live screencast: ${e?.message || e}`)
+      log(`⚠ Live ${getLiveMode()}: ${e?.message || e}`)
     );
-    log('→ Live screencast bật — mở panel Live Chrome trên UI.');
+    const ms = Number(process.env.LIVE_SNAPSHOT_MS) || 1500;
+    log(
+      getLiveMode() === 'snapshot'
+        ? `→ Live snapshot (~${ms}ms/ảnh) — Mở Live trên UI để xem.`
+        : '→ Live screencast — Mở Live trên UI để xem.'
+    );
   } else if (process.env.CHROME_LIVE === 'true') {
     log('→ Live noVNC: mở panel Live /chrome-live để xem + tương tác.');
   }
@@ -194,12 +197,7 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
     log('▶ Mở project + Quick Login...');
     const opened = await openProjectAndQuickLogin(browser, wpmPage, wpmProjectUrl, log, targetOpts);
     wpPage = opened.wpPage;
-    if (
-      process.env.CHROME_LIVE === 'true' &&
-      process.env.CHROME_LIVE_MODE === 'screencast' &&
-      hooks.onScreencast &&
-      wpPage
-    ) {
+    if (process.env.CHROME_LIVE === 'true' && isFrameLiveMode() && hooks.onScreencast && wpPage) {
       await setLivePage(liveId, wpPage, pushFrame).catch(() => {});
     }
     const projectName = opened.projectName || '';
@@ -384,12 +382,7 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
     } catch {
       /* ignore */
     }
-    if (
-      process.env.CHROME_LIVE === 'true' &&
-      process.env.CHROME_LIVE_MODE === 'screencast' &&
-      hooks.onScreencast &&
-      primary
-    ) {
+    if (process.env.CHROME_LIVE === 'true' && isFrameLiveMode() && hooks.onScreencast && primary) {
       await setLivePage(liveId, primary, pushFrame).catch(() => {});
     }
     const shot1 = await screenshotError(

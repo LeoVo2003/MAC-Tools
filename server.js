@@ -26,7 +26,7 @@ import { purgeOldBackups, buildHealthReport, detectStaleJobs } from './src/ops.j
 import { mountChromeLiveRoutes, attachChromeLiveWs, chromeLiveEnabled } from './src/chromeLive.js';
 import { initLiveVncIdleCpu } from './src/liveVnc.js';
 import { acquireCpuBoost, releaseCpuBoost } from './src/dockerCpuScale.js';
-import { dispatchLiveInput, listLiveSessions, getLiveSession } from './src/liveSession.js';
+import { dispatchLiveInput, listLiveSessions, getLiveSession, isFrameLiveMode } from './src/liveSession.js';
 import { clearLiveBrowsersForUser, takeLiveBrowser } from './src/liveBrowser.js';
 import { attachRealtime } from './src/realtime.js';
 
@@ -208,11 +208,11 @@ export function createApp() {
           wpmCredentials: { username: stored.username, password: stored.password },
           liveUserId: req.user.id,
           liveSessionId:
-            process.env.CHROME_LIVE === 'true' && process.env.CHROME_LIVE_MODE === 'screencast'
+            process.env.CHROME_LIVE === 'true' && isFrameLiveMode()
               ? fillSessionId
               : undefined,
           onScreencast:
-            process.env.CHROME_LIVE === 'true' && process.env.CHROME_LIVE_MODE === 'screencast'
+            process.env.CHROME_LIVE === 'true' && isFrameLiveMode()
               ? (payload) =>
                   broadcast('screencast', { ...payload, jobId: fillSessionId }, { userId: req.user.id })
               : undefined,
@@ -379,19 +379,22 @@ export function createApp() {
             jobId: thisJobId,
             liveUserId: ownerId,
             reuseBrowser: reuseBrowser || undefined,
-            forceHeaded: wantLive,
+            forceHeaded: wantLive && !isFrameLiveMode(),
             setBrowser: (b) => {
               jobRef.browser = b;
             },
             onScreenshots: (shots) => {
               jobRef.screenshots = shots;
             },
-            onScreencast: (payload) => {
-              broadcast('screencast', { ...payload, jobId: thisJobId }, {
-                jobId: thisJobId,
-                userId: ownerId,
-              });
-            },
+            onScreencast:
+              isFrameLiveMode()
+                ? (payload) => {
+                    broadcast('screencast', { ...payload, jobId: thisJobId }, {
+                      jobId: thisJobId,
+                      userId: ownerId,
+                    });
+                  }
+                : undefined,
           });
           if (jobRef.cancelled) throw new Error('Job đã bị hủy.');
           finishRun(runId, { status: 'success', result });
