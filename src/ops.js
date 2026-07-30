@@ -3,6 +3,8 @@ import path from 'path';
 import { DOWNLOADS_DIR } from './utils.js';
 import { findChromePath } from './browser.js';
 import { listBackupFolders } from './backupsApi.js';
+import { cpuScaleConfig } from './dockerCpuScale.js';
+import { readLoadavg, pressureThresholds, adaptiveEnabled } from './hostPressure.js';
 
 function safeResolveUnder(root, ...parts) {
   const rootAbs = path.resolve(root);
@@ -120,6 +122,12 @@ export function buildHealthReport({ queueSnapshot, staleMinutes = 45, diskWarnMb
     chrome,
     disk,
     queue: queueSnapshot || null,
+    cpuScale: cpuScaleConfig(),
+    adaptive: {
+      enabled: adaptiveEnabled(),
+      ...readLoadavg(),
+      thresholds: pressureThresholds(),
+    },
     alerts,
     staleMinutes,
     diskWarnMb,

@@ -4,7 +4,7 @@ services:
     build: .
     ports:
       - "3847:3847"
-    # Idle mặc định 0.3 — app scale lên DOCKER_CPU_LIVE khi Fill/Run/Mở Live (cần docker.sock)
+    # Idle 0.3 — adaptive: safe 0.5 khi host/MME bận, max 1.0 khi rảnh (host 1 vCPU)
     cpus: "0.30"
     shm_size: "512m"
     env_file:
@@ -33,7 +33,14 @@ services:
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
       DOCKER_CPU_SCALE: ${DOCKER_CPU_SCALE:-true}
       DOCKER_CPU_IDLE: ${DOCKER_CPU_IDLE:-0.3}
-      DOCKER_CPU_LIVE: ${DOCKER_CPU_LIVE:-2.5}
+      DOCKER_CPU_LIVE: ${DOCKER_CPU_LIVE:-0.5}
+      DOCKER_CPU_MAX: ${DOCKER_CPU_MAX:-1.0}
+      ADAPTIVE_CAPACITY: ${ADAPTIVE_CAPACITY:-true}
+      ADAPTIVE_LOAD_BUSY: ${ADAPTIVE_LOAD_BUSY:-0.70}
+      ADAPTIVE_LOAD_IDLE: ${ADAPTIVE_LOAD_IDLE:-0.35}
+      ADAPTIVE_PEER_CONTAINER: ${ADAPTIVE_PEER_CONTAINER:-mac-menu-engine}
+      ADAPTIVE_PEER_CPU_BUSY: ${ADAPTIVE_PEER_CPU_BUSY:-50}
+      ADAPTIVE_POLL_MS: ${ADAPTIVE_POLL_MS:-15000}
     volumes:
       - fugt_downloads:/data/downloads
       - fugt_data:/app/data

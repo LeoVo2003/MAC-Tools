@@ -8,10 +8,6 @@ import { findUserById } from './userStore.js';
 /** @type {import('socket.io').Server | null} */
 let io = null;
 
-export function getIo() {
-  return io;
-}
-
 /**
  * @param {import('http').Server} httpServer
  * @param {{ sessionMiddleware: Function, queue: object }} deps

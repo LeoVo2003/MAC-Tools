@@ -39,7 +39,7 @@ Chi tiết VPS / Docker / nginx: **[DEPLOY.md](DEPLOY.md)**.
 ## Stack
 
 - Node.js (Express) + Puppeteer (Chrome)
-- Session auth · queue job · SSE log
+- Session auth · queue job · Socket.IO log
 - User store: `data/users.json` (WPM password mã hóa AES)
 
 ## API nhanh

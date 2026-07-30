@@ -1,19 +1,34 @@
 /**
  * Scale CPU container qua Docker API (docker.sock).
- * Idle 0.3 khi không có holder; Fill/Run/Live → DOCKER_CPU_LIVE (1.5).
+ * - Adaptive off: idle ↔ DOCKER_CPU_LIVE (như cũ).
+ * - Adaptive on (1 vCPU host): idle / safe(LIVE) / max(DOCKER_CPU_MAX) theo host pressure.
  */
 import fs from 'fs';
 import http from 'http';
+import {
+  adaptiveEnabled,
+  sampleHostPressure,
+} from './hostPressure.js';
 
 const SOCKET = process.env.DOCKER_SOCK || '/var/run/docker.sock';
 const IDLE = Number(process.env.DOCKER_CPU_IDLE) || 0.3;
-/** Boost khi Chrome đang làm việc (Fill/Run) hoặc Live mở */
-const BOOST = Number(process.env.DOCKER_CPU_LIVE) || 2.5;
+/** Safe boost (adaptive on + busy) hoặc boost duy nhất khi adaptive off */
+const LIVE = Number(process.env.DOCKER_CPU_LIVE) || 2.5;
+/** Max khi adaptive on + host rảnh — mặc định 1.0 (host 1 vCPU) */
+const MAX = Number(process.env.DOCKER_CPU_MAX) || 1.0;
+const POLL_MS = Math.max(5000, Number(process.env.ADAPTIVE_POLL_MS) || 15000);
 
 /** @type {Map<string, number>} */
 const holders = new Map();
+/** @type {'idle'|'safe'|'max'|null} */
 let lastMode = null;
 let warnedOff = false;
+/** @type {'idle'|'busy'|'unknown'} */
+let lastPressure = 'unknown';
+/** @type {ReturnType<typeof setInterval>|null} */
+let pollTimer = null;
+/** @type {object|null} */
+let lastSample = null;
 
 function scaleEnabled() {
   const v = (process.env.DOCKER_CPU_SCALE || 'true').toLowerCase();
@@ -126,16 +141,82 @@ async function setNanoCpus(cpus) {
   return { ok: false, status: res.status, detail };
 }
 
-async function applyHolders() {
+/**
+ * @returns {Promise<{ mode: 'idle'|'safe'|'max', cpus: number, pressure: string, sample: object|null }>}
+ */
+async function resolveTarget() {
   const total = holderTotal();
-  const want = total > 0 ? 'boost' : 'idle';
-  const cpus = total > 0 ? BOOST : IDLE;
-  if (lastMode === want) {
-    return { ok: true, already: true, mode: want, cpus, holders: total };
+  if (total <= 0) {
+    return { mode: 'idle', cpus: IDLE, pressure: lastPressure, sample: lastSample };
   }
+
+  if (!adaptiveEnabled()) {
+    return { mode: 'safe', cpus: LIVE, pressure: 'n/a', sample: null };
+  }
+
+  const sample = await sampleHostPressure(lastPressure);
+  lastSample = sample;
+  lastPressure = sample.pressure;
+
+  if (sample.treatAsBusy) {
+    return { mode: 'safe', cpus: LIVE, pressure: sample.pressure, sample };
+  }
+  return { mode: 'max', cpus: MAX, pressure: sample.pressure, sample };
+}
+
+async function applyHolders() {
+  const target = await resolveTarget();
+  const { mode, cpus, pressure, sample } = target;
+  const total = holderTotal();
+
+  if (lastMode === mode) {
+    ensurePoll();
+    return {
+      ok: true,
+      already: true,
+      mode,
+      cpus,
+      holders: total,
+      pressure,
+      load1: sample?.load1 ?? null,
+    };
+  }
+
   const result = await setNanoCpus(cpus);
-  if (result.ok) lastMode = want;
-  return { ...result, mode: want, cpus, holders: total };
+  if (result.ok) {
+    lastMode = mode;
+    const load1 = sample?.load1;
+    console.log(
+      `[cpu-scale] mode=${mode} cpus=${cpus} pressure=${pressure}` +
+        (load1 != null ? ` load1=${load1}` : '') +
+        (sample?.peerCpu != null ? ` peerCpu=${sample.peerCpu}%` : '')
+    );
+  }
+  ensurePoll();
+  return {
+    ...result,
+    mode,
+    cpus,
+    holders: total,
+    pressure,
+    load1: sample?.load1 ?? null,
+  };
+}
+
+function ensurePoll() {
+  const need = adaptiveEnabled() && holderTotal() > 0;
+  if (need && !pollTimer) {
+    pollTimer = setInterval(() => {
+      applyHolders().catch((err) => {
+        console.warn('[cpu-scale] adaptive poll:', err?.message || err);
+      });
+    }, POLL_MS);
+    if (typeof pollTimer.unref === 'function') pollTimer.unref();
+  }
+  if (!need && pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
 }
 
 /** Giữ boost (Fill / Run / Live). Nhiều holder → chỉ hạ idle khi hết tất cả. */
@@ -153,23 +234,16 @@ export async function releaseCpuBoost(reason = 'work') {
   return applyHolders();
 }
 
-/** @deprecated dùng acquireCpuBoost — giữ alias cho Live */
-export async function scaleCpuLive() {
-  return acquireCpuBoost('live');
-}
-
-/** Chỉ idle nếu không còn holder nào (tránh hạ CPU khi Fill đang chạy). */
-export async function scaleCpuIdle() {
-  if (holderTotal() > 0) {
-    return { ok: true, skipped: true, reason: 'holders-active', holders: holderTotal() };
-  }
-  return applyHolders();
-}
-
 /** Boot: xóa holder + ép idle. */
 export async function resetCpuScaleIdle() {
   holders.clear();
   lastMode = null;
+  lastPressure = 'unknown';
+  lastSample = null;
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
   return setNanoCpus(IDLE).then((r) => {
     if (r.ok) lastMode = 'idle';
     return { ...r, mode: 'idle', cpus: IDLE, holders: 0 };
@@ -179,12 +253,20 @@ export async function resetCpuScaleIdle() {
 export function cpuScaleConfig() {
   return {
     enabled: scaleEnabled(),
+    adaptiveEnabled: adaptiveEnabled(),
     idle: IDLE,
-    live: BOOST,
-    boost: BOOST,
+    live: LIVE,
+    boost: LIVE,
+    max: MAX,
     socket: SOCKET,
     lastMode,
+    pressure: lastPressure,
+    load1: lastSample?.load1 ?? null,
+    peerCpu: lastSample?.peerCpu ?? null,
+    peerName: lastSample?.peerName ?? null,
+    cpuTarget: lastMode === 'max' ? MAX : lastMode === 'safe' ? LIVE : IDLE,
     holders: Object.fromEntries(holders),
     holderTotal: holderTotal(),
+    pollMs: POLL_MS,
   };
 }

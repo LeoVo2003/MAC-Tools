@@ -177,21 +177,3 @@ export async function launchBrowser({
 
   return { browser, page };
 }
-
-export async function newPage(browser, { downloadPath } = {}) {
-  const page = await browser.newPage();
-  await page.evaluateOnNewDocument(() => {
-    Object.defineProperty(navigator, 'webdriver', {
-      get: () => undefined,
-    });
-    window.chrome = window.chrome || { runtime: {} };
-  });
-  if (downloadPath) {
-    const client = await page.createCDPSession();
-    await client.send('Page.setDownloadBehavior', {
-      behavior: 'allow',
-      downloadPath,
-    });
-  }
-  return page;
-}

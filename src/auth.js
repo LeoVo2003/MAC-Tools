@@ -44,13 +44,6 @@ export function requireAdmin(req, res, next) {
   next();
 }
 
-export function optionalAuth(req, _res, next) {
-  if (req.session?.userId) {
-    req.user = findUserById(req.session.userId) || null;
-  }
-  next();
-}
-
 export function currentPublicUser(req) {
   if (!req.session?.userId) return null;
   const user = findUserById(req.session.userId);

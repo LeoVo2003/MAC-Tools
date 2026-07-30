@@ -64,7 +64,7 @@ export function createJobQueue({ onLog, onChange, maxConcurrent = 4 } = {}) {
 
   function remember(job) {
     recent.set(job.id, job);
-    // giữ tối đa 50 job xong gần đây (SSE / status)
+    // giữ tối đa 50 job xong gần đây (Socket.IO / status)
     if (recent.size > 50) {
       const first = recent.keys().next().value;
       recent.delete(first);

@@ -301,11 +301,14 @@ function normalizeCustomer(customer) {
 
 function interpretCreateUserError(errText, username, emailClean) {
   if (/email address is not correct|email.*not correct|email.*không hợp lệ/i.test(errText)) {
-    throw new Error(`WP từ chối email: kiểm tra lại ô Email trên form. (${emailClean})`);
+    // "already registered" cũng chứa "email" — ưu tiên exists trước (xem bên dưới)
+    if (!/already\s+(been\s+)?registered|already\s+used|already\s+exists/i.test(errText)) {
+      throw new Error(`WP từ chối email: kiểm tra lại ô Email trên form. (${emailClean})`);
+    }
   }
 
   if (
-    /already exists|đã tồn tại|already been registered|already used|sorry, that email/i.test(
+    /already exists|đã tồn tại|already\s+(been\s+)?registered|already used|sorry, that email|email is already/i.test(
       errText
     )
   ) {
@@ -321,6 +324,12 @@ function interpretCreateUserError(errText, username, emailClean) {
   }
 
   return { kind: 'ok' };
+}
+
+function isEmailExistsError(msg) {
+  return /already\s+(been\s+)?registered|already exists|đã tồn tại|already used|sorry, that email|email is already/i.test(
+    String(msg || '')
+  );
 }
 
 /**
@@ -685,6 +694,26 @@ export async function createCustomerAccount(page, customer, log) {
       return await createCustomerAccountViaHttp(page, customer, log);
     } catch (err) {
       const msg = err?.message || String(err);
+      // Rule: email đã có → bỏ tạo + sync, KHÔNG fallback Chrome
+      if (isEmailExistsError(msg)) {
+        const emailClean = String(customer?.email || '').trim();
+        log(
+          `⏭ WP báo email đã tồn tại (${emailClean}) — bỏ qua tạo user và sync WPM (không fallback Chrome).`
+        );
+        await leaveUserNewForm(page, log).catch(() => {});
+        const again = await emailAlreadyRegistered(page, emailClean, log).catch(() => ({
+          found: false,
+          username: '',
+        }));
+        return {
+          username: again.username || sanitizeWpUsername(customer?.username) || '',
+          password: '',
+          email: emailClean,
+          skipped: true,
+          reason: 'email_exists',
+          via: 'http',
+        };
+      }
       log(`⚠ HTTP tạo user thất bại (${msg.slice(0, 160)}) — fallback Chrome...`);
       return createCustomerAccountViaBrowser(page, customer, log);
     }

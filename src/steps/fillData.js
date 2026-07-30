@@ -46,25 +46,6 @@ export function usernameFromShopName(shopName) {
   return `${base}-admin`;
 }
 
-/** @deprecated Rule hiện tại dùng tên tiệm, không dùng domain. */
-export function usernameFromWebsiteUrl(websiteUrl) {
-  let host = '';
-  const raw = String(websiteUrl || '').trim();
-  if (!raw) return '';
-  try {
-    const withProto = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
-    host = new URL(withProto).hostname;
-  } catch {
-    host = raw.replace(/^https?:\/\//i, '').split(/[/?#]/)[0] || '';
-  }
-  host = host.toLowerCase().replace(/^www\./, '');
-  if (host.endsWith('.com')) host = host.slice(0, -4);
-  const base = sanitizeWpUsername(host.replace(/[^a-zA-Z0-9._\-]/g, ''));
-  if (!base) return '';
-  if (/-admin$/i.test(base)) return base.toLowerCase();
-  return `${base}-admin`;
-}
-
 /**
  * Password: Tên tiệm@Zipcode (không kèm -admin, không State).
  * vd lunabeautynails@12345

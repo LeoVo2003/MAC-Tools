@@ -397,8 +397,21 @@ async function snapshotNewestBackup(page) {
       const m = attrs.match(/(\d{9,13})/);
       if (m) return Number(m[1]) > 1e12 ? Math.floor(Number(m[1]) / 1000) : Number(m[1]);
 
-      // Ngày trong text: "20 Jul 2026 10:05" / "July 20, 2026 10:05 am"
       const text = (el.innerText || '').replace(/\s+/g, ' ');
+
+      // "Jul 29, 2026 21:11" / "29 Jul 2026 21:11" (Updraft hay dùng)
+      const mdY =
+        text.match(
+          /\b((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}\s+\d{1,2}:\d{2}(?:\s*[ap]m)?)\b/i
+        ) ||
+        text.match(
+          /\b((\d{1,2})\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}\s+\d{1,2}:\d{2}(?:\s*[ap]m)?)\b/i
+        );
+      if (mdY?.[1]) {
+        const t = Date.parse(mdY[1].replace(/,/g, ''));
+        if (!Number.isNaN(t)) return Math.floor(t / 1000);
+      }
+
       const d = Date.parse(text.slice(0, 80));
       if (!Number.isNaN(d)) return Math.floor(d / 1000);
 
@@ -413,14 +426,21 @@ async function snapshotNewestBackup(page) {
     };
 
     let best = null;
-    for (const row of rows) {
+    let bestIndex = Infinity;
+    rows.forEach((row, index) => {
       const ts = parseTs(row);
-      const label = (row.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 100);
-      if (!best || ts > best.timestamp) {
+      const label = (row.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+      // Updraft list newest-first: cùng ts → lấy hàng trên
+      if (
+        !best ||
+        ts > best.timestamp ||
+        (ts === best.timestamp && index < bestIndex)
+      ) {
         const key = `afp-backup-${ts}-${Math.random().toString(36).slice(2, 6)}`;
         best = { timestamp: ts, label, rowKey: key, el: row };
+        bestIndex = index;
       }
-    }
+    });
     if (!best) return null;
     best.el.setAttribute('data-afp-backup-row', best.rowKey);
     return { timestamp: best.timestamp, label: best.label, rowKey: best.rowKey };
@@ -438,74 +458,90 @@ async function waitUntilNewBackupReady(page, base, beforeSnap, log, shouldCancel
   let sawProgress = false;
   let sawComplete = false;
   let lastLog = 0;
+  let stableNewCount = 0;
+
+  const isFinishedLabel = (label) =>
+    label && !/not\s*finished|in\s*progress|incomplete/i.test(label);
 
   while (Date.now() < deadline) {
     if (shouldCancel?.()) throw new Error('Job đã bị hủy.');
     const state = await page.evaluate(() => {
       const body = document.body?.innerText || '';
+      // Progress: KHÔNG lấy .updraft_finished (cái đó = xong)
       const progress =
-        /backup.*progress|backing up|creating backup|database.*backup|uploaded.*%/i.test(body) ||
+        /backing up|creating backup|backup.*progress|uploaded\s*\d+%/i.test(body) ||
         !!document.querySelector(
-          '#updraft-jobstatus, .updraft_finished, #updraft_lastlogmessagerow, .updraft-progress'
+          '#updraft-jobstatus:not(.updraft_finished), .updraft-progress, #updraft_activejobsrow'
         );
-      // Complete — tránh match mơ hồ "succeeded" trong notice cũ
       const complete =
         /backup\s*(apparently\s*)?(succeeded|complete|finished)/i.test(body) ||
         /the backup apparently succeeded/i.test(body) ||
         /backup complete/i.test(body) ||
         !!document.querySelector('.updraft_finished, #updraft-backup-complete');
+      // Active: hẹp — tránh "please wait" / "is running" trên notice WP khác
       const active =
-        /backup in progress|currently being backed|is running|please wait/i.test(body) ||
-        !!document.querySelector('.updraft_active_job, #updraft_activejobs_table .job');
-      return { progress, complete, active, snippet: body.replace(/\s+/g, ' ').slice(0, 200) };
+        /backup in progress|currently being backed|backing up (database|plugins|themes|uploads)/i.test(
+          body
+        ) || !!document.querySelector('#updraft_activejobs_table .job, #updraft_activejobsrow .job');
+      return { progress, complete, active };
     });
 
     if (state.progress || state.active) sawProgress = true;
     if (state.complete && (sawProgress || !beforeSnap)) sawComplete = true;
 
-    // Poll hàng backup mới nhất
     const newest = await snapshotNewestBackup(page);
+    const labelChanged =
+      newest && beforeSnap && newest.label && newest.label !== beforeSnap.label;
+    const finishedRow = newest && isFinishedLabel(newest.label);
+
     const isNewer =
       newest &&
       (!beforeSnap ||
         newest.timestamp > beforeSnap.timestamp ||
         (newest.timestamp === beforeSnap.timestamp &&
           newest.label !== beforeSnap.label &&
-          newest.timestamp > 0) ||
-        (beforeSnap.timestamp === 0 && newest.timestamp > 0));
+          (newest.timestamp > 0 || finishedRow)) ||
+        (beforeSnap.timestamp === 0 && newest.timestamp > 0) ||
+        // Cả hai ts=0 nhưng label đổi + đã finished (case Updraft không có data-timestamp)
+        (beforeSnap.timestamp === 0 &&
+          newest.timestamp === 0 &&
+          labelChanged &&
+          finishedRow));
 
-    // Cùng timestamp nhưng row mới (ts=0 fallback): so sánh label khác
-    const labelChanged =
-      newest && beforeSnap && newest.label && newest.label !== beforeSnap.label;
+    if (isNewer && finishedRow) stableNewCount += 1;
+    else stableNewCount = 0;
 
     if (Date.now() - lastLog > 15000) {
       log(
-        `… chờ backup: progress=${sawProgress}, complete=${!!state.complete}, ` +
-          `newest=${newest ? `${newest.label.slice(0, 60)} (ts=${newest.timestamp})` : 'n/a'}`
+        `… chờ backup: progress=${sawProgress}, complete=${!!state.complete}, active=${!!state.active}, ` +
+          `newer=${!!isNewer}, newest=${newest ? `${newest.label.slice(0, 55)} (ts=${newest.timestamp})` : 'n/a'}`
       );
       lastLog = Date.now();
     }
 
-    // Điều kiện xong: có hàng mới HƠN trước đó, và (đã thấy complete HOẶC đã thấy progress rồi hết active)
-    if (isNewer && (sawComplete || (sawProgress && !state.active && state.complete))) {
+    // Xong: hàng mới + finished + (complete UI hoặc progress đã chạy rồi hết active)
+    if (
+      isNewer &&
+      finishedRow &&
+      (sawComplete || state.complete || (sawProgress && !state.active) || stableNewCount >= 2)
+    ) {
       log(
         `Backup mới đã xong: ${newest.label.slice(0, 80)} (ts=${newest.timestamp}` +
           (beforeSnap ? `, trước=${beforeSnap.timestamp}` : '') +
           ')'
       );
-      await sleepExact(3000);
+      await sleepExact(2000);
       return newest;
     }
 
-    // Nếu chưa có beforeSnap: cần complete + có ít nhất 1 row
-    if (!beforeSnap && newest && (sawComplete || (state.complete && !state.active))) {
+    if (!beforeSnap && newest && finishedRow && (sawComplete || (state.complete && !state.active))) {
       log(`Backup đầu tiên xong: ${newest.label.slice(0, 80)} (ts=${newest.timestamp})`);
-      await sleepExact(3000);
+      await sleepExact(2000);
       return newest;
     }
 
-    // Thỉnh thoảng Updraft cập nhật list chậm — rescan
-    if (sawComplete && !isNewer && Date.now() % 20000 < 1200) {
+    // Rescan list khi UI báo xong nhưng chưa thấy hàng mới
+    if (sawComplete && !isNewer && Date.now() % 20000 < 1600) {
       await page.evaluate(() => {
         const btn = Array.from(document.querySelectorAll('a, button')).find((el) =>
           /rescan|re-scan|refresh.*local|scan.*backup/i.test((el.innerText || '').trim())
@@ -514,20 +550,26 @@ async function waitUntilNewBackupReady(page, base, beforeSnap, log, shouldCancel
       });
     }
 
-    // Fallback: complete + label đổi (khi không parse được timestamp)
-    if (sawComplete && labelChanged && !state.active) {
+    // Fallback: label đổi + không còn "Not finished"
+    if (labelChanged && finishedRow && (sawComplete || state.complete || !state.active)) {
       log(`Backup mới (đổi label): ${newest.label.slice(0, 80)}`);
-      await sleepExact(3000);
+      await sleepExact(2000);
       return newest;
     }
 
     await sleepExact(1500);
   }
 
-  // Hết giờ — kiểm tra lần cuối
   const newest = await snapshotNewestBackup(page);
-  if (newest && beforeSnap && newest.timestamp > beforeSnap.timestamp) {
-    log(`Hết thời gian chờ nhưng đã có backup mới hơn (ts=${newest.timestamp}) — tiếp tục.`);
+  if (
+    newest &&
+    beforeSnap &&
+    (newest.timestamp > beforeSnap.timestamp ||
+      (newest.label !== beforeSnap.label && isFinishedLabel(newest.label)))
+  ) {
+    log(
+      `Hết thời gian chờ nhưng đã có backup mới hơn — tiếp tục (${newest.label.slice(0, 60)}).`
+    );
     return newest;
   }
 

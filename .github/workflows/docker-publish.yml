@@ -99,16 +99,31 @@ jobs:
               exit 1
             fi
 
-            # Perf defaults (không đụng SESSION/APP secret)
+            # Perf defaults (không đụng SESSION/APP secret) — host 1 vCPU + adaptive
             if grep -qE '^SPEED=' .env; then
               sed -i 's/^SPEED=.*/SPEED=turbo/' .env
             else
               echo 'SPEED=turbo' >> .env
             fi
             if grep -qE '^DOCKER_CPU_LIVE=' .env; then
-              sed -i 's/^DOCKER_CPU_LIVE=.*/DOCKER_CPU_LIVE=2.5/' .env
+              sed -i 's/^DOCKER_CPU_LIVE=.*/DOCKER_CPU_LIVE=0.5/' .env
             else
-              echo 'DOCKER_CPU_LIVE=2.5' >> .env
+              echo 'DOCKER_CPU_LIVE=0.5' >> .env
+            fi
+            if grep -qE '^DOCKER_CPU_MAX=' .env; then
+              sed -i 's/^DOCKER_CPU_MAX=.*/DOCKER_CPU_MAX=1.0/' .env
+            else
+              echo 'DOCKER_CPU_MAX=1.0' >> .env
+            fi
+            if grep -qE '^ADAPTIVE_CAPACITY=' .env; then
+              sed -i 's/^ADAPTIVE_CAPACITY=.*/ADAPTIVE_CAPACITY=true/' .env
+            else
+              echo 'ADAPTIVE_CAPACITY=true' >> .env
+            fi
+            if grep -qE '^ADAPTIVE_PEER_CONTAINER=' .env; then
+              sed -i 's/^ADAPTIVE_PEER_CONTAINER=.*/ADAPTIVE_PEER_CONTAINER=mac-menu-engine/' .env
+            else
+              echo 'ADAPTIVE_PEER_CONTAINER=mac-menu-engine' >> .env
             fi
             if grep -qE '^CHROME_LIVE_MODE=' .env; then
               sed -i 's/^CHROME_LIVE_MODE=.*/CHROME_LIVE_MODE=snapshot/' .env

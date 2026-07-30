@@ -488,13 +488,6 @@ export async function resolveTargetWeb(page, opts = {}, log = () => {}) {
   return pick;
 }
 
-/**
- * Alias: luôn chọn Main Web (rule cũ).
- */
-export async function resolveMainWeb(page, log = () => {}) {
-  return resolveTargetWeb(page, { mode: 'main' }, log);
-}
-
 /** true nếu card đang mở (body/collapse visible). */
 async function isWebCardExpanded(page, webId) {
   return page.evaluate((id) => {
@@ -579,11 +572,6 @@ export async function focusOnlyWebCard(page, webId, log = () => {}) {
     await setWebCardExpanded(page, webId, true);
   }
   log(`Chỉ thao tác trên card ${webId} — không mở web khác.`);
-}
-
-/** Expand đúng card web (theo id). Prefer focusOnlyWebCard khi có nhiều web. */
-export async function expandWebCard(page, webId) {
-  await setWebCardExpanded(page, webId, true);
 }
 
 /**

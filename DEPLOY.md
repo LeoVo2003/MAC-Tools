@@ -35,8 +35,13 @@ Admin mặc định: `leo.vo@macusaone.com` (thêm email: `ADMIN_EMAILS=a@x.com,
 | `ADMIN_EMAILS` | Thêm email admin (comma-separated), ngoài leo.vo@… |
 | `CHROME_PATH` | Path Chrome/Chromium nếu không tự tìm |
 | `DOWNLOAD_DIR` | Thư mục lưu file backup |
-| `MAX_CONCURRENT_JOBS` | Số Chrome chạy song song (mặc định `4`) |
+| `MAX_CONCURRENT_JOBS` | Số Chrome chạy song song (VPS mặc định `1`) |
 | `PORT` | Mặc định `3847` |
+| `ADAPTIVE_CAPACITY` | `true` = idle/safe/max theo load + peer MME; `false` = chỉ idle ↔ `DOCKER_CPU_LIVE` |
+| `DOCKER_CPU_IDLE` / `LIVE` / `MAX` | Host 1 vCPU: `0.3` / `0.5` (bận) / `1.0` (rảnh) |
+| `ADAPTIVE_PEER_CONTAINER` | Tên container MME (mặc định `mac-menu-engine`) |
+
+**Rollback adaptive:** trong `.env` VPS đặt `ADAPTIVE_CAPACITY=false` và (tuỳ) `DOCKER_CPU_LIVE=2.5`, rồi `docker compose up -d`.
 
 ## Nginx mẫu (Socket.IO + Live Chrome WebSocket)
 

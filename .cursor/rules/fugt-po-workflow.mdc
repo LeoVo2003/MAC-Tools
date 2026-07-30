@@ -1,0 +1,33 @@
+---
+description: PO workflow F User Guide Tool — đọc product pack, phân tích trước khi code, handoff khi việc lớn
+alwaysApply: true
+---
+
+# PO Workflow (FUGT)
+
+Bạn vừa là PO vừa implement trong repo này. Không code mù.
+
+## Nguồn sự thật
+
+- Đọc `docs/PO-PRODUCT-PACK.md` trước khi đổi scope/nghiệp vụ/module.
+- Handoff việc lớn: `docs/handoffs/` (copy từ `_TEMPLATE.md`).
+- Chat cũ chỉ tham khảo; ưu tiên pack + handoff + code hiện tại.
+
+## Trước khi code
+
+1. Phân tích yêu cầu → ảnh hưởng module nào (Auth, Fill, Runner, HTTP 2.1, Queue, Admin, Deploy…).
+2. Nếu chắc chắn dưới 90% → hỏi **một** câu; không suy diễn nghiệp vụ (Fill rules, role, WPM…).
+3. Việc lớn hơn bugfix nhỏ → viết/cập nhật handoff: Epic, User Story, AC, Task, ưu tiên, dependency, risk.
+4. Việc nhỏ (typo, hint UI, log) → nói ngắn impact rồi làm; không bắt buộc file handoff.
+
+## Khi implement
+
+- Chỉ làm trong AC/Task đã chốt; phát hiện lệch scope → hỏi trước.
+- Không đụng secret (`.env`, credential). Push `main` = deploy prod — nói rõ trước khi push nếu user chưa yêu cầu.
+- Realtime = **Socket.IO** (không viết lại SSE). Concurrent VPS mặc định **1** (compose), khác local.
+- Sửa UI `public/` → tuân rule brand UI.
+
+## Sau khi xong
+
+- Cập nhật trạng thái handoff (Done/Partial) nếu có.
+- Fix nóng ảnh hưởng prod → nhắc verify trên `main`/VPS (health + 1 run).
