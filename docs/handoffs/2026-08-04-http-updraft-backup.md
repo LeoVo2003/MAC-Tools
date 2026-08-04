@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Ready (chờ Task 0 discovery AJAX) |
+| **Status** | Done (local — chưa push) |
 | **Date** | 2026-08-04 |
 | **Priority** | P1 |
 | **Epic** | E2 — Hybrid HTTP 2.1 |
@@ -33,10 +33,14 @@ Install/Activate Updraft đã HTTP OK. Tiếp: **Backup Now + chờ backup mới
 
 | # | Task | Done |
 |---|---|---|
-| 0 | Discovery Updraft AJAX (nonce / subaction / poll) trên site thật | [ ] |
-| 1 | `readUpdraftAjaxContext` | [ ] |
-| 2 | `startUpdraftBackupViaHttp` | [ ] |
-| 3 | Snapshot newest HTTP | [ ] |
-| 4 | `waitUntilNewBackupReadyHttp` | [ ] |
-| 5 | Wire + anti double-start | [ ] |
-| 6 | Verify local | [ ] |
+| 0 | Discovery: `updraft_ajax` + `backupnow` + nonce `updraftplus-credentialtest-nonce`; poll `activejobs_list` | [x] |
+| 1 | `readUpdraftAjaxContext` | [x] |
+| 2 | `startUpdraftBackupViaHttp` | [x] |
+| 3–4 | `waitUntilNewBackupReadyHttp` (activejobs + reload DOM snapshot) | [x] |
+| 5 | Wire + anti double-start nếu đã HTTP start | [x] |
+| 6 | Verify local | [ ] user chạy lại job |
+
+## API dùng
+
+- POST `action=updraft_ajax&subaction=backupnow&nonce=…`
+- GET `action=updraft_ajax&subaction=activejobs_list&nonce=…`

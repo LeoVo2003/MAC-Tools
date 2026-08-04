@@ -98,6 +98,206 @@ function httpFailDetail(label, res) {
   return `${label} HTTP ${res?.status || '?'} url=${String(res?.url || '').slice(0, 80)} ${snip}`;
 }
 
+/** Đọc trạng thái trang Add Plugins / updates nonce (AJAX wordpress.org hay chậm hoặc trống). */
+async function readAddPluginsState(page) {
+  return page.evaluate(() => {
+    const url = location.href;
+    const body = (document.body?.innerText || '').replace(/\s+/g, ' ').trim();
+    const title = document.title || '';
+    const is404 =
+      /404|not found|không tìm thấy/i.test(title) ||
+      /error 404|page not found/i.test(body.slice(0, 400));
+    const apiFail =
+      /an unexpected error occurred|wordpress\.org|could not be established|unable to connect|không thể kết nối/i.test(
+        body
+      );
+    const noResults = /no plugins (were )?found|không tìm thấy plugin/i.test(body);
+
+    let nonce =
+      window._wpUpdatesSettings?.ajax_nonce ||
+      window.wp?.updates?.ajaxNonce ||
+      '';
+    if (!nonce) {
+      for (const s of Array.from(document.querySelectorAll('script'))) {
+        const t = s.textContent || '';
+        const m =
+          t.match(/ajax_nonce["']\s*:\s*["']([a-f0-9]+)["']/i) ||
+          t.match(/["']_ajax_nonce["']\s*:\s*["']([a-f0-9]+)["']/i);
+        if (m) {
+          nonce = m[1];
+          break;
+        }
+      }
+    }
+
+    const card =
+      document.querySelector('.plugin-card-updraftplus') ||
+      Array.from(document.querySelectorAll('.plugin-card')).find((c) => {
+        const name = (c.querySelector('.name, h3')?.innerText || '').toLowerCase();
+        return name.includes('updraftplus') && !name.includes('exclude');
+      });
+
+    let cardStatus = 'no-card';
+    if (card) {
+      const t = (card.innerText || '').toLowerCase();
+      const hasActivate = Array.from(card.querySelectorAll('a, button')).some((el) =>
+        /^activate$/i.test((el.innerText || el.textContent || '').trim())
+      );
+      const hasInstall = Array.from(card.querySelectorAll('a, button')).some((el) =>
+        /install now/i.test((el.innerText || el.textContent || '').trim())
+      );
+      if (hasActivate) cardStatus = 'ready-to-activate';
+      else if (hasInstall) cardStatus = 'need-install';
+      else if (/active|activated/i.test(t)) cardStatus = 'already-active';
+      else if (/installing|updating/i.test(t)) cardStatus = 'installing';
+      else cardStatus = 'waiting';
+    }
+
+    return {
+      url,
+      is404,
+      apiFail,
+      noResults,
+      nonce: nonce || '',
+      cardStatus,
+      bodyHint: body.slice(0, 120),
+    };
+  });
+}
+
+/**
+ * Chờ card Updraft hoặc updates nonce.
+ * Site yếu / API wordpress.org chậm → chờ lâu (không coi no-card sớm là lỗi).
+ */
+async function waitForAddPluginsReady(page, log, timeoutMs = 120000) {
+  const deadline = Date.now() + timeoutMs;
+  const started = Date.now();
+  let last = null;
+  let lastLog = 0;
+  let nonceAfter = 0;
+
+  while (Date.now() < deadline) {
+    last = await readAddPluginsState(page);
+    if (last.is404) {
+      throw new Error(
+        `Add Plugins trả 404 (${last.url}). Kiểm tra Quick Login đúng site / quyền cài plugin.`
+      );
+    }
+    if (
+      last.cardStatus === 'need-install' ||
+      last.cardStatus === 'ready-to-activate' ||
+      last.cardStatus === 'already-active' ||
+      last.cardStatus === 'installing'
+    ) {
+      return last;
+    }
+
+    const elapsed = Date.now() - started;
+    if (last.nonce && !nonceAfter) nonceAfter = elapsed;
+
+    // Có nonce đủ lâu mà vẫn không card → cho HTTP/AJAX slug (không upload zip)
+    if (last.nonce && elapsed >= 25000 && last.cardStatus === 'no-card') {
+      log(
+        `… ${Math.round(elapsed / 1000)}s chưa thấy card — dùng updates nonce để cài theo slug.`
+      );
+      return last;
+    }
+
+    if (Date.now() - lastLog > 15000) {
+      log(
+        `… chờ Add Plugins (${Math.round(elapsed / 1000)}s/${Math.round(timeoutMs / 1000)}s): ` +
+          `card=${last.cardStatus}, nonce=${last.nonce ? 'có' : 'chưa'}` +
+          (last.apiFail || last.noResults ? ', search trống/API chậm' : '')
+      );
+      lastLog = Date.now();
+    }
+    await sleepExact(1500);
+  }
+  return last || readAddPluginsState(page);
+}
+
+/** POST admin-ajax install-plugin (slug) — không phụ thuộc card UI. */
+async function installUpdraftViaAdminAjax(page, log) {
+  log('AJAX: POST install-plugin slug=updraftplus...');
+  const installRes = await page.evaluate(async (slug) => {
+    const ajaxurl = window.ajaxurl || '/wp-admin/admin-ajax.php';
+    let nonce =
+      window._wpUpdatesSettings?.ajax_nonce ||
+      window.wp?.updates?.ajaxNonce ||
+      '';
+    if (!nonce) {
+      for (const s of Array.from(document.querySelectorAll('script'))) {
+        const t = s.textContent || '';
+        const m =
+          t.match(/ajax_nonce["']\s*:\s*["']([a-f0-9]+)["']/i) ||
+          t.match(/["']_ajax_nonce["']\s*:\s*["']([a-f0-9]+)["']/i);
+        if (m) {
+          nonce = m[1];
+          break;
+        }
+      }
+    }
+    if (!nonce) return { ok: false, error: 'no-updates-nonce' };
+
+    const body = new URLSearchParams();
+    body.set('action', 'install-plugin');
+    body.set('_ajax_nonce', nonce);
+    body.set('slug', slug);
+
+    const res = await fetch(ajaxurl, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        Accept: 'application/json, text/javascript, */*; q=0.01',
+        'X-Requested-With': 'XMLHttpRequest',
+      },
+      body: body.toString(),
+    });
+    const text = await res.text();
+    let json = null;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      /* ignore */
+    }
+    return { ok: res.ok, status: res.status, text: text.slice(0, 500), json };
+  }, UPDRAFT_SLUG);
+
+  if (installRes.error === 'no-updates-nonce') {
+    throw new Error('Không lấy được updates ajax_nonce để cài UpdraftPlus.');
+  }
+
+  const data = installRes.json?.data || {};
+  const success =
+    installRes.json?.success === true ||
+    data.pluginName ||
+    data.activateUrl ||
+    /folder_exists|already.?installed/i.test(JSON.stringify(installRes.json || {}));
+
+  const folderExists =
+    installRes.json?.success === false &&
+    /folder_exists|already.?installed|destination folder already exists/i.test(
+      JSON.stringify(installRes.json || installRes.text || '')
+    );
+
+  if (!success && !folderExists) {
+    throw new Error(
+      `Install AJAX fail (${installRes.status}): ${String(
+        installRes.json?.data?.errorMessage ||
+          installRes.json?.data?.errorCode ||
+          installRes.text ||
+          ''
+      ).slice(0, 180)}`
+    );
+  }
+
+  if (folderExists) log('⏭ Plugin folder đã có — sang Activate.');
+  else log('✓ Install UpdraftPlus OK (admin-ajax).');
+
+  return { activateHref: data.activateUrl || null };
+}
+
 /**
  * HTTP: check settings → install (wordpress.org) → activate.
  * Dùng fetch trong tab WP (không Node wpFetch) — site macmar hay 404 Node.
@@ -151,131 +351,39 @@ export async function ensureUpdraftInstalledAndActiveViaHttp(page, base, log) {
   );
 
   if (!activateHref && !alreadyOnDisk) {
-    // GET update.php?_wpnonce=… hay bị "link expired" (403).
-    // Đúng như nút Install Now: POST admin-ajax action=install-plugin + _ajax_nonce=updates.
+    // 1) HTTP/AJAX slug ưu tiên — chờ lâu Add Plugins (site yếu).
+    // Fail → throw → ensureUpdraftInstalledAndActive fallback Chrome. Không upload zip.
     const searchUrl = `${base}/wp-admin/plugin-install.php?s=${UPDRAFT_SLUG}&tab=search&type=term`;
-    log('HTTP: mở Add Plugins (lấy updates nonce)...');
+    log('HTTP: mở Add Plugins (chờ card / nonce — tối đa ~2 phút)...');
     await page.goto(searchUrl, GOTO);
     await sleep(400);
 
-    const cardState = await page.evaluate(() => {
-      const card =
-        document.querySelector('.plugin-card-updraftplus') ||
-        Array.from(document.querySelectorAll('.plugin-card')).find((c) => {
-          const name = (c.querySelector('.name, h3')?.innerText || '').toLowerCase();
-          return name.includes('updraftplus') && !name.includes('exclude');
-        });
-      if (!card) return { status: 'no-card' };
-      const t = (card.innerText || '').toLowerCase();
-      const hasActivate = Array.from(card.querySelectorAll('a, button')).some((el) =>
-        /^activate$/i.test((el.innerText || el.textContent || '').trim())
-      );
-      const hasInstall = Array.from(card.querySelectorAll('a, button')).some((el) =>
-        /install now/i.test((el.innerText || el.textContent || '').trim())
-      );
-      if (hasActivate) return { status: 'ready-to-activate' };
-      if (hasInstall) return { status: 'need-install' };
-      if (/active|activated/i.test(t)) return { status: 'already-active' };
-      return { status: 'waiting' };
-    });
+    let cardState = await waitForAddPluginsReady(page, log, 120000);
 
-    if (cardState.status === 'no-card') {
-      throw new Error('Không thấy card UpdraftPlus trên Add Plugins (HTTP).');
+    if (!cardState.nonce && cardState.cardStatus === 'no-card') {
+      log('… không có nonce trên Add Plugins — thử plugins.php...');
+      await page.goto(`${base}/wp-admin/plugins.php`, GOTO);
+      await sleep(400);
+      cardState = await readAddPluginsState(page);
     }
 
-    if (cardState.status === 'need-install') {
-      log('HTTP: POST admin-ajax install-plugin (updraftplus)...');
-      const installRes = await page.evaluate(async (slug) => {
-        const ajaxurl = window.ajaxurl || '/wp-admin/admin-ajax.php';
-        let nonce =
-          window._wpUpdatesSettings?.ajax_nonce ||
-          window.wp?.updates?.ajaxNonce ||
-          '';
-        if (!nonce) {
-          for (const s of Array.from(document.querySelectorAll('script'))) {
-            const t = s.textContent || '';
-            const m =
-              t.match(/ajax_nonce["']\s*:\s*["']([a-f0-9]+)["']/i) ||
-              t.match(/["']_ajax_nonce["']\s*:\s*["']([a-f0-9]+)["']/i);
-            if (m) {
-              nonce = m[1];
-              break;
-            }
-          }
-        }
-        if (!nonce) return { ok: false, error: 'no-updates-nonce' };
+    const canAjaxInstall = Boolean(cardState.nonce);
+    const needInstall =
+      cardState.cardStatus === 'need-install' ||
+      (cardState.cardStatus === 'no-card' && canAjaxInstall) ||
+      (cardState.cardStatus === 'waiting' && canAjaxInstall);
 
-        const body = new URLSearchParams();
-        body.set('action', 'install-plugin');
-        body.set('_ajax_nonce', nonce);
-        body.set('slug', slug);
+    if (cardState.cardStatus === 'no-card' && !canAjaxInstall) {
+      throw new Error(
+        'HTTP: không thấy card UpdraftPlus / updates nonce sau khi chờ Add Plugins — fallback Chrome.'
+      );
+    }
 
-        const res = await fetch(ajaxurl, {
-          method: 'POST',
-          credentials: 'include',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-            Accept: 'application/json, text/javascript, */*; q=0.01',
-            'X-Requested-With': 'XMLHttpRequest',
-          },
-          body: body.toString(),
-        });
-        const text = await res.text();
-        let json = null;
-        try {
-          json = JSON.parse(text);
-        } catch {
-          /* ignore */
-        }
-        return {
-          ok: res.ok,
-          status: res.status,
-          text: text.slice(0, 500),
-          json,
-          nonceOk: Boolean(nonce),
-        };
-      }, UPDRAFT_SLUG);
-
-      if (installRes.error === 'no-updates-nonce') {
-        throw new Error('Không lấy được _wpUpdatesSettings.ajax_nonce trên Add Plugins.');
-      }
-
-      const data = installRes.json?.data || {};
-      const success =
-        installRes.json?.success === true ||
-        data.pluginName ||
-        data.activateUrl ||
-        /folder_exists|already.?installed/i.test(JSON.stringify(installRes.json || {}));
-
-      // folder_exists = đã có trên disk → sang activate
-      const folderExists =
-        installRes.json?.success === false &&
-        /folder_exists|already.?installed|destination folder already exists/i.test(
-          JSON.stringify(installRes.json || installRes.text || '')
-        );
-
-      if (!success && !folderExists) {
-        throw new Error(
-          `Install AJAX fail (${installRes.status}): ${String(
-            installRes.json?.data?.errorMessage ||
-              installRes.json?.data?.errorCode ||
-              installRes.text ||
-              ''
-          ).slice(0, 180)}`
-        );
-      }
-
-      if (folderExists) {
-        log('⏭ Plugin folder đã có — sang Activate.');
-      } else {
-        log('✓ Install UpdraftPlus OK (admin-ajax).');
-      }
-
-      if (data.activateUrl) {
-        activateHref = data.activateUrl;
-      }
+    if (needInstall) {
+      const inst = await installUpdraftViaAdminAjax(page, log);
+      if (inst.activateHref) activateHref = inst.activateHref;
       await sleepExact(600);
-    } else if (cardState.status === 'ready-to-activate') {
+    } else if (cardState.cardStatus === 'ready-to-activate') {
       log('Card đã có Activate — bỏ qua Install.');
       activateHref = await page.evaluate(() => {
         const card =
@@ -289,7 +397,7 @@ export async function ensureUpdraftInstalledAndActiveViaHttp(page, base, log) {
         );
         return a?.getAttribute('href') || null;
       });
-    } else if (cardState.status === 'already-active') {
+    } else if (cardState.cardStatus === 'already-active') {
       log('Card báo đã active.');
     }
 
@@ -448,24 +556,39 @@ async function ensureUpdraftInstalledAndActiveViaBrowser(page, base, log) {
         return true;
       }, action);
 
-    // --- Add Plugins: Install → chờ Activate hiện → bấm Activate (không reload) ---
-    log('Mở Add Plugins...');
+    // --- Add Plugins (Chrome): chờ lâu tìm card → Install → Activate. Không upload zip. ---
+    log('Mở Add Plugins (Chrome — chờ card tối đa ~2 phút)...');
     await page.goto(addPluginsUrl, GOTO);
     await sleep(500);
 
-    let state = await readCard();
-    if (state.status === 'no-card') {
-      throw new Error('Không thấy card UpdraftPlus trên Add Plugins.');
-    }
+    let state = await waitForAddPluginsReady(page, log, 120000);
+    let cardStatus = state.cardStatus;
 
-    if (state.status === 'need-install') {
-      log('Bấm Install Now...');
-      if (!(await clickOnCard('install'))) {
-        throw new Error('Không bấm được Install Now.');
+    if (cardStatus === 'no-card') {
+      if (state.nonce) {
+        log('Chrome: chưa thấy card — thử AJAX slug...');
+        await installUpdraftViaAdminAjax(page, log);
+        cardStatus = 'ready-to-activate';
+      } else {
+        throw new Error(
+          'Không thấy card UpdraftPlus trên Add Plugins sau khi chờ (site yếu / API wordpress.org). Hủy — thử Run lại hoặc cài tay UpdraftPlus rồi tick bỏ Backup install.'
+        );
       }
     }
 
-    if (state.status !== 'already-active') {
+    if (cardStatus === 'need-install') {
+      log('Bấm Install Now...');
+      if (!(await clickOnCard('install'))) {
+        if (state.nonce) {
+          log('⚠ Không bấm Install Now — thử AJAX slug...');
+          await installUpdraftViaAdminAjax(page, log);
+        } else {
+          throw new Error('Không bấm được Install Now và không có updates nonce.');
+        }
+      }
+    }
+
+    if (cardStatus !== 'already-active') {
       log('Chờ nút Activate hiện ra (chưa bấm sớm)...');
       const deadline = Date.now() + 180000;
       while (Date.now() < deadline) {
@@ -492,13 +615,15 @@ async function ensureUpdraftInstalledAndActiveViaBrowser(page, base, log) {
           break;
         }
         if (state.status === 'need-install') {
-          // đôi khi AJAX fail — thử Install lại
           log('Vẫn thấy Install Now — thử Install lại...');
           await clickOnCard('install');
         }
+        if (state.status === 'no-card') {
+          // Đã cài AJAX — Activate trên Plugins list
+          break;
+        }
       }
-      if (state.status !== 'ready-to-activate' && state.status !== 'already-active') {
-        // vòng lặp hết mà chưa kịp break sau activate
+      if (state.status !== 'ready-to-activate' && state.status !== 'already-active' && state.status !== 'no-card') {
         state = await readCard();
         if (state.status === 'ready-to-activate') {
           await clickOnCard('activate');
@@ -561,7 +686,6 @@ async function ensureUpdraftInstalledAndActiveViaBrowser(page, base, log) {
           : `${base}/wp-admin/${status.activateHref.replace(/^\//, '')}`;
         await page.goto(href, GOTO);
         await sleep(600);
-        // vòng tiếp sẽ xác nhận lại
         continue;
       }
 
@@ -646,7 +770,7 @@ async function ensureUpdraftInstalledAndActive(page, base, log) {
   if (isHttpStepsEnabled()) {
     try {
       await ensureUpdraftInstalledAndActiveViaHttp(page, base, log);
-      // Đồng bộ tab Chrome sang trang Updraft (Backup Now vẫn cần DOM)
+      // Đồng bộ tab Chrome sang trang Updraft
       await page.goto(`${base}/wp-admin/options-general.php?page=updraftplus`, GOTO).catch(() => {});
       await sleep(300);
       return;
@@ -659,28 +783,286 @@ async function ensureUpdraftInstalledAndActive(page, base, log) {
   await ensureUpdraftInstalledAndActiveViaBrowser(page, base, log);
 }
 
-export async function installAndBackupUpdraftPlus(page, options = {}, log) {
-  const base = originOf(page.url());
+/**
+ * Đọc ajaxurl + nonce Updraft từ trang settings (var updraft_credentialtest_nonce).
+ */
+async function readUpdraftAjaxContext(page) {
+  return page.evaluate(() => {
+    const ajaxurl = window.ajaxurl || '/wp-admin/admin-ajax.php';
+    let nonce = window.updraft_credentialtest_nonce || '';
+    if (!nonce) {
+      for (const s of Array.from(document.querySelectorAll('script'))) {
+        const t = s.textContent || '';
+        const m = t.match(
+          /updraft_credentialtest_nonce\s*=\s*['"]([a-f0-9]+)['"]/i
+        );
+        if (m) {
+          nonce = m[1];
+          break;
+        }
+      }
+    }
+    return { ajaxurl, nonce };
+  });
+}
 
-  await ensureUpdraftInstalledAndActive(page, base, log);
+/**
+ * POST admin-ajax: action=updraft_ajax&subaction=backupnow
+ * (files + DB như UI mặc định; không ép nocloud).
+ */
+async function startUpdraftBackupViaHttp(page, log) {
+  const ctx = await readUpdraftAjaxContext(page);
+  if (!ctx.nonce) {
+    throw new Error('Không lấy được updraft_credentialtest_nonce trên trang Updraft.');
+  }
+  log(`HTTP: Updraft backupnow (nonce ${ctx.nonce.slice(0, 6)}…)…`);
 
-  log('Mở UpdraftPlus → Backup Now...');
-  const opened = await openUpdraftPage(page, base, log);
-  if (!opened) {
+  const res = await page.evaluate(async (ajaxurl, nonce) => {
+    const body = new URLSearchParams();
+    body.set('action', 'updraft_ajax');
+    body.set('subaction', 'backupnow');
+    body.set('nonce', nonce);
+    // Mặc định UI: backup files + database (không set nofiles/nodb)
+    // backupnow_nocloud bỏ trống → theo cấu hình remote của site
+
+    const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), 45000) : null;
+    try {
+      const r = await fetch(ajaxurl, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          Accept: 'application/json, text/javascript, */*; q=0.01',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+        body: body.toString(),
+        signal: ctrl?.signal,
+      });
+      const text = await r.text();
+      let json = null;
+      try {
+        json = JSON.parse(text.replace(/\s+$/, ''));
+      } catch {
+        const m = text.match(/\{[\s\S]*"nonce"[\s\S]*\}/);
+        if (m) {
+          try {
+            json = JSON.parse(m[0]);
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+      return { ok: r.ok, status: r.status, text: text.slice(0, 400), json };
+    } catch (e) {
+      return { ok: false, status: 0, text: String(e?.message || e), json: null, aborted: true };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }, ctx.ajaxurl, ctx.nonce);
+
+  if (res.aborted) {
+    throw new Error(`Backupnow AJAX timeout/abort: ${res.text}`);
+  }
+
+  // Updraft close_browser_connection sớm với { nonce, m } — hoặc error
+  if (res.json?.error) {
+    throw new Error(`Backupnow: ${String(res.json.error).slice(0, 180)}`);
+  }
+  if (res.json?.fatal_error) {
     throw new Error(
-      'Không mở được trang UpdraftPlus (permission hoặc plugin chưa active). Kiểm tra Plugins → UpdraftPlus.'
+      `Backupnow fatal: ${String(res.json.fatal_error_message || res.json.fatal_error).slice(0, 180)}`
     );
   }
 
-  // Snapshot backup mới nhất HIỆN CÓ — chờ hàng mới hơn sau Backup Now
-  const beforeSnap = await snapshotNewestBackup(page);
-  log(
-    beforeSnap
-      ? `Backup sẵn có (mới nhất): ${beforeSnap.label} (ts=${beforeSnap.timestamp})`
-      : 'Chưa có backup sẵn — lần này sẽ là backup đầu.'
-  );
+  const jobNonce = res.json?.nonce || '';
+  const msg = stripHtmlText(res.json?.m || res.text || '');
+  if (!jobNonce && !/start backup|ok\.|activity|last log/i.test(msg) && res.status >= 400) {
+    throw new Error(`Backupnow HTTP ${res.status}: ${msg.slice(0, 160)}`);
+  }
 
-  // Backup Now
+  log(
+    jobNonce
+      ? `✓ Backupnow started (job ${jobNonce.slice(0, 10)}…) ${msg.slice(0, 80)}`
+      : `✓ Backupnow sent — ${msg.slice(0, 100) || `HTTP ${res.status}`}`
+  );
+  return { jobNonce, message: msg, via: 'http' };
+}
+
+/**
+ * Poll activejobs_list + DOM Existing Backups (cùng rule xong như Chrome wait).
+ */
+async function waitUntilNewBackupReadyHttp(page, base, beforeSnap, log, shouldCancel = null) {
+  log('HTTP: chờ backup MỚI hoàn tất (activejobs + Existing Backups)...');
+  const deadline = Date.now() + 360000;
+  let sawProgress = false;
+  let sawComplete = false;
+  let lastLog = 0;
+  let stableNewCount = 0;
+  let lastReload = 0;
+
+  const isFinishedLabel = (label) =>
+    label && !/not\s*finished|in\s*progress|incomplete/i.test(label);
+
+  const pollActiveJobs = async () => {
+    const ctx = await readUpdraftAjaxContext(page);
+    if (!ctx.nonce) return { html: '', last: '', error: 'no-nonce' };
+    return page.evaluate(async (ajaxurl, nonce) => {
+      const u = new URL(ajaxurl, window.location.origin);
+      u.searchParams.set('action', 'updraft_ajax');
+      u.searchParams.set('subaction', 'activejobs_list');
+      u.searchParams.set('nonce', nonce);
+      const r = await fetch(u.toString(), {
+        method: 'GET',
+        credentials: 'include',
+        headers: {
+          Accept: 'application/json, text/javascript, */*; q=0.01',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+      });
+      const text = await r.text();
+      let json = null;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        /* ignore */
+      }
+      return {
+        status: r.status,
+        html: String(json?.j || ''),
+        last: String(json?.l || ''),
+        raw: text.slice(0, 200),
+      };
+    }, ctx.ajaxurl, ctx.nonce);
+  };
+
+  while (Date.now() < deadline) {
+    if (shouldCancel?.()) throw new Error('Job đã bị hủy.');
+
+    let jobsHtml = '';
+    let lastMsg = '';
+    try {
+      const aj = await pollActiveJobs();
+      jobsHtml = aj.html || '';
+      lastMsg = stripHtmlText(aj.last || '');
+      if (jobsHtml && jobsHtml.replace(/\s/g, '').length > 0) {
+        sawProgress = true;
+      }
+      if (/backup\s*(apparently\s*)?(succeeded|complete|finished)|the backup apparently succeeded/i.test(lastMsg)) {
+        sawComplete = true;
+      }
+    } catch {
+      /* poll fail — vẫn dựa DOM */
+    }
+
+    // Định kỳ reload trang để Existing Backups cập nhật (AJAX start không gắn UI poller)
+    if (Date.now() - lastReload > 12000) {
+      await page.goto(`${base}/wp-admin/options-general.php?page=updraftplus`, GOTO).catch(() => {});
+      await sleep(400);
+      lastReload = Date.now();
+    }
+
+    const state = await page.evaluate(() => {
+      const body = document.body?.innerText || '';
+      const progress =
+        /backing up|creating backup|backup.*progress|uploaded\s*\d+%/i.test(body) ||
+        !!document.querySelector(
+          '#updraft-jobstatus:not(.updraft_finished), .updraft-progress, #updraft_activejobsrow'
+        );
+      const complete =
+        /backup\s*(apparently\s*)?(succeeded|complete|finished)/i.test(body) ||
+        /the backup apparently succeeded/i.test(body) ||
+        !!document.querySelector('.updraft_finished, #updraft-backup-complete');
+      const active =
+        /backup in progress|currently being backed|backing up (database|plugins|themes|uploads)/i.test(
+          body
+        ) || !!document.querySelector('#updraft_activejobs_table .job, #updraft_activejobsrow .job');
+      return { progress, complete, active };
+    });
+
+    if (state.progress || state.active || (jobsHtml && jobsHtml.length > 2)) sawProgress = true;
+    if (state.complete && (sawProgress || !beforeSnap)) sawComplete = true;
+
+    const newest = await snapshotNewestBackup(page);
+    const labelChanged =
+      newest && beforeSnap && newest.label && newest.label !== beforeSnap.label;
+    const finishedRow = newest && isFinishedLabel(newest.label);
+
+    const isNewer =
+      newest &&
+      (!beforeSnap ||
+        newest.timestamp > beforeSnap.timestamp ||
+        (newest.timestamp === beforeSnap.timestamp &&
+          newest.label !== beforeSnap.label &&
+          (newest.timestamp > 0 || finishedRow)) ||
+        (beforeSnap.timestamp === 0 && newest.timestamp > 0) ||
+        (beforeSnap.timestamp === 0 &&
+          newest.timestamp === 0 &&
+          labelChanged &&
+          finishedRow));
+
+    if (isNewer && finishedRow) stableNewCount += 1;
+    else stableNewCount = 0;
+
+    const jobsIdle = !jobsHtml || jobsHtml.replace(/<[^>]+>/g, '').trim().length < 3;
+
+    if (Date.now() - lastLog > 15000) {
+      log(
+        `… HTTP chờ backup: progress=${sawProgress}, jobsIdle=${jobsIdle}, complete=${sawComplete || !!state.complete}, ` +
+          `newer=${!!isNewer}, newest=${newest ? `${newest.label.slice(0, 50)} (ts=${newest.timestamp})` : 'n/a'}` +
+          (lastMsg ? ` | last=${lastMsg.slice(0, 40)}` : '')
+      );
+      lastLog = Date.now();
+    }
+
+    if (
+      isNewer &&
+      finishedRow &&
+      (sawComplete ||
+        state.complete ||
+        (sawProgress && jobsIdle && !state.active) ||
+        stableNewCount >= 2)
+    ) {
+      log(
+        `Backup mới đã xong (HTTP): ${newest.label.slice(0, 80)} (ts=${newest.timestamp}` +
+          (beforeSnap ? `, trước=${beforeSnap.timestamp}` : '') +
+          ')'
+      );
+      await sleepExact(2000);
+      return newest;
+    }
+
+    if (!beforeSnap && newest && finishedRow && (sawComplete || (state.complete && jobsIdle))) {
+      log(`Backup đầu tiên xong (HTTP): ${newest.label.slice(0, 80)}`);
+      await sleepExact(2000);
+      return newest;
+    }
+
+    if (labelChanged && finishedRow && (sawComplete || state.complete || (jobsIdle && !state.active))) {
+      log(`Backup mới (đổi label, HTTP): ${newest.label.slice(0, 80)}`);
+      await sleepExact(2000);
+      return newest;
+    }
+
+    await sleepExact(1500);
+  }
+
+  const newest = await snapshotNewestBackup(page);
+  if (
+    newest &&
+    beforeSnap &&
+    (newest.timestamp > beforeSnap.timestamp ||
+      (newest.label !== beforeSnap.label && isFinishedLabel(newest.label)))
+  ) {
+    log(`Hết thời gian chờ nhưng đã có backup mới hơn — tiếp tục (${newest.label.slice(0, 60)}).`);
+    return newest;
+  }
+
+  throw new Error('Timeout: backup mới chưa xong / chưa thấy hàng backup mới hơn bản cũ (HTTP).');
+}
+
+async function runBackupNowViaBrowser(page, base, beforeSnap, log, shouldCancel) {
+  log('Backup Now (Chrome click)...');
   const clickedBackup = await page.evaluate(() => {
     const btn =
       document.querySelector('#updraft-backupnow-button') ||
@@ -706,7 +1088,6 @@ export async function installAndBackupUpdraftPlus(page, options = {}, log) {
   }
   await sleep(200);
 
-  // Confirm modal
   await page.evaluate(() => {
     const modalBtns = Array.from(
       document.querySelectorAll('.updraft_backup_btn, button, input[type="button"], a.button')
@@ -723,8 +1104,58 @@ export async function installAndBackupUpdraftPlus(page, options = {}, log) {
     (inModal || confirm)?.click();
   });
 
-  // Chờ backup MỚI trên site xong — không tải file về máy (dễ timeout/lag)
-  await waitUntilNewBackupReady(page, base, beforeSnap, log, options.shouldCancel);
+  await waitUntilNewBackupReady(page, base, beforeSnap, log, shouldCancel);
+}
+
+export async function installAndBackupUpdraftPlus(page, options = {}, log) {
+  const base = originOf(page.url());
+
+  await ensureUpdraftInstalledAndActive(page, base, log);
+
+  log('Mở UpdraftPlus → Backup Now...');
+  const opened = await openUpdraftPage(page, base, log);
+  if (!opened) {
+    throw new Error(
+      'Không mở được trang UpdraftPlus (permission hoặc plugin chưa active). Kiểm tra Plugins → UpdraftPlus.'
+    );
+  }
+
+  const beforeSnap = await snapshotNewestBackup(page);
+  log(
+    beforeSnap
+      ? `Backup sẵn có (mới nhất): ${beforeSnap.label} (ts=${beforeSnap.timestamp})`
+      : 'Chưa có backup sẵn — lần này sẽ là backup đầu.'
+  );
+
+  let startedViaHttp = false;
+  if (isHttpStepsEnabled()) {
+    try {
+      await startUpdraftBackupViaHttp(page, log);
+      startedViaHttp = true;
+      await waitUntilNewBackupReadyHttp(page, base, beforeSnap, log, options.shouldCancel);
+      log('✓ Backup trên site xong — không tải file về máy.');
+      return;
+    } catch (err) {
+      log(
+        `⚠ Updraft backup HTTP fail — fallback Chrome: ${String(err?.message || err).slice(0, 160)}`
+      );
+      if (startedViaHttp) {
+        // Đã start AJAX — không bấm Backup Now lần 2; chỉ chờ DOM
+        log('… đã start HTTP — chờ tiếp bằng DOM (không click Backup lại)...');
+        try {
+          await waitUntilNewBackupReady(page, base, beforeSnap, log, options.shouldCancel);
+          log('✓ Backup trên site xong — không tải file về máy.');
+          return;
+        } catch (err2) {
+          throw new Error(
+            `Backup HTTP chờ fail: ${err2?.message || err2} (start: ${err?.message || err})`
+          );
+        }
+      }
+    }
+  }
+
+  await runBackupNowViaBrowser(page, base, beforeSnap, log, options.shouldCancel);
   log('✓ Backup trên site xong — không tải file về máy.');
 }
 

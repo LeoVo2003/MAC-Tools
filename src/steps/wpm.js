@@ -574,8 +574,108 @@ export async function focusOnlyWebCard(page, webId, log = () => {}) {
   log(`Chỉ thao tác trên card ${webId} — không mở web khác.`);
 }
 
+/** Host so sánh không phân biệt www / trailing. */
+function hostOf(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./i, '').toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function isWpAdminLikeUrl(url) {
+  const u = String(url || '');
+  return /\/wp-admin|\/wp-login\.php|\/mac-login/i.test(u);
+}
+
 /**
- * Bấm Quick Login trên đúng card Main Web (không lấy subdomain).
+ * Chờ tab/cửa sổ WP sau Quick Login — phải khớp host target (project 2 web dễ nhầm tab).
+ * @returns {Promise<import('puppeteer').Page>}
+ */
+async function waitForWpAfterQuickLogin(browser, wpmPage, pagesBefore, targetUrl, log) {
+  const wantHost = hostOf(targetUrl);
+  const deadline = Date.now() + 45000;
+  let lastSeen = '';
+
+  const scorePage = async (p) => {
+    let u = '';
+    try {
+      u = p.url() || '';
+    } catch {
+      return { page: p, score: -1, url: '' };
+    }
+    if (!u || u === 'about:blank' || u.startsWith('chrome')) {
+      return { page: p, score: 0, url: u };
+    }
+    const h = hostOf(u);
+    let score = 0;
+    if (wantHost && h === wantHost) score += 50;
+    if (isWpAdminLikeUrl(u)) score += 40;
+    if (wantHost && h && h !== wantHost && !/wpm\.macusaone\.com/i.test(u)) score -= 30;
+    if (/wpm\.macusaone\.com/i.test(u)) score -= 50;
+    return { page: p, score, url: u };
+  };
+
+  while (Date.now() < deadline) {
+    const pages = await browser.pages().catch(() => []);
+    const newer = pages.filter((p) => !pagesBefore.includes(p));
+    const candidates = newer.length ? newer : pages;
+
+    let best = null;
+    for (const p of candidates) {
+      const s = await scorePage(p);
+      if (s.url) lastSeen = s.url;
+      if (!best || s.score > best.score) best = s;
+    }
+
+    // Same-tab: WPM page đã navigate sang WP target
+    const wpmScore = await scorePage(wpmPage);
+    if (wpmScore.url) lastSeen = wpmScore.url;
+    if (!best || wpmScore.score > best.score) best = wpmScore;
+
+    if (
+      best &&
+      best.score >= 80 &&
+      wantHost &&
+      hostOf(best.url) === wantHost &&
+      isWpAdminLikeUrl(best.url)
+    ) {
+      return best.page;
+    }
+
+    // Host khớp + đã vào site (chưa chắc /wp-admin — Quick Login đôi khi về homepage rồi redirect)
+    if (best && best.score >= 50 && wantHost && hostOf(best.url) === wantHost) {
+      try {
+        await best.page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 8000 }).catch(() => {});
+      } catch {
+        /* ignore */
+      }
+      const u2 = best.page.url();
+      lastSeen = u2;
+      if (isWpAdminLikeUrl(u2) || hostOf(u2) === wantHost) {
+        // Ép vào wp-admin nếu đang ở front-end cùng host
+        if (!isWpAdminLikeUrl(u2) && hostOf(u2) === wantHost) {
+          log(`… Quick Login vào ${wantHost} nhưng chưa wp-admin — mở /wp-admin...`);
+          await best.page.goto(`https://${wantHost}/wp-admin/`, GOTO).catch(() => {});
+          await sleep(500);
+        }
+        const u3 = best.page.url();
+        if (isWpAdminLikeUrl(u3) && hostOf(u3) === wantHost) return best.page;
+      }
+    }
+
+    await sleep(200);
+  }
+
+  throw new Error(
+    `Quick Login chưa mở được WordPress của ${targetUrl} trong 45s ` +
+      `(vẫn thấy: ${lastSeen || wpmPage.url() || '?'}). ` +
+      'Thường gặp khi project có 2 web / lần Run trước còn tab — thử Run lại hoặc kiểm tra nút Quick Login đúng card.'
+  );
+}
+
+/**
+ * Bấm Quick Login trên đúng card target (không fallback card khác).
  * @returns {Promise<boolean>}
  */
 export async function clickMainWebQuickLogin(page, webId, log = () => {}) {
@@ -612,7 +712,7 @@ export async function clickMainWebQuickLogin(page, webId, log = () => {}) {
     return true;
   }, webId);
 
-  if (clicked) log(`Đã bấm Quick Login trên Main Web (${webId}).`);
+  if (clicked) log(`Đã bấm Quick Login trên card ${webId}.`);
   return clicked;
 }
 
@@ -718,32 +818,29 @@ export async function openProjectAndQuickLogin(browser, page, projectUrl, log, t
     );
   }
 
-  let wpPage = page;
-  const deadline = Date.now() + 15000;
-  while (Date.now() < deadline) {
-    const pages = await browser.pages();
-    const newer = pages.filter((p) => !pagesBefore.includes(p));
-    if (newer.length) {
-      wpPage = newer[newer.length - 1];
-      break;
-    }
-    const u = page.url();
-    if (u.includes('wp-admin') || u.includes('wp-login')) {
-      wpPage = page;
-      break;
-    }
-    await sleep(150);
-  }
+  const wpPage = await waitForWpAfterQuickLogin(
+    browser,
+    page,
+    pagesBefore,
+    targetWeb.url,
+    log
+  );
 
   await wpPage.bringToFront().catch(() => {});
-  await wpPage.waitForNavigation(GOTO).catch(() => {});
-  await sleep(500);
+  await sleep(400);
 
   if (wpPage.url().includes('wp-login')) {
     await sleep(800);
   }
 
-  log(`Đã vào WordPress (${targetWeb.url}): ${wpPage.url()}`);
+  const finalUrl = wpPage.url();
+  if (!isWpAdminLikeUrl(finalUrl) || hostOf(finalUrl) !== hostOf(targetWeb.url)) {
+    throw new Error(
+      `Quick Login xong nhưng không đúng WP target. Mong đợi ${targetWeb.url}/wp-admin — đang ở: ${finalUrl}`
+    );
+  }
+
+  log(`Đã vào WordPress (${targetWeb.url}): ${finalUrl}`);
   return {
     wpPage,
     projectName,
