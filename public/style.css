@@ -1193,6 +1193,19 @@ kbd {
   font-family: var(--mono);
 }
 
+.data-table .col-check {
+  width: 2.25rem;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.data-table .col-check input {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--orange);
+  cursor: pointer;
+}
+
 .data-table .col-time {
   width: 7.2rem;
   white-space: nowrap;

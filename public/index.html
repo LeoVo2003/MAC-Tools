@@ -223,7 +223,6 @@
           <div class="stats-row" id="statsRow">
             <span class="stat">Total: <strong id="statTotal">0</strong></span>
             <span class="stat ok">OK: <strong id="statOk">0</strong></span>
-            <span class="stat err">Error: <strong id="statErr">0</strong></span>
             <span class="stat">Avg time: <strong id="statAvg">—</strong></span>
           </div>
           <div class="filters-row" id="reportFilters">
@@ -242,8 +241,8 @@
             <label>
               <span>Status</span>
               <select id="filterStatus">
+                <option value="success" selected>Chỉ OK (mặc định)</option>
                 <option value="">Tất cả</option>
-                <option value="success">success</option>
                 <option value="error">error</option>
                 <option value="cancelled">cancelled</option>
                 <option value="running">running</option>
@@ -253,12 +252,26 @@
           <div class="steps-toolbar">
             <button type="button" id="refreshReportsBtn" class="secondary tiny">Refresh</button>
             <button type="button" id="exportCsvBtn" class="secondary tiny">Export CSV</button>
+            <button type="button" id="deleteSelectedRunsBtn" class="danger tiny" disabled title="Xóa các dòng đã chọn">
+              Xóa đã chọn
+            </button>
+            <button
+              type="button"
+              id="purgeFailedRunsBtn"
+              class="secondary tiny"
+              title="Xóa khỏi lịch sử mọi bản ghi error + cancelled (không hiện ở mặc định)"
+            >
+              Dọn lỗi &amp; hủy
+            </button>
             <button type="button" id="clearReportsBtn" class="danger tiny" title="Xóa toàn bộ lịch sử báo cáo">Clear báo cáo</button>
           </div>
           <div class="table-wrap">
             <table class="data-table" id="runsTable">
               <thead>
                 <tr>
+                  <th class="col-check">
+                    <input type="checkbox" id="runsSelectAll" title="Chọn tất cả trang này" aria-label="Chọn tất cả" />
+                  </th>
                   <th>Thời gian</th>
                   <th>User</th>
                   <th>Website</th>

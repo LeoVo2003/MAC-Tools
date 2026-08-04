@@ -4,8 +4,357 @@ import {
   sleep,
   sleepExact,
 } from '../utils.js';
+import { isHttpStepsEnabled, stripHtmlText } from '../http/wpSession.js';
 
 const GOTO = { waitUntil: 'domcontentloaded', timeout: 60000 };
+const UPDRAFT_SLUG = 'updraftplus';
+const UPDRAFT_FILE = 'updraftplus/updraftplus.php';
+
+function absWpAdminUrl(base, href) {
+  if (!href) return null;
+  const h = String(href).replace(/&amp;/g, '&').trim();
+  if (/^https?:\/\//i.test(h)) return h;
+  if (h.startsWith('//')) return `https:${h}`;
+  const path = h.replace(/^\//, '').replace(/^wp-admin\//i, '');
+  return `${base}/wp-admin/${path}`;
+}
+
+function updraftSettingsOk(html) {
+  const t = stripHtmlText(html);
+  if (/not allowed to access this page|không được phép truy cập/i.test(t)) return false;
+  return /backup now|updraftplus|existing backups/i.test(t);
+}
+
+/** Parse link Install Now / Activate Updraft từ HTML admin (tránh nhầm plugin Exclude…). */
+function parseUpdraftActionHref(html, kind) {
+  const raw = String(html || '');
+  if (kind === 'install') {
+    const re =
+      /href=["']([^"']*update\.php\?[^"']*action=install-plugin[^"']*plugin=updraftplus[^"']*)["']/gi;
+    let m;
+    while ((m = re.exec(raw))) {
+      const href = m[1].replace(/&amp;/g, '&');
+      if (/exclude|thumbnail/i.test(href)) continue;
+      return href;
+    }
+    // data-slug="updraftplus" gần install-now
+    const card = raw.match(
+      /data-slug=["']updraftplus["'][\s\S]{0,400}?href=["']([^"']*install-plugin[^"']*)["']/i
+    );
+    if (card?.[1]) return card[1].replace(/&amp;/g, '&');
+    return null;
+  }
+
+  // activate
+  const re =
+    /href=["']([^"']*action=activate[^"']*plugin=updraftplus(?:%2F|\/)updraftplus\.php[^"']*)["']/gi;
+  let m;
+  while ((m = re.exec(raw))) {
+    const href = m[1].replace(/&amp;/g, '&');
+    if (/exclude/i.test(href)) continue;
+    return href;
+  }
+  return null;
+}
+
+function pluginRowLooksActive(html) {
+  // Có deactivate cho đúng file UpdraftPlus
+  return /action=deactivate[^"']*plugin=updraftplus(?:%2F|\/)updraftplus\.php/i.test(
+    String(html || '')
+  );
+}
+
+/**
+ * fetch trong Chrome (credentials include) — tránh Node fetch bị WAF/404 giả
+ * (giống createUser HTTP).
+ */
+async function wpFetchInPage(page, url, { method = 'GET', body = null, referer = '' } = {}) {
+  return page.evaluate(
+    async (u, m, b, ref) => {
+      const headers = {
+        Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
+      };
+      if (ref) headers.Referer = ref;
+      if (b) headers['Content-Type'] = 'application/x-www-form-urlencoded';
+      const res = await fetch(u, {
+        method: m,
+        credentials: 'include',
+        redirect: 'follow',
+        headers,
+        body: m === 'GET' || m === 'HEAD' ? undefined : b,
+      });
+      const text = await res.text();
+      return { ok: res.ok, status: res.status, url: res.url, text };
+    },
+    url,
+    method,
+    body,
+    referer || `${new URL(url).origin}/wp-admin/`
+  );
+}
+
+function httpFailDetail(label, res) {
+  const snip = stripHtmlText(res?.text || '').slice(0, 120);
+  return `${label} HTTP ${res?.status || '?'} url=${String(res?.url || '').slice(0, 80)} ${snip}`;
+}
+
+/**
+ * HTTP: check settings → install (wordpress.org) → activate.
+ * Dùng fetch trong tab WP (không Node wpFetch) — site macmar hay 404 Node.
+ */
+export async function ensureUpdraftInstalledAndActiveViaHttp(page, base, log) {
+  // Đảm bảo đang ở origin WP (cookie session)
+  if (!String(page.url() || '').includes(base.replace(/^https?:\/\//, ''))) {
+    await page.goto(`${base}/wp-admin/`, GOTO).catch(() => {});
+    await sleep(200);
+  }
+
+  const adminRef = `${base}/wp-admin/`;
+
+  log('HTTP: kiểm tra trang UpdraftPlus (in-page)...');
+  let settings = await wpFetchInPage(
+    page,
+    `${base}/wp-admin/options-general.php?page=updraftplus`,
+    { referer: adminRef }
+  );
+  if (updraftSettingsOk(settings.text)) {
+    log('UpdraftPlus đã active — vào settings được (HTTP).');
+    return { via: 'http', skipped: true };
+  }
+
+  log('HTTP: đọc Plugins list (in-page)...');
+  let plugins = await wpFetchInPage(page, `${base}/wp-admin/plugins.php`, {
+    referer: adminRef,
+  });
+  // Một số host/WAF trả 404 cho Node; in-page vẫn có thể 404 tạm — không throw ngay
+  if (!plugins.ok && plugins.status >= 400) {
+    log(`⚠ plugins.php ${plugins.status} — bỏ qua list, thử Add Plugins...`);
+    plugins = { ok: false, status: plugins.status, url: plugins.url, text: '' };
+  }
+
+  if (pluginRowLooksActive(plugins.text)) {
+    log('Plugins list: UpdraftPlus đã Active — thử settings lại...');
+    settings = await wpFetchInPage(
+      page,
+      `${base}/wp-admin/options-general.php?page=updraftplus`,
+      { referer: adminRef }
+    );
+    if (updraftSettingsOk(settings.text)) {
+      log('✓ UpdraftPlus sẵn sàng (HTTP).');
+      return { via: 'http', skipped: true };
+    }
+  }
+
+  let activateHref = parseUpdraftActionHref(plugins.text, 'activate');
+  const alreadyOnDisk = /updraftplus\/updraftplus\.php|plugin=updraftplus/i.test(
+    plugins.text || ''
+  );
+
+  if (!activateHref && !alreadyOnDisk) {
+    // GET update.php?_wpnonce=… hay bị "link expired" (403).
+    // Đúng như nút Install Now: POST admin-ajax action=install-plugin + _ajax_nonce=updates.
+    const searchUrl = `${base}/wp-admin/plugin-install.php?s=${UPDRAFT_SLUG}&tab=search&type=term`;
+    log('HTTP: mở Add Plugins (lấy updates nonce)...');
+    await page.goto(searchUrl, GOTO);
+    await sleep(400);
+
+    const cardState = await page.evaluate(() => {
+      const card =
+        document.querySelector('.plugin-card-updraftplus') ||
+        Array.from(document.querySelectorAll('.plugin-card')).find((c) => {
+          const name = (c.querySelector('.name, h3')?.innerText || '').toLowerCase();
+          return name.includes('updraftplus') && !name.includes('exclude');
+        });
+      if (!card) return { status: 'no-card' };
+      const t = (card.innerText || '').toLowerCase();
+      const hasActivate = Array.from(card.querySelectorAll('a, button')).some((el) =>
+        /^activate$/i.test((el.innerText || el.textContent || '').trim())
+      );
+      const hasInstall = Array.from(card.querySelectorAll('a, button')).some((el) =>
+        /install now/i.test((el.innerText || el.textContent || '').trim())
+      );
+      if (hasActivate) return { status: 'ready-to-activate' };
+      if (hasInstall) return { status: 'need-install' };
+      if (/active|activated/i.test(t)) return { status: 'already-active' };
+      return { status: 'waiting' };
+    });
+
+    if (cardState.status === 'no-card') {
+      throw new Error('Không thấy card UpdraftPlus trên Add Plugins (HTTP).');
+    }
+
+    if (cardState.status === 'need-install') {
+      log('HTTP: POST admin-ajax install-plugin (updraftplus)...');
+      const installRes = await page.evaluate(async (slug) => {
+        const ajaxurl = window.ajaxurl || '/wp-admin/admin-ajax.php';
+        let nonce =
+          window._wpUpdatesSettings?.ajax_nonce ||
+          window.wp?.updates?.ajaxNonce ||
+          '';
+        if (!nonce) {
+          for (const s of Array.from(document.querySelectorAll('script'))) {
+            const t = s.textContent || '';
+            const m =
+              t.match(/ajax_nonce["']\s*:\s*["']([a-f0-9]+)["']/i) ||
+              t.match(/["']_ajax_nonce["']\s*:\s*["']([a-f0-9]+)["']/i);
+            if (m) {
+              nonce = m[1];
+              break;
+            }
+          }
+        }
+        if (!nonce) return { ok: false, error: 'no-updates-nonce' };
+
+        const body = new URLSearchParams();
+        body.set('action', 'install-plugin');
+        body.set('_ajax_nonce', nonce);
+        body.set('slug', slug);
+
+        const res = await fetch(ajaxurl, {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            Accept: 'application/json, text/javascript, */*; q=0.01',
+            'X-Requested-With': 'XMLHttpRequest',
+          },
+          body: body.toString(),
+        });
+        const text = await res.text();
+        let json = null;
+        try {
+          json = JSON.parse(text);
+        } catch {
+          /* ignore */
+        }
+        return {
+          ok: res.ok,
+          status: res.status,
+          text: text.slice(0, 500),
+          json,
+          nonceOk: Boolean(nonce),
+        };
+      }, UPDRAFT_SLUG);
+
+      if (installRes.error === 'no-updates-nonce') {
+        throw new Error('Không lấy được _wpUpdatesSettings.ajax_nonce trên Add Plugins.');
+      }
+
+      const data = installRes.json?.data || {};
+      const success =
+        installRes.json?.success === true ||
+        data.pluginName ||
+        data.activateUrl ||
+        /folder_exists|already.?installed/i.test(JSON.stringify(installRes.json || {}));
+
+      // folder_exists = đã có trên disk → sang activate
+      const folderExists =
+        installRes.json?.success === false &&
+        /folder_exists|already.?installed|destination folder already exists/i.test(
+          JSON.stringify(installRes.json || installRes.text || '')
+        );
+
+      if (!success && !folderExists) {
+        throw new Error(
+          `Install AJAX fail (${installRes.status}): ${String(
+            installRes.json?.data?.errorMessage ||
+              installRes.json?.data?.errorCode ||
+              installRes.text ||
+              ''
+          ).slice(0, 180)}`
+        );
+      }
+
+      if (folderExists) {
+        log('⏭ Plugin folder đã có — sang Activate.');
+      } else {
+        log('✓ Install UpdraftPlus OK (admin-ajax).');
+      }
+
+      if (data.activateUrl) {
+        activateHref = data.activateUrl;
+      }
+      await sleepExact(600);
+    } else if (cardState.status === 'ready-to-activate') {
+      log('Card đã có Activate — bỏ qua Install.');
+      activateHref = await page.evaluate(() => {
+        const card =
+          document.querySelector('.plugin-card-updraftplus') ||
+          Array.from(document.querySelectorAll('.plugin-card')).find((c) => {
+            const name = (c.querySelector('.name, h3')?.innerText || '').toLowerCase();
+            return name.includes('updraftplus') && !name.includes('exclude');
+          });
+        const a = Array.from(card?.querySelectorAll('a') || []).find((el) =>
+          /action=activate/i.test(el.getAttribute('href') || '')
+        );
+        return a?.getAttribute('href') || null;
+      });
+    } else if (cardState.status === 'already-active') {
+      log('Card báo đã active.');
+    }
+
+    plugins = await wpFetchInPage(page, `${base}/wp-admin/plugins.php`, {
+      referer: adminRef,
+    });
+    if (!plugins.ok && plugins.status >= 400) {
+      plugins = { ok: false, status: plugins.status, url: plugins.url, text: plugins.text || '' };
+    }
+    activateHref = activateHref || parseUpdraftActionHref(plugins.text, 'activate');
+
+    if (!activateHref && /updraftplus\/updraftplus\.php/i.test(plugins.text)) {
+      const nonce =
+        plugins.text.match(
+          /action=activate[^"']*plugin=updraftplus(?:%2F|\/)updraftplus\.php[^"']*_wpnonce=([a-f0-9]+)/i
+        ) ||
+        plugins.text.match(
+          /_wpnonce=([a-f0-9]+)[^"']*action=activate[^"']*plugin=updraftplus/i
+        );
+      if (nonce?.[1]) {
+        activateHref = `plugins.php?action=activate&plugin=${encodeURIComponent(UPDRAFT_FILE)}&_wpnonce=${nonce[1]}`;
+      }
+    }
+  }
+
+  if (!pluginRowLooksActive(plugins.text)) {
+    if (!activateHref) {
+      throw new Error('Không tìm thấy link Activate UpdraftPlus (HTTP).');
+    }
+    const activateUrl = absWpAdminUrl(base, activateHref);
+    // Activate: dùng navigation (nonce cookie ổn định hơn fetch)
+    log('HTTP: Activate (goto) …updraftplus/updraftplus.php…');
+    await page.goto(activateUrl, GOTO);
+    await sleepExact(600);
+    plugins = await wpFetchInPage(page, `${base}/wp-admin/plugins.php`, {
+      referer: adminRef,
+    });
+    if (!pluginRowLooksActive(plugins.text)) {
+      // Fallback: fetch nếu goto chưa thấy deactivate
+      const actRes = await wpFetchInPage(page, activateUrl, {
+        referer: `${base}/wp-admin/plugins.php`,
+      });
+      if (!pluginRowLooksActive(actRes.text) && !pluginRowLooksActive(plugins.text)) {
+        throw new Error(
+          httpFailDetail('Activate', actRes) || 'Activate xong vẫn chưa thấy Deactivate trên Plugins.'
+        );
+      }
+    }
+    log('✓ Activate UpdraftPlus OK (HTTP).');
+    await sleepExact(400);
+  } else {
+    log('⏭ UpdraftPlus đã Active — bỏ qua Activate.');
+  }
+
+  settings = await wpFetchInPage(
+    page,
+    `${base}/wp-admin/options-general.php?page=updraftplus`,
+    { referer: adminRef }
+  );
+  if (!updraftSettingsOk(settings.text)) {
+    throw new Error('HTTP: đã cài/activate nhưng không mở được trang UpdraftPlus settings.');
+  }
+  log('UpdraftPlus sẵn sàng (HTTP).');
+  return { via: 'http', skipped: false };
+}
 
 async function assertNotForbidden(page) {
   const denied = await page.evaluate(() => {
@@ -19,9 +368,9 @@ async function assertNotForbidden(page) {
   }
 }
 
-async function ensureUpdraftInstalledAndActive(page, base, log) {
+async function ensureUpdraftInstalledAndActiveViaBrowser(page, base, log) {
   // Đã active? Thử mở thẳng trang Updraft
-  log('Kiểm tra UpdraftPlus đã sẵn sàng chưa...');
+  log('Kiểm tra UpdraftPlus đã sẵn sàng chưa (Chrome)...');
   await page.goto(`${base}/wp-admin/options-general.php?page=updraftplus`, GOTO);
   await sleep(300);
   const alreadyOk = await page.evaluate(() => {
@@ -291,6 +640,23 @@ async function openUpdraftPage(page, base, log) {
     );
   }
   return false;
+}
+
+async function ensureUpdraftInstalledAndActive(page, base, log) {
+  if (isHttpStepsEnabled()) {
+    try {
+      await ensureUpdraftInstalledAndActiveViaHttp(page, base, log);
+      // Đồng bộ tab Chrome sang trang Updraft (Backup Now vẫn cần DOM)
+      await page.goto(`${base}/wp-admin/options-general.php?page=updraftplus`, GOTO).catch(() => {});
+      await sleep(300);
+      return;
+    } catch (err) {
+      log(
+        `⚠ Updraft install HTTP fail — fallback Chrome: ${String(err?.message || err).slice(0, 160)}`
+      );
+    }
+  }
+  await ensureUpdraftInstalledAndActiveViaBrowser(page, base, log);
 }
 
 export async function installAndBackupUpdraftPlus(page, options = {}, log) {

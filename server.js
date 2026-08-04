@@ -12,7 +12,16 @@ import {
   sanitizeCustomerPassword,
   DOWNLOADS_DIR,
 } from './src/utils.js';
-import { startRun, finishRun, listRuns, runsStats, runsToCsv, clearRuns } from './src/tracking.js';
+import {
+  startRun,
+  finishRun,
+  listRuns,
+  runsStats,
+  runsToCsv,
+  clearRuns,
+  deleteRunsByIds,
+  deleteRunsByStatuses,
+} from './src/tracking.js';
 import {
   ensureKnownUsers,
   loginWithWpm,
@@ -504,6 +513,23 @@ export function createApp() {
     try {
       const result = clearRuns();
       res.json({ ok: true, ...result });
+    } catch (err) {
+      res.status(500).json({ error: err?.message || String(err) });
+    }
+  });
+
+  /** Xóa từng bản ghi: { ids: string[] } hoặc dọn status: { statuses: ['error','cancelled'] } */
+  app.post('/api/runs/delete', requireAuth, requireAdmin, (req, res) => {
+    try {
+      const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+      const statuses = Array.isArray(req.body?.statuses) ? req.body.statuses : [];
+      if (ids.length) {
+        return res.json({ ok: true, ...deleteRunsByIds(ids) });
+      }
+      if (statuses.length) {
+        return res.json({ ok: true, ...deleteRunsByStatuses(statuses) });
+      }
+      return res.status(400).json({ error: 'Thiếu ids hoặc statuses.' });
     } catch (err) {
       res.status(500).json({ error: err?.message || String(err) });
     }

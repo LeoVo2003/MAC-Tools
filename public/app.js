@@ -958,17 +958,39 @@ function reportQuery() {
   return p;
 }
 
+function selectedRunIds() {
+  return [...document.querySelectorAll('#runsTable tbody .run-check:checked')]
+    .map((el) => el.value)
+    .filter(Boolean);
+}
+
+function syncRunsDeleteBtn() {
+  const btn = document.getElementById('deleteSelectedRunsBtn');
+  const all = document.getElementById('runsSelectAll');
+  const boxes = [...document.querySelectorAll('#runsTable tbody .run-check')];
+  const n = selectedRunIds().length;
+  if (btn) btn.disabled = n === 0;
+  if (all) {
+    all.checked = boxes.length > 0 && boxes.every((b) => b.checked);
+    all.indeterminate = n > 0 && n < boxes.length;
+  }
+}
+
 async function loadReports() {
   const res = await fetch(`/api/runs?${reportQuery()}`);
   if (!res.ok) return;
   const data = await res.json();
   document.getElementById('statTotal').textContent = data.stats?.total ?? 0;
   document.getElementById('statOk').textContent = data.stats?.success ?? 0;
-  document.getElementById('statErr').textContent = data.stats?.error ?? 0;
   const avgEl = document.getElementById('statAvg');
   if (avgEl) avgEl.textContent = formatDuration(data.stats?.avgDurationMs);
   const tbody = document.querySelector('#runsTable tbody');
   tbody.innerHTML = '';
+  const selectAll = document.getElementById('runsSelectAll');
+  if (selectAll) {
+    selectAll.checked = false;
+    selectAll.indeterminate = false;
+  }
   for (const r of data.runs || []) {
     const tr = document.createElement('tr');
     const noteRaw =
@@ -991,6 +1013,16 @@ async function loadReports() {
           : r.status === 'cancelled'
             ? 'cancelled'
             : 'running';
+
+    const tdCheck = document.createElement('td');
+    tdCheck.className = 'col-check';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.className = 'run-check';
+    cb.value = r.id || '';
+    cb.disabled = !r.id;
+    cb.addEventListener('change', syncRunsDeleteBtn);
+    tdCheck.appendChild(cb);
 
     const tdTime = document.createElement('td');
     tdTime.className = 'col-time';
@@ -1025,9 +1057,10 @@ async function loadReports() {
     noteSpan.textContent = note;
     tdNote.appendChild(noteSpan);
 
-    tr.append(tdTime, tdUser, tdUrl, tdDur, tdStatus, tdNote);
+    tr.append(tdCheck, tdTime, tdUser, tdUrl, tdDur, tdStatus, tdNote);
     tbody.appendChild(tr);
   }
+  syncRunsDeleteBtn();
 }
 
 function escapeHtml(s) {
@@ -1062,6 +1095,46 @@ async function loadHealth() {
 document.getElementById('refreshReportsBtn')?.addEventListener('click', loadReports);
 document.getElementById('exportCsvBtn')?.addEventListener('click', () => {
   window.location.href = `/api/runs.csv?${reportQuery()}`;
+});
+document.getElementById('runsSelectAll')?.addEventListener('change', (e) => {
+  const on = Boolean(e.target?.checked);
+  document.querySelectorAll('#runsTable tbody .run-check').forEach((cb) => {
+    if (!cb.disabled) cb.checked = on;
+  });
+  syncRunsDeleteBtn();
+});
+document.getElementById('deleteSelectedRunsBtn')?.addEventListener('click', async () => {
+  const ids = selectedRunIds();
+  if (!ids.length) return;
+  if (!confirm(`Xóa ${ids.length} bản ghi đã chọn? Không hoàn tác được.`)) return;
+  try {
+    const res = await fetch('/api/runs/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || res.statusText);
+    await loadReports();
+  } catch (err) {
+    alert(err?.message || 'Xóa bản ghi thất bại.');
+  }
+});
+document.getElementById('purgeFailedRunsBtn')?.addEventListener('click', async () => {
+  if (!confirm('Xóa khỏi lịch sử mọi bản ghi error + cancelled? Không hoàn tác được.')) return;
+  try {
+    const res = await fetch('/api/runs/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ statuses: ['error', 'cancelled'] }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || res.statusText);
+    await loadReports();
+    alert(`Đã dọn ${data.deleted ?? 0} bản ghi lỗi/hủy.`);
+  } catch (err) {
+    alert(err?.message || 'Dọn lỗi/hủy thất bại.');
+  }
 });
 document.getElementById('clearReportsBtn')?.addEventListener('click', async () => {
   if (!confirm('Xóa toàn bộ lịch sử báo cáo? Không hoàn tác được.')) return;

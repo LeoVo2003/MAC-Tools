@@ -171,3 +171,43 @@ export function clearRuns() {
   return { cleared: before };
 }
 
+/**
+ * Xóa theo id (admin).
+ * @param {string[]} ids
+ */
+export function deleteRunsByIds(ids) {
+  ensureDataDir();
+  const want = new Set((ids || []).map((id) => String(id || '').trim()).filter(Boolean));
+  if (!want.size) return { deleted: 0 };
+  const rows = readAllRuns();
+  const kept = rows.filter((r) => !want.has(String(r.id || '')));
+  const deleted = rows.length - kept.length;
+  fs.writeFileSync(
+    RUNS_FILE,
+    kept.length ? `${kept.map((r) => JSON.stringify(r)).join('\n')}\n` : '',
+    'utf-8'
+  );
+  return { deleted };
+}
+
+/**
+ * Xóa theo status (vd error, cancelled) — dọn báo cáo.
+ * @param {string[]} statuses
+ */
+export function deleteRunsByStatuses(statuses) {
+  ensureDataDir();
+  const set = new Set(
+    (statuses || []).map((s) => String(s || '').trim().toLowerCase()).filter(Boolean)
+  );
+  if (!set.size) return { deleted: 0 };
+  const rows = readAllRuns();
+  const kept = rows.filter((r) => !set.has(String(r.status || '').toLowerCase()));
+  const deleted = rows.length - kept.length;
+  fs.writeFileSync(
+    RUNS_FILE,
+    kept.length ? `${kept.map((r) => JSON.stringify(r)).join('\n')}\n` : '',
+    'utf-8'
+  );
+  return { deleted };
+}
+
