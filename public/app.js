@@ -813,6 +813,20 @@ resultPanel?.addEventListener('click', async (e) => {
 });
 
 /* Tabs */
+function isRunTabActive() {
+  const run = document.getElementById('tab-run');
+  return Boolean(run && !run.hidden);
+}
+
+/** live-layout khóa scroll body — chỉ khi đang xem tab Job + Live mở. Báo cáo phải scroll được. */
+function syncLiveLayoutClass() {
+  if (liveChromeOpen && isRunTabActive()) {
+    document.body.classList.add('live-layout');
+  } else {
+    document.body.classList.remove('live-layout');
+  }
+}
+
 document.querySelectorAll('.tab').forEach((btn) => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.tab').forEach((b) => b.classList.remove('active'));
@@ -821,6 +835,7 @@ document.querySelectorAll('.tab').forEach((btn) => {
     document.getElementById('tab-run').hidden = tab !== 'run';
     const reports = document.getElementById('tab-reports');
     if (reports) reports.hidden = tab !== 'reports';
+    syncLiveLayoutClass();
     if (tab === 'reports') {
       loadReports();
       loadHealth();
@@ -1181,7 +1196,7 @@ async function setupLiveChrome() {
 
   const setUiClosed = () => {
     liveChromeOpen = false;
-    document.body.classList.remove('live-layout');
+    syncLiveLayoutClass();
     if (frame) {
       frame.src = 'about:blank';
       frame.hidden = true;
@@ -1202,7 +1217,7 @@ async function setupLiveChrome() {
 
   const setUiOpen = () => {
     liveChromeOpen = true;
-    document.body.classList.add('live-layout');
+    syncLiveLayoutClass();
     if (wrap) wrap.hidden = false;
     toggle.disabled = false;
     toggle.textContent = 'Đóng Live';

@@ -3,6 +3,7 @@ import {
   clickFirst,
   sleep,
   sleepExact,
+  evaluateSafe,
 } from '../utils.js';
 import { isHttpStepsEnabled, stripHtmlText } from '../http/wpSession.js';
 
@@ -66,10 +67,11 @@ function pluginRowLooksActive(html) {
 
 /**
  * fetch trong Chrome (credentials include) — tránh Node fetch bị WAF/404 giả
- * (giống createUser HTTP).
+ * (giống createUser HTTP). Retry khi trang vừa navigate (notice / redirect).
  */
 async function wpFetchInPage(page, url, { method = 'GET', body = null, referer = '' } = {}) {
-  return page.evaluate(
+  return evaluateSafe(
+    page,
     async (u, m, b, ref) => {
       const headers = {
         Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
@@ -100,7 +102,7 @@ function httpFailDetail(label, res) {
 
 /** Đọc trạng thái trang Add Plugins / updates nonce (AJAX wordpress.org hay chậm hoặc trống). */
 async function readAddPluginsState(page) {
-  return page.evaluate(() => {
+  return evaluateSafe(page, () => {
     const url = location.href;
     const body = (document.body?.innerText || '').replace(/\s+/g, ' ').trim();
     const title = document.title || '';
@@ -303,11 +305,15 @@ async function installUpdraftViaAdminAjax(page, log) {
  * Dùng fetch trong tab WP (không Node wpFetch) — site macmar hay 404 Node.
  */
 export async function ensureUpdraftInstalledAndActiveViaHttp(page, base, log) {
-  // Đảm bảo đang ở origin WP (cookie session)
-  if (!String(page.url() || '').includes(base.replace(/^https?:\/\//, ''))) {
+  // Đảm bảo đang ở origin WP + trang ổn định (tránh context destroyed sau đóng notice)
+  const host = base.replace(/^https?:\/\//, '').replace(/\/$/, '');
+  if (!String(page.url() || '').includes(host)) {
     await page.goto(`${base}/wp-admin/`, GOTO).catch(() => {});
-    await sleep(200);
   }
+  await page
+    .waitForFunction(() => document.readyState === 'complete', { timeout: 15000 })
+    .catch(() => {});
+  await sleepExact(400);
 
   const adminRef = `${base}/wp-admin/`;
 
@@ -768,16 +774,33 @@ async function openUpdraftPage(page, base, log) {
 
 async function ensureUpdraftInstalledAndActive(page, base, log) {
   if (isHttpStepsEnabled()) {
-    try {
-      await ensureUpdraftInstalledAndActiveViaHttp(page, base, log);
-      // Đồng bộ tab Chrome sang trang Updraft
-      await page.goto(`${base}/wp-admin/options-general.php?page=updraftplus`, GOTO).catch(() => {});
-      await sleep(300);
-      return;
-    } catch (err) {
-      log(
-        `⚠ Updraft install HTTP fail — fallback Chrome: ${String(err?.message || err).slice(0, 160)}`
+    const isNavGlitch = (err) =>
+      /Execution context was destroyed|Cannot find context|navigat/i.test(
+        String(err?.message || err)
       );
+
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        await ensureUpdraftInstalledAndActiveViaHttp(page, base, log);
+        await page
+          .goto(`${base}/wp-admin/options-general.php?page=updraftplus`, GOTO)
+          .catch(() => {});
+        await sleep(300);
+        return;
+      } catch (err) {
+        if (attempt === 1 && isNavGlitch(err)) {
+          log(
+            `⚠ Updraft HTTP bị navigate giữa chừng — chờ ổn định rồi thử HTTP lại: ${String(err?.message || err).slice(0, 100)}`
+          );
+          await page.goto(`${base}/wp-admin/`, GOTO).catch(() => {});
+          await sleepExact(800);
+          continue;
+        }
+        log(
+          `⚠ Updraft install HTTP fail — fallback Chrome: ${String(err?.message || err).slice(0, 160)}`
+        );
+        break;
+      }
     }
   }
   await ensureUpdraftInstalledAndActiveViaBrowser(page, base, log);
