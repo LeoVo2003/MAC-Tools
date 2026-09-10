@@ -6,13 +6,9 @@ import {
   sanitizeWpUsername,
   sanitizeCustomerPassword,
   clearUnloadGuard,
+  evaluateSafe,
 } from '../utils.js';
-import {
-  cookieHeaderFromPage,
-  isHttpStepsEnabled,
-  stripHtmlText,
-  wpFetch,
-} from '../http/wpSession.js';
+import { isHttpStepsEnabled, stripHtmlText } from '../http/wpSession.js';
 
 const GOTO = { waitUntil: 'domcontentloaded', timeout: 60000 };
 
@@ -132,15 +128,61 @@ export async function emailAlreadyRegistered(page, email, log = () => {}) {
 }
 
 /**
- * Kiểm tra email đã có user — HTTP (cookie sau Quick Login).
+ * Kiểm tra email đã có user — in-page fetch (cookie tab WP, có timeout).
+ * Node wpFetch hay bị WAF giữ / 404 giả → job đứng hoặc miss “đã có mail”.
  */
-async function emailAlreadyRegisteredHttp(session, emailClean, log) {
-  const url = `${session.origin}/wp-admin/users.php?s=${encodeURIComponent(emailClean)}`;
-  log(`Kiểm tra email (HTTP): ${emailClean}`);
-  const res = await wpFetch(url, { cookieHeader: session.cookieHeader });
-  if (/wp-login\.php/i.test(res.url) || /name=["']log["']/i.test(res.text)) {
-    throw new Error('Cookie WP hết hạn / chưa login — HTTP users.php bị đẩy về login.');
+async function emailAlreadyRegisteredInPage(page, emailClean, log) {
+  const base = originOf(page.url());
+  if (!base) throw new Error('Không xác định origin WP để check email.');
+  const url = `${base}/wp-admin/users.php?s=${encodeURIComponent(emailClean)}`;
+  log(`Kiểm tra email (in-page): ${emailClean}`);
+
+  const res = await evaluateSafe(page, async (u) => {
+    const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), 25000) : null;
+    try {
+      const r = await fetch(u, {
+        method: 'GET',
+        credentials: 'include',
+        redirect: 'follow',
+        headers: {
+          Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
+        },
+        signal: ctrl?.signal,
+      });
+      const text = await r.text();
+      return { ok: r.ok, status: r.status, url: r.url, text, aborted: false };
+    } catch (e) {
+      return {
+        ok: false,
+        status: 0,
+        url: u,
+        text: String(e?.message || e),
+        aborted: /abort/i.test(String(e?.name || e?.message || e)),
+      };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }, url);
+
+  if (res.aborted) {
+    throw new Error('Check email timeout 25s (users.php).');
   }
+  if (/wp-login\.php/i.test(res.url) || /name=["']log["']/i.test(res.text)) {
+    throw new Error('Cookie WP hết hạn / chưa login — users.php bị đẩy về login.');
+  }
+  // HTML không phải Users list → không kết luận “chưa có”
+  if (
+    !res.ok ||
+    (!/id=["']the-list["']/i.test(res.text) &&
+      !/wp-list-table[^\n]*users/i.test(res.text) &&
+      !/Search Results/i.test(res.text))
+  ) {
+    throw new Error(
+      `users.php không đọc được list user (HTTP ${res.status}) — fallback Chrome.`
+    );
+  }
+
   if (/tr[^>]*class=["'][^"']*no-items/i.test(res.text) || /No users found/i.test(res.text)) {
     return { found: false, username: '' };
   }
@@ -159,7 +201,6 @@ async function emailAlreadyRegisteredHttp(session, emailClean, log) {
       rowHtml.match(/<strong>\s*<a[^>]*>([^<]+)</i);
     return { found: true, username: (userMatch?.[1] || '').trim() };
   }
-  // Fallback: email xuất hiện trong bảng users
   if (res.text.toLowerCase().includes(want) && /id=["']the-list["']/i.test(res.text)) {
     const loose = res.text.match(
       new RegExp(
@@ -173,6 +214,16 @@ async function emailAlreadyRegisteredHttp(session, emailClean, log) {
     }
   }
   return { found: false, username: '' };
+}
+
+/** Check email trước tạo user: in-page → fail thì Chrome Users search. */
+async function ensureEmailNotRegistered(page, emailClean, log) {
+  try {
+    return await emailAlreadyRegisteredInPage(page, emailClean, log);
+  } catch (e) {
+    log(`⚠ Check email in-page lỗi (${String(e?.message || e).slice(0, 100)}) — dùng Chrome Users...`);
+    return emailAlreadyRegistered(page, emailClean, log);
+  }
 }
 
 async function fillAndSubmitNewUser(page, { username, password, emailClean }, log) {
@@ -308,7 +359,7 @@ function interpretCreateUserError(errText, username, emailClean) {
   }
 
   if (
-    /already exists|đã tồn tại|already\s+(been\s+)?registered|already used|sorry, that email|email is already/i.test(
+    /already exists|đã tồn tại|already\s+(been\s+)?registered|already used|sorry, that email|email is already|email address is already|this email.*(already|registered)|username.*(already|exists)|login name.*(already|exists)/i.test(
       errText
     )
   ) {
@@ -327,7 +378,7 @@ function interpretCreateUserError(errText, username, emailClean) {
 }
 
 function isEmailExistsError(msg) {
-  return /already\s+(been\s+)?registered|already exists|đã tồn tại|already used|sorry, that email|email is already/i.test(
+  return /already\s+(been\s+)?registered|already exists|đã tồn tại|already used|sorry, that email|email is already|email address is already|this email.*(already|registered)|username.*(already|exists)|login name.*(already|exists)/i.test(
     String(msg || '')
   );
 }
@@ -404,7 +455,8 @@ async function loadCreateUserFormFromPage(page, log) {
  * POST tạo user từ trong Chrome (credentials include) — nhanh hơn điền từng ô.
  */
 async function postCreateUserInPage(page, form, { username, password, emailClean }) {
-  return page.evaluate(
+  return evaluateSafe(
+    page,
     async (payload) => {
       const body = new URLSearchParams();
       body.set('action', 'createuser');
@@ -421,18 +473,32 @@ async function postCreateUserInPage(page, form, { username, password, emailClean
       body.set('role', 'editor');
       body.set('createuser', 'Add New User');
 
-      const res = await fetch(payload.formUrl, {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
-        },
-        body: body.toString(),
-        redirect: 'follow',
-      });
-      const text = await res.text();
-      return { status: res.status, url: res.url, text };
+      const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const timer = ctrl ? setTimeout(() => ctrl.abort(), 45000) : null;
+      try {
+        const res = await fetch(payload.formUrl, {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
+          },
+          body: body.toString(),
+          redirect: 'follow',
+          signal: ctrl?.signal,
+        });
+        const text = await res.text();
+        return { status: res.status, url: res.url, text, aborted: false };
+      } catch (e) {
+        return {
+          status: 0,
+          url: payload.formUrl,
+          text: String(e?.message || e),
+          aborted: /abort/i.test(String(e?.name || e?.message || e)),
+        };
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
     },
     {
       formUrl: form.formUrl,
@@ -460,15 +526,8 @@ export async function createCustomerAccountViaHttp(page, customer, log) {
     log(`Password format: đã bỏ dấu nháy '`);
   }
 
-  // Check email: ưu tiên HTTP; fail → dùng list Users trên Chrome
-  let existing = { found: false, username: '' };
-  try {
-    const session = await cookieHeaderFromPage(page);
-    existing = await emailAlreadyRegisteredHttp(session, emailClean, log);
-  } catch (e) {
-    log(`⚠ Check email HTTP lỗi (${String(e?.message || e).slice(0, 80)}) — dùng Chrome...`);
-    existing = await emailAlreadyRegistered(page, emailClean, log);
-  }
+  // Check email TRƯỚC khi POST: in-page (+ timeout) → Chrome Users search
+  const existing = await ensureEmailNotRegistered(page, emailClean, log);
 
   if (existing.found) {
     const existingUser = existing.username || username;
@@ -491,7 +550,14 @@ export async function createCustomerAccountViaHttp(page, customer, log) {
   let form = await loadCreateUserFormFromPage(page, log);
 
   let res = await postCreateUserInPage(page, form, { username, password, emailClean });
+  if (res.aborted) {
+    throw new Error('POST tạo user timeout 45s — thử lại hoặc fallback Chrome.');
+  }
   let errText = parseCreateUserErrorFromHtml(res.text);
+  // WP đôi khi chỉ để lỗi trong body / title mà không có notice-error chuẩn
+  if (!errText && isEmailExistsError(stripHtmlText(res.text))) {
+    errText = stripHtmlText(res.text).slice(0, 200);
+  }
 
   const successUrl =
     /users\.php/i.test(res.url) && /update=add|id=\d+/i.test(res.url);
@@ -509,13 +575,22 @@ export async function createCustomerAccountViaHttp(page, customer, log) {
     username = retryUser;
     form = await loadCreateUserFormFromPage(page, log);
     res = await postCreateUserInPage(page, form, { username, password, emailClean });
+    if (res.aborted) {
+      throw new Error('POST tạo user (retry) timeout 45s.');
+    }
     errText = parseCreateUserErrorFromHtml(res.text);
+    if (!errText && isEmailExistsError(stripHtmlText(res.text))) {
+      errText = stripHtmlText(res.text).slice(0, 200);
+    }
     verdict = interpretCreateUserError(errText, username, emailClean);
   }
 
   if (verdict.kind === 'exists') {
     log(`⏭ WP báo email/user đã tồn tại — bỏ qua tạo user và sync WPM.`);
-    const again = await emailAlreadyRegistered(page, emailClean, log);
+    const again = await ensureEmailNotRegistered(page, emailClean, log).catch(() => ({
+      found: true,
+      username: '',
+    }));
     await leaveUserNewForm(page, log);
     return {
       username: again.username || username,
