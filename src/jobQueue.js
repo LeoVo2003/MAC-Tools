@@ -1,12 +1,12 @@
 import crypto from 'crypto';
-import { acquireCpuBoost, releaseCpuBoost } from './dockerCpuScale.js';
 
 /**
- * Queue chạy song song có giới hạn (mặc định 4 Chrome cùng lúc).
+ * Queue chạy song song; mặc định không giới hạn. maxConcurrent > 0 để giới hạn.
  * @param {{ onLog?: Function, maxConcurrent?: number }} opts
  */
-export function createJobQueue({ onLog, onChange, maxConcurrent = 4 } = {}) {
-  const limit = Math.max(1, Number(maxConcurrent) || 4);
+export function createJobQueue({ onLog, onChange, maxConcurrent = 0 } = {}) {
+  const configured = Number(maxConcurrent);
+  const limit = Number.isFinite(configured) && configured >= 1 ? Math.floor(configured) : 0;
   /** @type {Array<object>} */
   const pending = [];
   /** @type {Map<string, object>} */
@@ -105,9 +105,6 @@ export function createJobQueue({ onLog, onChange, maxConcurrent = 4 } = {}) {
       onLog?.(job.id, line);
     };
 
-    await acquireCpuBoost('job').catch((err) => {
-      console.warn('[queue] cpu boost:', err?.message || err);
-    });
     try {
       push('=== Job bắt đầu ===');
       if (job.cancelled) throw new Error('Job đã bị hủy.');
@@ -149,9 +146,6 @@ export function createJobQueue({ onLog, onChange, maxConcurrent = 4 } = {}) {
       if (active.get(job.id) === job) active.delete(job.id);
       remember(job);
       onChange?.(snapshot());
-      await releaseCpuBoost('job').catch((err) => {
-        console.warn('[queue] cpu release:', err?.message || err);
-      });
       setImmediate(() => pump());
     }
   }
@@ -160,7 +154,7 @@ export function createJobQueue({ onLog, onChange, maxConcurrent = 4 } = {}) {
     if (pumping) return;
     pumping = true;
     try {
-      while (active.size < limit && pending.length) {
+      while ((limit === 0 || active.size < limit) && pending.length) {
         const job = pending.shift();
         // fire-and-forget; startOne tự gọi pump khi xong
         void startOne(job);

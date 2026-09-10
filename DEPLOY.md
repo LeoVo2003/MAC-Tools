@@ -35,13 +35,12 @@ Admin mặc định: `leo.vo@macusaone.com` (thêm email: `ADMIN_EMAILS=a@x.com,
 | `ADMIN_EMAILS` | Thêm email admin (comma-separated), ngoài leo.vo@… |
 | `CHROME_PATH` | Path Chrome/Chromium nếu không tự tìm |
 | `DOWNLOAD_DIR` | Thư mục lưu file backup |
-| `MAX_CONCURRENT_JOBS` | Số Chrome chạy song song (VPS mặc định `1`) |
+| `MAX_CONCURRENT_JOBS` | `0` (mặc định) = không giới hạn job đồng thời; số nguyên dương = giới hạn do admin chọn |
 | `PORT` | Mặc định `3847` |
-| `ADAPTIVE_CAPACITY` | `true` = idle/safe/max theo load + peer MME; `false` = chỉ idle ↔ `DOCKER_CPU_LIVE` |
-| `DOCKER_CPU_IDLE` / `LIVE` / `MAX` | Host 1 vCPU: `0.3` / `0.5` (bận) / `1.0` (rảnh) |
-| `ADAPTIVE_PEER_CONTAINER` | Tên container MME (mặc định `mac-menu-engine`) |
 
-**Rollback adaptive:** trong `.env` VPS đặt `ADAPTIVE_CAPACITY=false` và (tuỳ) `DOCKER_CPU_LIVE=2.5`, rồi `docker compose up -d`.
+Từ `2.1.1`, Compose không đặt quota CPU, ứng dụng không tự hạ CPU và không cần mount `docker.sock`. Các biến `DOCKER_CPU_*` / `ADAPTIVE_*` cũ không còn sử dụng. Chrome không bị ép tắt GPU; khả năng tăng tốc phụ thuộc phần cứng, driver và quyền truy cập thiết bị trong container.
+
+CI chuyển `MAX_CONCURRENT_JOBS` sang `0`, xóa cấu hình CPU/adaptive cũ và recreate container để gỡ quota đang áp dụng. Deploy thủ công: cập nhật Compose, đặt `MAX_CONCURRENT_JOBS=0` trong `.env`, chạy `docker compose up -d --force-recreate`. Nhiều job đồng thời có thể tăng tải CPU/RAM; có thể đặt lại số job nếu host cần chia sẻ tài nguyên.
 
 ## Nginx mẫu (Socket.IO + Live Chrome WebSocket)
 
@@ -100,7 +99,7 @@ Nếu log/queue không realtime sau F5: thêm block `/socket.io/` như trên.
 cd /home/flashvps/User-Guide
 # 1) .env: CHROME_LIVE=true (hoặc false nếu team không cần Live), HEADLESS=false, secrets
 #    Live mặc định tắt trên UI — user bấm Mở Live mới start x11vnc; Đóng Live = tắt (tiết kiệm CPU)
-#    CPU: idle 0.3; Fill/Run hoặc Mở Live → ~1.5 (docker.sock); hết việc + Live đóng → 0.3
+#    CPU không đặt quota; MAX_CONCURRENT_JOBS=0 để không chờ slot.
 # 2) nginx có /socket.io/ + /chrome-live/ (WebSocket) + nginx -t && systemctl reload nginx
 # 3) recreate để nhận image + deps socket.io: docker compose up -d --force-recreate
 docker compose pull
@@ -109,6 +108,8 @@ docker compose ps
 docker compose logs --tail=40
 # Health
 curl -s http://127.0.0.1:3847/api/health
+# Xác nhận quota CPU đã gỡ: NanoCpus = 0, CpuQuota = 0 hoặc -1
+docker inspect "$(docker compose ps -q fugt)" --format '{{.HostConfig.NanoCpus}} {{.HostConfig.CpuQuota}}'
 # IP egress (whitelist WPM)
 curl -4 -s https://ifconfig.me; echo
 ```

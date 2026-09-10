@@ -9,7 +9,6 @@ import express from 'express';
 import httpProxy from 'http-proxy';
 import { requireAuth } from './auth.js';
 import { acquireLiveVnc, releaseLiveVnc, probeLiveVnc, ensureLiveVnc } from './liveVnc.js';
-import { cpuScaleConfig } from './dockerCpuScale.js';
 import { getLiveMode, isFrameLiveMode } from './liveSession.js';
 
 const NOVNC_CANDIDATES = [
@@ -195,7 +194,6 @@ export function mountChromeLiveRoutes(app) {
             ? 'Live = mỗi dòng Log chụp 1 ảnh; màn hình hiện ảnh của dòng log trước. Mở Live rồi Fill/Run.'
             : 'Live = stream ảnh Chrome. Mở Live rồi Fill/Run.',
         backend: { screencast: true, novnc: false },
-        cpuScale: cpuScaleConfig(),
       });
     }
 
@@ -207,7 +205,6 @@ export function mountChromeLiveRoutes(app) {
       autoOpen: false,
       hint: 'Live mặc định tắt (tiết kiệm CPU). Bấm Mở Live khi cần xem/click Chrome.',
       backend: { ...backend, screencast: false },
-      cpuScale: cpuScaleConfig(),
     });
   });
 

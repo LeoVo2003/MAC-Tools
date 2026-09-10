@@ -33,8 +33,6 @@ import { createJobQueue } from './src/jobQueue.js';
 import { fillCustomerDataFromUrls } from './src/steps/fillData.js';
 import { purgeOldBackups, buildHealthReport, detectStaleJobs } from './src/ops.js';
 import { mountChromeLiveRoutes, attachChromeLiveWs, chromeLiveEnabled } from './src/chromeLive.js';
-import { initLiveVncIdleCpu } from './src/liveVnc.js';
-import { acquireCpuBoost, releaseCpuBoost } from './src/dockerCpuScale.js';
 import { dispatchLiveInput, listLiveSessions, getLiveSession, isFrameLiveMode } from './src/liveSession.js';
 import { clearLiveBrowsersForUser, takeLiveBrowser } from './src/liveBrowser.js';
 import { attachRealtime } from './src/realtime.js';
@@ -43,7 +41,7 @@ dotenv.config({ path: getEnvPath() });
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3847;
-const VERSION = '2.1.0';
+const VERSION = '2.1.1';
 
 /** Một instance session — Express + Socket.IO chung MemoryStore */
 const sharedSession = sessionMiddleware();
@@ -68,7 +66,7 @@ const queue = createJobQueue({
     broadcast('log', { line, jobId }, { jobId, userId: job?.meta?.userId });
   },
   onChange: () => broadcast('queue', null, { refreshQueues: true }),
-  maxConcurrent: Number(process.env.MAX_CONCURRENT_JOBS) || 4,
+  maxConcurrent: process.env.MAX_CONCURRENT_JOBS,
 });
 
 export function createApp() {
@@ -193,9 +191,6 @@ export function createApp() {
 
     const logs = [];
     const fillSessionId = `fill-${req.user.id}`;
-    await acquireCpuBoost('fill').catch((err) => {
-      console.warn('[fill] cpu boost:', err?.message || err);
-    });
     try {
       // Fill mới: clear Chrome Live cũ (tránh lag / timeout trên Xvfb)
       const clearedReg = await clearLiveBrowsersForUser(req.user.id);
@@ -237,10 +232,6 @@ export function createApp() {
       res.status(500).json({
         error: err?.message || String(err),
         logs,
-      });
-    } finally {
-      await releaseCpuBoost('fill').catch((err) => {
-        console.warn('[fill] cpu release:', err?.message || err);
       });
     }
   });
@@ -432,15 +423,15 @@ export function createApp() {
       },
     });
 
-    const maxJobs = Number(process.env.MAX_CONCURRENT_JOBS) || 4;
     const userSnap = queue.snapshotForUser(req.user.id, { admin: req.user.role === 'admin' });
+    const maxJobs = userSnap.maxConcurrent;
     broadcast('queue', null, { refreshQueues: true });
     res.json({
       ok: true,
       jobId,
       position,
       message:
-        position > maxJobs
+        maxJobs > 0 && position > maxJobs
           ? `Đã xếp hàng (vị trí ${position}). Tối đa ${maxJobs} job chạy cùng lúc.`
           : 'Job đã bắt đầu (hoặc sắp chạy).',
       queue: userSnap,
@@ -591,7 +582,6 @@ export async function startServer({ openBrowser: shouldOpen } = {}) {
     console.log(`Download dir: ${DOWNLOADS_DIR}`);
     console.log(`Health: ${url}/api/health`);
     if (chromeLiveEnabled()) console.log(`Live Chrome: ${url}/chrome-live/`);
-    if (chromeLiveEnabled()) initLiveVncIdleCpu();
     if (autoOpen) setTimeout(() => openBrowser(url), 400);
   });
 

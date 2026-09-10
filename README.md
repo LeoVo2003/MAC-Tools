@@ -2,7 +2,7 @@
 
 Công cụ web tự động hóa gói F trên WordPress qua WPM (login project → backup → tạo user → sync → Mac Role → Web Info).
 
-**Version:** `2.1.0` — HTTP/DOM (createUser, Mac Core/Role, Web Info) + fallback Chrome. Mốc ổn định trước đó: tag `v2.0.0`.
+**Version:** `2.1.1` — bỏ quota CPU, cờ tắt GPU và giới hạn số job mặc định; Live hiển thị ảnh hiện tại và không giới hạn 4 fps. HTTP/DOM (createUser, Mac Core/Role, Web Info) + fallback Chrome.
 
 **Branch:** deploy từ `main` · phát triển trên `develop`.
 
@@ -16,6 +16,10 @@ npm start
 ```
 
 UI: http://localhost:3847 · Health: `GET /api/health`
+
+`MAX_CONCURRENT_JOBS=0` (mặc định) cho phép job chạy ngay, không chờ slot. Có thể đặt số nguyên dương để giới hạn theo tài nguyên máy. Nếu `.env` cũ có giá trị `1` hoặc `4`, đổi thành `0` để bỏ giới hạn.
+
+Kiểm tra: `npm test`.
 
 ## Cách dùng
 

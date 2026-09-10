@@ -1,5 +1,5 @@
 /**
- * Live view: snapshot theo từng dòng Log (hiện ảnh log trước) hoặc CDP screencast.
+ * Live view: snapshot hiện tại theo từng dòng Log hoặc CDP screencast.
  * Input HTTP vẫn hỗ trợ (phase sau / screencast).
  */
 
@@ -10,13 +10,9 @@
  *   onFrame?: (payload: object) => void,
  *   stop?: () => Promise<void>,
  *   mode?: string,
- *   pendingImage?: string|null,
  *   captureChain?: Promise<void>,
  * }>} */
 const sessions = new Map();
-
-let lastFrameAt = 0;
-const MIN_FRAME_MS = 250; // CDP screencast throttle
 
 export function getLiveMode() {
   const m = (process.env.CHROME_LIVE_MODE || 'snapshot').toLowerCase();
@@ -36,7 +32,7 @@ function snapshotQuality() {
 
 /**
  * Đăng ký session snapshot — không poll theo giây.
- * Mỗi lần log → pushSnapshotOnLog: hiện ảnh log trước, chụp ảnh mới để lần sau.
+ * Mỗi lần log → chụp và đẩy ảnh hiện tại ngay khi chụp xong.
  */
 export async function startSnapshotLive(sessionId, browser, page, onFrame) {
   await stopLiveSession(sessionId);
@@ -46,44 +42,29 @@ export async function startSnapshotLive(sessionId, browser, page, onFrame) {
     page,
     onFrame,
     mode: 'snapshot',
-    pendingImage: null,
     captureChain: Promise.resolve(),
     stop: null,
   };
   sessions.set(sessionId, entry);
 
-  // Chụp sẵn 1 frame nền (chưa đẩy UI) — log đầu tiên sẽ hiện frame này
-  try {
-    if (page && !page.isClosed?.()) {
-      const buf = await page.screenshot({
-        type: 'jpeg',
-        quality: snapshotQuality(),
-        encoding: 'base64',
-        captureBeyondViewport: false,
-      });
-      entry.pendingImage =
-        typeof buf === 'string' ? buf : Buffer.from(buf).toString('base64');
-    }
-  } catch {
-    /* ignore */
-  }
-
-  entry.stop = async () => {
-    entry.pendingImage = null;
-  };
+  // Hiện frame đầu tiên ngay; dùng chung chain để giữ đúng thứ tự với log.
+  entry.captureChain = pushSnapshotOnLog(sessionId);
+  await entry.captureChain;
 
   return entry;
 }
 
 /**
- * Gọi sau mỗi dòng log: đẩy ảnh pending (log trước) lên Live, rồi chụp mới.
+ * Gọi sau mỗi dòng log: chụp và đẩy ảnh hiện tại lên Live.
  * Không block caller — xếp hàng tuần tự để không loạn thứ tự ảnh.
  */
 export function scheduleSnapshotOnLog(sessionId) {
   const cur = sessions.get(sessionId);
   if (!cur || cur.mode !== 'snapshot' || !cur.onFrame) return;
   cur.captureChain = (cur.captureChain || Promise.resolve())
-    .then(() => pushSnapshotOnLog(sessionId))
+    .then(() => {
+      if (sessions.get(sessionId) === cur) return pushSnapshotOnLog(sessionId);
+    })
     .catch(() => {});
 }
 
@@ -91,30 +72,8 @@ export async function pushSnapshotOnLog(sessionId) {
   const cur = sessions.get(sessionId);
   if (!cur || cur.mode !== 'snapshot' || !cur.onFrame) return;
 
-  // 1) Hiện ảnh của log trước (nếu có)
-  if (cur.pendingImage) {
-    try {
-      cur.onFrame({
-        sessionId,
-        image: cur.pendingImage,
-        meta: {
-          mode: 'snapshot',
-          lag: 'prev-log',
-          quality: snapshotQuality(),
-          timestamp: Date.now(),
-        },
-      });
-    } catch {
-      /* ignore */
-    }
-  }
-
-  // 2) Chụp ảnh mới → pending cho log kế
   const page = cur.page;
-  if (!page || page.isClosed?.()) {
-    cur.pendingImage = null;
-    return;
-  }
+  if (!page || page.isClosed?.()) return;
   try {
     const buf = await page.screenshot({
       type: 'jpeg',
@@ -122,15 +81,24 @@ export async function pushSnapshotOnLog(sessionId) {
       encoding: 'base64',
       captureBeyondViewport: false,
     });
-    cur.pendingImage =
-      typeof buf === 'string' ? buf : Buffer.from(buf).toString('base64');
+    // Session có thể đã đóng/đổi tab trong lúc screenshot đang chạy.
+    if (sessions.get(sessionId) !== cur) return;
+    cur.onFrame({
+      sessionId,
+      image: typeof buf === 'string' ? buf : Buffer.from(buf).toString('base64'),
+      meta: {
+        mode: 'snapshot',
+        quality: snapshotQuality(),
+        timestamp: Date.now(),
+      },
+    });
   } catch {
-    /* page navigating — giữ pending cũ */
+    /* Page đang chuyển trang — đợi lần chụp sau, không phát lại ảnh cũ. */
   }
 }
 
 /**
- * CDP screencast (~4fps) — mode=screencast.
+ * CDP screencast — phát mỗi frame Chrome gửi, theo độ phân giải của viewport.
  */
 export async function startScreencastLive(sessionId, browser, page, onFrame) {
   await stopLiveSession(sessionId);
@@ -145,9 +113,7 @@ export async function startScreencastLive(sessionId, browser, page, onFrame) {
     } catch {
       /* ignore */
     }
-    const now = Date.now();
-    if (now - lastFrameAt < MIN_FRAME_MS) return;
-    lastFrameAt = now;
+    if (sessions.get(sessionId) !== entry) return;
     onFrame({
       sessionId,
       image: evt.data,
@@ -165,14 +131,6 @@ export async function startScreencastLive(sessionId, browser, page, onFrame) {
 
   client.on('Page.screencastFrame', onScreencastFrame);
 
-  await client.send('Page.startScreencast', {
-    format: 'jpeg',
-    quality: 45,
-    maxWidth: 1280,
-    maxHeight: 800,
-    everyNthFrame: 2,
-  });
-
   entry.stop = async () => {
     try {
       client.off('Page.screencastFrame', onScreencastFrame);
@@ -180,7 +138,20 @@ export async function startScreencastLive(sessionId, browser, page, onFrame) {
     } catch {
       /* ignore */
     }
+    await client.detach?.().catch(() => {});
   };
+
+  try {
+    await client.send('Page.startScreencast', {
+      format: 'jpeg',
+      quality: 45,
+      everyNthFrame: 1,
+    });
+  } catch (err) {
+    if (sessions.get(sessionId) === entry) sessions.delete(sessionId);
+    await entry.stop();
+    throw err;
+  }
 
   return entry;
 }
@@ -207,15 +178,14 @@ export async function setLivePage(sessionId, page, onFrame) {
   if (!cur?.browser) return;
   const frameCb = onFrame || cur.onFrame;
   if (!frameCb) return;
-  if (cur.stop) await cur.stop().catch(() => {});
   await startLiveSession(sessionId, cur.browser, page, frameCb);
 }
 
 export async function stopLiveSession(sessionId) {
   const cur = sessions.get(sessionId);
   if (!cur) return;
-  if (cur.stop) await cur.stop().catch(() => {});
   sessions.delete(sessionId);
+  if (cur.stop) await cur.stop().catch(() => {});
 }
 
 export function getLiveSession(sessionId) {

@@ -1,11 +1,12 @@
 {
   "name": "f-user-guide-tool",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "F User Guide Tool v2.1 — HTTP/DOM hybrid (createUser, Mac Role, Web Info) + Chrome fallback",
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "test": "node --test"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

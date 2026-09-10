@@ -11,7 +11,7 @@
 
 Team Web trước đây làm tay ~15 phút/job (ít lỗi). Tool thay thế thao tác lặp để **tiết kiệm thời gian** và **chịu được volume task cao**: login WPM → Quick Login → Backup → tạo user Editor → sync WPM → Mac Role / F Package → Web Info → xuất Output (và điền Task nếu có).
 
-Sản phẩm đã **dùng production** trên VPS (FlashPanel/FlashVPS), deploy bằng **push `main` → GitHub Actions**. Pain ưu tiên hiện tại: **job trên server chậm hơn local** do đồng host với MME + `MAX_CONCURRENT_JOBS=1` + CPU container thấp khi idle.
+Sản phẩm đã **dùng production** trên VPS (FlashPanel/FlashVPS), deploy bằng **push `main` → GitHub Actions**. Từ `2.1.1`: bỏ quota CPU adaptive / giới hạn concurrent mặc định — VPS mới mạnh hơn chạy full; `MAX_CONCURRENT_JOBS=0` (không chờ slot).
 
 ---
 

@@ -1,12 +1,10 @@
 /**
  * x11vnc + websockify — bật khi user mở Live, tắt khi đóng (tiết kiệm CPU).
  * Xvfb vẫn chạy sẵn từ entrypoint (Chrome headed cần DISPLAY).
- * Mở Live → scale CPU lên; đóng → hạ về idle (docker.sock).
  */
 import { spawn, spawnSync } from 'child_process';
 import net from 'net';
 import fs from 'fs';
-import { acquireCpuBoost, releaseCpuBoost, resetCpuScaleIdle } from './dockerCpuScale.js';
 
 const VNC_PORT = 5900;
 const WS_PORT = 6080;
@@ -19,23 +17,6 @@ let startPromise = null;
 let x11Child = null;
 let wsChild = null;
 let idleTimer = null;
-let liveBoostHeld = false;
-
-async function holdLiveBoost() {
-  if (liveBoostHeld) return;
-  liveBoostHeld = true;
-  await acquireCpuBoost('live').catch((err) => {
-    console.warn('[live-vnc] cpu boost:', err?.message || err);
-  });
-}
-
-async function dropLiveBoost() {
-  if (!liveBoostHeld) return;
-  liveBoostHeld = false;
-  await releaseCpuBoost('live').catch((err) => {
-    console.warn('[live-vnc] cpu release:', err?.message || err);
-  });
-}
 
 function probePort(port, host = '127.0.0.1') {
   return new Promise((resolve) => {
@@ -123,9 +104,6 @@ async function startProcesses() {
     throw new Error('x11vnc không có trên server (chỉ VPS/Docker có Live noVNC).');
   }
 
-  // Nới CPU trước khi spawn VNC (Live cần headroom)
-  await holdLiveBoost();
-
   killByName(['x11vnc', 'websockify.*6080']);
   await sleep(300);
 
@@ -200,7 +178,6 @@ function stopProcesses() {
   wsChild = null;
   killByName(['x11vnc', 'websockify.*6080']);
   console.log('[live-vnc] stopped (no Live viewers)');
-  dropLiveBoost();
 }
 
 async function runStart() {
@@ -224,9 +201,6 @@ export async function acquireLiveVnc() {
   clearIdleTimer();
   refCount += 1;
   try {
-    if (refCount === 1) {
-      await holdLiveBoost();
-    }
     const result = await runStart();
     return { ...result, refCount };
   } catch (err) {
@@ -258,9 +232,3 @@ export function isLiveVncActive() {
   return refCount > 0;
 }
 
-/** Boot: ép về idle (tránh kẹt 1.5 sau crash). */
-export function initLiveVncIdleCpu() {
-  resetCpuScaleIdle().catch((err) => {
-    console.warn('[live-vnc] boot scale idle:', err?.message || err);
-  });
-}

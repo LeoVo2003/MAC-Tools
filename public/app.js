@@ -885,9 +885,9 @@ function runDurationMs(r) {
 }
 
 function renderQueue(q) {
-  const max = q?.maxConcurrent || 4;
+  const max = Number(q?.maxConcurrent) || 0;
   if (q?.runningCount > 0 || q?.pendingCount > 0) {
-    queueHint.textContent = `Đang chạy ${q.runningCount || 0}/${max}${q.pendingCount ? ` · chờ ${q.pendingCount}` : ''}`;
+    queueHint.textContent = `Đang chạy ${q.runningCount || 0}${max > 0 ? `/${max}` : ' job'}${q.pendingCount ? ` · chờ ${q.pendingCount}` : ''}`;
   } else {
     queueHint.textContent = '';
   }

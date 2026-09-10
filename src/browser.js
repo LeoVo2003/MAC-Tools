@@ -93,7 +93,6 @@ export async function launchBrowser({
     (typeof process.getuid === 'function' && process.getuid() === 0);
   if (needNoSandbox) {
     args.push('--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage');
-    if (headless || chromeLiveEnv) args.push('--disable-gpu');
   }
 
   // Headless nhanh hơn: tắt nền / extension / sync không cần cho automation
