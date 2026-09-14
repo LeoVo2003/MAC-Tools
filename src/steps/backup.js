@@ -6,6 +6,7 @@ import {
   evaluateSafe,
 } from '../utils.js';
 import { isHttpStepsEnabled, stripHtmlText } from '../http/wpSession.js';
+import { removeAdminMenuEditorIfPresent } from './pluginsCleanup.js';
 
 const GOTO = { waitUntil: 'domcontentloaded', timeout: 60000 };
 const UPDRAFT_SLUG = 'updraftplus';
@@ -1132,6 +1133,9 @@ async function runBackupNowViaBrowser(page, base, beforeSnap, log, shouldCancel)
 
 export async function installAndBackupUpdraftPlus(page, options = {}, log) {
   const base = originOf(page.url());
+
+  // Check plugin: Admin Menu Editor → gỡ trước; rồi mới Updraft / Backup
+  await removeAdminMenuEditorIfPresent(page, log);
 
   await ensureUpdraftInstalledAndActive(page, base, log);
 

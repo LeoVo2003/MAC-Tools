@@ -861,20 +861,232 @@ export async function installMacRoleViaMacCore(page, log) {
 }
 
 /**
+ * Sau Create F: vào Mac Role Settings → bật Grant WordPress capabilities for allowed URLs → Save.
+ * HTTP/DOM ưu tiên, Chrome fallback.
+ */
+async function enableGrantWpCapabilitiesViaHttp(page, base, log) {
+  const url = `${base}/wp-admin/admin.php?page=mac-role-settings`;
+  log(`HTTP: Mac Role Settings — bật Grant WP capabilities... (${url.replace(base, '')})`);
+  await page.goto(url, GOTO);
+  await sleep(500);
+  await dismissBlockingAlerts(page, log);
+
+  const result = await evaluateSafe(page, async () => {
+    const bodyText = document.body?.innerText || '';
+    if (!/mac\s*role|grant\s*wordpress\s*capabilities|allowed\s*urls/i.test(bodyText)) {
+      return { ok: false, reason: 'not-settings-page' };
+    }
+
+    const norm = (s) =>
+      String(s || '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+
+    const needle = 'grant wordpress capabilities for allowed urls';
+    let checkbox = null;
+
+    // 1) label text khớp
+    for (const lab of Array.from(document.querySelectorAll('label'))) {
+      if (norm(lab.textContent).includes(needle)) {
+        checkbox =
+          lab.control ||
+          (lab.getAttribute('for') ? document.getElementById(lab.getAttribute('for')) : null) ||
+          lab.querySelector('input[type="checkbox"]');
+        if (checkbox) break;
+      }
+    }
+
+    // 2) gần text node
+    if (!checkbox) {
+      const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
+      let n;
+      while ((n = walk.nextNode())) {
+        if (!n.matches?.('label, th, td, span, div, p, li')) continue;
+        if ((n.children?.length || 0) > 6) continue;
+        if (!norm(n.textContent).includes(needle)) continue;
+        const row = n.closest('tr, .form-field, .form-group, .mb-3, .row, label') || n.parentElement;
+        checkbox = row?.querySelector('input[type="checkbox"]');
+        if (checkbox) break;
+      }
+    }
+
+    // 3) name/id gợi ý
+    if (!checkbox) {
+      checkbox =
+        document.querySelector(
+          'input[type="checkbox"][name*="grant" i], input[type="checkbox"][id*="grant" i], input[type="checkbox"][name*="capabilit" i], input[type="checkbox"][name*="allowed_url" i]'
+        ) || null;
+    }
+
+    if (!checkbox) return { ok: false, reason: 'no-checkbox' };
+
+    const already = Boolean(checkbox.checked);
+    if (!already) {
+      checkbox.checked = true;
+      checkbox.dispatchEvent(new Event('input', { bubbles: true }));
+      checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+      checkbox.click?.();
+      if (!checkbox.checked) checkbox.checked = true;
+    }
+
+    // Save: submit form hoặc nút Save/Update
+    const form = checkbox.closest('form') || document.querySelector('form');
+    const saveBtn =
+      form?.querySelector(
+        'input[type="submit"], button[type="submit"], button.button-primary, input.button-primary'
+      ) ||
+      Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"]')).find(
+        (el) => /^(save|update|submit|lưu)$/i.test((el.innerText || el.value || '').trim())
+      );
+
+    if (form && typeof form.requestSubmit === 'function' && saveBtn) {
+      form.requestSubmit(saveBtn);
+    } else if (saveBtn) {
+      saveBtn.click();
+    } else if (form) {
+      form.submit();
+    } else {
+      return { ok: false, reason: 'no-save', already };
+    }
+
+    return { ok: true, already, name: checkbox.name || checkbox.id || '' };
+  });
+
+  if (!result?.ok) {
+    throw new Error(`Grant caps HTTP: ${result?.reason || 'unknown'}`);
+  }
+
+  await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+  await sleep(500);
+
+  // Verify still checked
+  await page.goto(url, GOTO).catch(() => {});
+  await sleep(400);
+  const verified = await evaluateSafe(page, () => {
+    const needle = 'grant wordpress capabilities for allowed urls';
+    const norm = (s) =>
+      String(s || '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+    for (const lab of Array.from(document.querySelectorAll('label'))) {
+      if (!norm(lab.textContent).includes(needle)) continue;
+      const cb =
+        lab.control ||
+        (lab.getAttribute('for') ? document.getElementById(lab.getAttribute('for')) : null) ||
+        lab.querySelector('input[type="checkbox"]');
+      if (cb) return Boolean(cb.checked);
+    }
+    const cb = document.querySelector(
+      'input[type="checkbox"][name*="grant" i], input[type="checkbox"][id*="grant" i], input[type="checkbox"][name*="capabilit" i]'
+    );
+    return cb ? Boolean(cb.checked) : null;
+  });
+
+  if (verified === false) {
+    throw new Error('Grant caps đã Save nhưng checkbox vẫn tắt sau reload.');
+  }
+  log(
+    result.already
+      ? '✓ Grant WordPress capabilities… đã bật sẵn (HTTP).'
+      : '✓ Đã bật Grant WordPress capabilities for allowed URLs + Save (HTTP).'
+  );
+  return { via: 'http', already: Boolean(result.already) };
+}
+
+async function enableGrantWpCapabilitiesViaBrowser(page, base, log) {
+  const url = `${base}/wp-admin/admin.php?page=mac-role-settings`;
+  log('Chrome: Mac Role Settings — bật Grant WP capabilities...');
+  await page.goto(url, GOTO);
+  await sleep(500);
+  await dismissBlockingAlerts(page, log);
+
+  const toggled = await page.evaluate(() => {
+    const needle = 'grant wordpress capabilities for allowed urls';
+    const norm = (s) =>
+      String(s || '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+    for (const lab of Array.from(document.querySelectorAll('label'))) {
+      if (!norm(lab.textContent).includes(needle)) continue;
+      const cb =
+        lab.control ||
+        (lab.getAttribute('for') ? document.getElementById(lab.getAttribute('for')) : null) ||
+        lab.querySelector('input[type="checkbox"]');
+      if (!cb) continue;
+      if (!cb.checked) cb.click();
+      return { ok: true, checked: cb.checked };
+    }
+    const cb = document.querySelector(
+      'input[type="checkbox"][name*="grant" i], input[type="checkbox"][name*="capabilit" i]'
+    );
+    if (cb) {
+      if (!cb.checked) cb.click();
+      return { ok: true, checked: cb.checked };
+    }
+    return { ok: false };
+  });
+
+  if (!toggled?.ok) {
+    throw new Error('Chrome: không tìm thấy checkbox Grant WordPress capabilities…');
+  }
+
+  try {
+    await clickByText(page, 'Save', { exact: true, timeout: 4000 });
+  } catch {
+    await clickByText(page, 'Update', { exact: true, timeout: 3000 }).catch(() =>
+      page.evaluate(() => {
+        document.querySelector('input[type="submit"], button[type="submit"]')?.click();
+      })
+    );
+  }
+  await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+  await sleep(400);
+  log('✓ Đã bật Grant WordPress capabilities for allowed URLs + Save (Chrome).');
+  return { via: 'browser' };
+}
+
+export async function enableGrantWpCapabilitiesForAllowedUrls(page, log) {
+  const base = originOf(page.url());
+  if (!base) throw new Error('Không xác định origin WP cho Mac Role Settings.');
+
+  if (isHttpStepsEnabled()) {
+    try {
+      return await enableGrantWpCapabilitiesViaHttp(page, base, log);
+    } catch (err) {
+      log(
+        `⚠ Grant caps HTTP fail — fallback Chrome: ${String(err?.message || err).slice(0, 140)}`
+      );
+    }
+  }
+  return enableGrantWpCapabilitiesViaBrowser(page, base, log);
+}
+
+/**
  * Mac Role → Create F Package User.
  * 2.1: HTTP rud_apply_template, fallback Chrome.
+ * Sau Create: bật Grant WordPress capabilities for allowed URLs.
  */
 export async function configureFPackageUser(page, packageTier = 'F', log) {
   if (isHttpStepsEnabled()) {
     try {
       await configureFPackageUserViaHttp(page, packageTier, log);
-      return;
     } catch (err) {
       const msg = err?.message || String(err);
       log(`⚠ HTTP Create F thất bại (${msg.slice(0, 160)}) — fallback Chrome...`);
       await configureFPackageUserViaBrowser(page, packageTier, log);
-      return;
     }
+  } else {
+    await configureFPackageUserViaBrowser(page, packageTier, log);
   }
-  await configureFPackageUserViaBrowser(page, packageTier, log);
+
+  try {
+    await enableGrantWpCapabilitiesForAllowedUrls(page, log);
+  } catch (err) {
+    log(
+      `⚠ Không bật được Grant WP capabilities (${String(err?.message || err).slice(0, 140)}) — kiểm tra tay Mac Role → Settings.`
+    );
+  }
 }
