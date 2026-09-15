@@ -1,4 +1,4 @@
-import { originOf, sleep, sleepExact, evaluateSafe } from '../utils.js';
+import { originOf, sleep, sleepExact, evaluateSafe, withAcceptedDialogs } from '../utils.js';
 import { isHttpStepsEnabled, stripHtmlText } from '../http/wpSession.js';
 
 const GOTO = { waitUntil: 'domcontentloaded', timeout: 60000 };
@@ -27,45 +27,74 @@ function isAmePluginFile(plugin) {
   );
 }
 
-/**
- * Đọc plugins.php → tìm hàng Admin Menu Editor + link deactivate/delete.
- */
-async function findAmeActionsInPage(page) {
-  return evaluateSafe(page, () => {
-    const rows = Array.from(document.querySelectorAll('#the-list > tr[id^=""], #the-list tr, tr'));
-    for (const row of rows) {
-      const id = row.id || '';
-      const text = (row.innerText || '').toLowerCase();
-      const title =
-        row.querySelector('.plugin-title strong, .plugin-title, td.plugin-title')?.innerText ||
-        '';
-      const titleL = title.toLowerCase();
-      const isAme =
-        /admin-menu-editor/i.test(id) ||
-        /^admin menu editor/i.test(title.trim()) ||
-        (/admin menu editor/i.test(titleL) && !/exclude/i.test(titleL));
-      if (!isAme && !/admin-menu-editor/i.test(row.innerHTML || '')) continue;
-      // Tránh nhầm plugin khác có chữ "menu editor" xa
-      if (!isAme && !/admin-menu-editor/i.test(row.innerHTML || '')) continue;
+function scanAmeRow() {
+  const rows = Array.from(document.querySelectorAll('#the-list > tr'));
+  for (const row of rows) {
+    if (row.classList.contains('plugin-update-tr')) continue;
+    const slug = String(row.getAttribute('data-slug') || '').toLowerCase();
+    const pluginAttr = String(
+      row.getAttribute('data-plugin') ||
+        row.querySelector('input[name="checked[]"]')?.value ||
+        ''
+    )
+      .replace(/\\/g, '/')
+      .toLowerCase();
+    const id = String(row.id || '').toLowerCase();
+    const name = (row.querySelector('.plugin-title strong')?.textContent || '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const isAme =
+      slug.includes('admin-menu-editor') ||
+      pluginAttr.includes('admin-menu-editor') ||
+      id === 'admin-menu-editor' ||
+      id === 'admin-menu-editor-pro' ||
+      /^admin menu editor\b/i.test(name);
+    if (!isAme) continue;
+    const deactivate = row.querySelector('.row-actions a[href*="action=deactivate"]');
+    const deleteLink = row.querySelector(
+      '.row-actions a[href*="action=delete-plugin"], .row-actions a.delete'
+    );
+    const activate = row.querySelector('.row-actions a[href*="action=activate"]');
+    const hrefForPlugin =
+      deactivate?.getAttribute('href') || deleteLink?.getAttribute('href') || '';
+    const pluginMatch = hrefForPlugin.match(/[?&]plugin=([^&]+)/i);
+    return {
+      found: true,
+      active: Boolean(deactivate),
+      inactive: Boolean(activate) && !deactivate,
+      deactivateHref: deactivate?.getAttribute('href') || null,
+      deleteHref: deleteLink?.getAttribute('href') || null,
+      plugin:
+        (pluginMatch ? decodeURIComponent(pluginMatch[1].replace(/\+/g, ' ')) : '') ||
+        row.getAttribute('data-plugin') ||
+        '',
+      slug: slug || id,
+      title: name.slice(0, 80),
+    };
+  }
+  return { found: false };
+}
 
-      const deactivate = row.querySelector('a[href*="action=deactivate"]');
-      const deleteLink = row.querySelector('a[href*="action=delete-plugin"], a.delete, a[href*="action=delete"]');
-      const activate = row.querySelector('a[href*="action=activate"]');
-      const pluginMatch =
-        (deactivate?.getAttribute('href') || deleteLink?.getAttribute('href') || '').match(
-          /[?&]plugin=([^&]+)/i
-        );
-      return {
-        found: true,
-        active: Boolean(deactivate),
-        inactive: Boolean(activate) && !deactivate,
-        deactivateHref: deactivate?.getAttribute('href') || null,
-        deleteHref: deleteLink?.getAttribute('href') || null,
-        plugin: pluginMatch ? decodeURIComponent(pluginMatch[1].replace(/\+/g, ' ')) : '',
-        title: title.trim().slice(0, 80),
-      };
-    }
-    return { found: false };
+async function findAmeActionsInPage(page) {
+  return evaluateSafe(page, scanAmeRow);
+}
+
+async function readPageHint(page) {
+  return evaluateSafe(page, () => {
+    const ftp = Boolean(
+      document.querySelector(
+        '#request-filesystem-credentials-form, #request-filesystem-credentials-dialog, #upgrade'
+      )
+    );
+    const verify = Boolean(document.querySelector('input[name="verify-delete"]'));
+    const notice = (
+      document.querySelector('.notice-error, .notice-success, #message, .updated, .error')
+        ?.innerText || ''
+    )
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 160);
+    return { url: location.href, ftp, verify, notice };
   });
 }
 
@@ -74,190 +103,332 @@ async function gotoPluginsList(page, base) {
   await sleep(400);
 }
 
-/**
- * HTTP/in-page: deactivate rồi delete Admin Menu Editor nếu có.
- */
-async function removeAdminMenuEditorViaHttp(page, base, log) {
-  log('HTTP: kiểm tra Admin Menu Editor trên Plugins...');
-  await gotoPluginsList(page, base);
+async function confirmVerifyDeleteIfPresent(page, log) {
+  const has = await evaluateSafe(page, () =>
+    Boolean(document.querySelector('input[name="verify-delete"]'))
+  );
+  if (!has) return false;
+  log('Trang confirm WP — bấm Yes, delete these files...');
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => {}),
+    page.evaluate(() => {
+      const btn = document.querySelector('input[name="verify-delete"]');
+      const form = btn?.form;
+      if (form && typeof form.requestSubmit === 'function') form.requestSubmit(btn);
+      else btn?.click();
+    }),
+  ]);
+  await sleep(400);
+  return true;
+}
 
-  let info = await findAmeActionsInPage(page);
-  if (!info.found) {
-    log('⏭ Không có Admin Menu Editor — bỏ qua gỡ.');
-    return { removed: false, skipped: true, via: 'http' };
+async function waitAmeGone(page, timeoutMs = 25000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const info = await findAmeActionsInPage(page).catch(() => ({ found: true }));
+    if (!info.found) return true;
+    const hint = await readPageHint(page);
+    if (hint.ftp) {
+      throw new Error(
+        'WP hỏi FTP/filesystem credentials — host không cho xóa plugin trực tiếp.'
+      );
+    }
+    if (hint.verify) {
+      await confirmVerifyDeleteIfPresent(page, () => {});
+    }
+    await sleep(400);
   }
+  return false;
+}
 
-  log(`Phát hiện Admin Menu Editor (“${info.title || info.plugin || 'plugin'}”) — gỡ...`);
+/**
+ * WP admin hiện đại xóa plugin bằng AJAX (wp.updates.deletePlugin), không phải GET href.
+ */
+async function deleteAmeViaWpAjax(page, info, log) {
+  const pluginFile = info.plugin || '';
+  const slug = info.slug || 'admin-menu-editor';
+  if (!pluginFile) return { ok: false, reason: 'no-plugin-file' };
 
-  if (info.active && info.deactivateHref) {
-    const url = absAdminUrl(base, info.deactivateHref);
-    log('HTTP: Deactivate Admin Menu Editor...');
-    await page.goto(url, GOTO);
+  log(`AJAX: wp.updates.deletePlugin (${pluginFile})...`);
+  const result = await evaluateSafe(
+    page,
+    async (plugin, slugName) => {
+      const api = window.wp && window.wp.updates;
+      if (!api || typeof api.deletePlugin !== 'function') {
+        return { ok: false, reason: 'no-wp-updates' };
+      }
+      try {
+        const ret = api.deletePlugin({ plugin, slug: slugName });
+        if (ret && typeof ret.then === 'function') {
+          await ret;
+        } else {
+          await new Promise((r) => setTimeout(r, 2500));
+        }
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, reason: String(err && err.message ? err.message : err).slice(0, 160) };
+      }
+    },
+    pluginFile,
+    slug
+  );
+  if (!result?.ok) return result || { ok: false, reason: 'ajax-fail' };
+  const gone = await waitAmeGone(page, 20000);
+  return gone ? { ok: true } : { ok: false, reason: 'ajax-row-still-there' };
+}
+
+async function deleteAmeViaRowClick(page, log) {
+  log('Click Delete trên hàng plugin...');
+  const clicked = await withAcceptedDialogs(
+    page,
+    async () => {
+      const result = await evaluateSafe(page, () => {
+        const rows = Array.from(document.querySelectorAll('#the-list > tr'));
+        for (const row of rows) {
+          if (row.classList.contains('plugin-update-tr')) continue;
+          const slug = String(row.getAttribute('data-slug') || '').toLowerCase();
+          const plugin = String(row.getAttribute('data-plugin') || '').toLowerCase();
+          const id = String(row.id || '').toLowerCase();
+          const name = (row.querySelector('.plugin-title strong')?.textContent || '').trim();
+          const isAme =
+            slug.includes('admin-menu-editor') ||
+            plugin.includes('admin-menu-editor') ||
+            id === 'admin-menu-editor' ||
+            id === 'admin-menu-editor-pro' ||
+            /^admin menu editor\b/i.test(name);
+          if (!isAme) continue;
+          const a = row.querySelector('.row-actions a.delete, .row-actions a[href*="delete-plugin"]');
+          if (!a) return { ok: false, reason: 'no-delete-link' };
+          a.click();
+          return { ok: true };
+        }
+        return { ok: false, reason: 'no-row' };
+      });
+      if (result?.ok) {
+        await sleep(800);
+        await confirmVerifyDeleteIfPresent(page, log);
+      }
+      return result;
+    },
+    log
+  );
+  if (!clicked?.ok) {
+    log(`⚠ Chưa click được Delete (${clicked?.reason || 'unknown'}) — thử cách khác.`);
+    return false;
+  }
+  return waitAmeGone(page, 25000);
+}
+
+async function deleteAmeViaHref(page, base, info, log) {
+  if (!info.deleteHref) return false;
+  log('Goto link Delete + confirm Yes, delete...');
+  await withAcceptedDialogs(
+    page,
+    async () => {
+      await page.goto(absAdminUrl(base, info.deleteHref), GOTO);
+      await sleepExact(600);
+      await confirmVerifyDeleteIfPresent(page, log);
+    },
+    log
+  );
+  if (await waitAmeGone(page, 12000)) return true;
+  await gotoPluginsList(page, base);
+  return !(await findAmeActionsInPage(page)).found;
+}
+
+async function deleteAmeViaBulk(page, log) {
+  log('Bulk: tick Admin Menu Editor → Delete selected...');
+  const bulk = await evaluateSafe(page, () => {
+    const rows = Array.from(document.querySelectorAll('#the-list > tr'));
+    let checked = false;
+    for (const row of rows) {
+      const plugin = String(
+        row.getAttribute('data-plugin') || row.querySelector('input[name="checked[]"]')?.value || ''
+      ).toLowerCase();
+      const slug = String(row.getAttribute('data-slug') || row.id || '').toLowerCase();
+      if (!plugin.includes('admin-menu-editor') && !slug.includes('admin-menu-editor')) continue;
+      const cb = row.querySelector('input[type="checkbox"][name="checked[]"]');
+      if (!cb) continue;
+      cb.checked = true;
+      cb.dispatchEvent(new Event('change', { bubbles: true }));
+      checked = true;
+    }
+    if (!checked) return { ok: false, reason: 'no-checkbox' };
+    const form =
+      document.querySelector('#bulk-action-form') ||
+      document.querySelector('form#posts-filter') ||
+      document.querySelector('#the-list')?.closest('form');
+    const action =
+      form?.querySelector('select[name="action"]') || document.querySelector('select[name="action"]');
+    if (action) {
+      action.value = 'delete-selected';
+      action.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    const apply = document.querySelector('#doaction');
+    if (form && typeof form.requestSubmit === 'function' && apply) {
+      form.requestSubmit(apply);
+    } else {
+      apply?.click();
+    }
+    return { ok: true };
+  });
+  if (!bulk?.ok) return false;
+  await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => {});
+  await sleep(400);
+  await confirmVerifyDeleteIfPresent(page, log);
+  return waitAmeGone(page, 20000);
+}
+
+async function deactivateAme(page, base, info, log) {
+  if (!info.found || !info.active) return info;
+
+  if (info.deactivateHref) {
+    log('Deactivate Admin Menu Editor (đang Active — WP chỉ Delete được khi inactive)...');
+    await page.goto(absAdminUrl(base, info.deactivateHref), GOTO);
     await sleepExact(500);
     await gotoPluginsList(page, base);
     info = await findAmeActionsInPage(page);
   }
 
-  // Sau deactivate: tìm lại Delete
-  if (!info.deleteHref) {
+  if (info.found && info.active) {
+    log('⚠ Vẫn Active — click Deactivate trên hàng...');
+    await withAcceptedDialogs(
+      page,
+      async () => {
+        await evaluateSafe(page, () => {
+          const rows = Array.from(document.querySelectorAll('#the-list > tr'));
+          for (const row of rows) {
+            const plugin = String(row.getAttribute('data-plugin') || '').toLowerCase();
+            const slug = String(row.getAttribute('data-slug') || row.id || '').toLowerCase();
+            if (!plugin.includes('admin-menu-editor') && !slug.includes('admin-menu-editor')) continue;
+            row.querySelector('.row-actions a[href*="action=deactivate"]')?.click();
+            return;
+          }
+        });
+        await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+      },
+      log
+    );
+    await sleep(400);
     await gotoPluginsList(page, base);
     info = await findAmeActionsInPage(page);
   }
 
-  if (info.found && info.deleteHref) {
-    const delUrl = absAdminUrl(base, info.deleteHref);
-    log('HTTP: Delete Admin Menu Editor...');
-    // WP có thể hỏi confirm — accept dialog
-    const onDialog = async (dialog) => {
-      try {
-        await dialog.accept();
-      } catch {
-        /* ignore */
-      }
-    };
-    page.on('dialog', onDialog);
-    try {
-      await page.goto(delUrl, GOTO);
-      await sleepExact(600);
-      // Trang confirm “Yes, delete” nếu có
-      await page.evaluate(() => {
-        const btn =
-          document.querySelector('#submit, input[name="verify-delete"], button[type="submit"]') ||
-          Array.from(document.querySelectorAll('a.button, button, input[type="submit"]')).find(
-            (el) => /yes.*delete|delete|xóa/i.test((el.innerText || el.value || '').trim())
-          );
-        btn?.click?.();
-      });
-      await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
-      await sleep(400);
-    } finally {
-      page.off('dialog', onDialog);
-    }
-  } else if (info.found) {
-    // Bulk delete: tick checkbox + action delete-selected
-    log('HTTP: Delete qua bulk (không thấy link Delete đơn)...');
-    const bulk = await page.evaluate((files) => {
-      const want = files.map((f) => f.toLowerCase());
-      const rows = Array.from(document.querySelectorAll('#the-list tr'));
-      let checked = false;
-      for (const row of rows) {
-        const cb = row.querySelector('input[type="checkbox"][name="checked[]"]');
-        if (!cb) continue;
-        const v = decodeURIComponent(String(cb.value || '')).toLowerCase();
-        if (want.some((f) => v === f || v.includes('admin-menu-editor'))) {
-          cb.checked = true;
-          cb.dispatchEvent(new Event('change', { bubbles: true }));
-          checked = true;
-        }
-      }
-      if (!checked) return { ok: false, reason: 'no-checkbox' };
-      const action = document.querySelector('select[name="action"]');
-      if (action) {
-        action.value = 'delete-selected';
-        action.dispatchEvent(new Event('change', { bubbles: true }));
-      }
-      const apply =
-        document.querySelector('#doaction') ||
-        document.querySelector('input[type="submit"][id^="doaction"]');
-      apply?.click?.();
-      return { ok: true };
-    }, AME_PLUGIN_FILES);
-    if (!bulk.ok) throw new Error('Không tick được Admin Menu Editor để xóa.');
-    await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
-    await sleep(400);
-    await page.evaluate(() => {
-      const btn =
-        document.querySelector('input[name="verify-delete"], #submit') ||
-        Array.from(document.querySelectorAll('input[type="submit"], button')).find((el) =>
-          /yes.*delete|delete|xóa/i.test((el.value || el.innerText || '').trim())
-        );
-      btn?.click?.();
-    });
-    await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
-  }
-
-  await gotoPluginsList(page, base);
-  const after = await findAmeActionsInPage(page);
-  if (after.found) {
-    throw new Error('Đã thử gỡ Admin Menu Editor nhưng vẫn còn trên Plugins list.');
-  }
-  log('✓ Đã gỡ Admin Menu Editor (deactivate + delete).');
-  return { removed: true, skipped: false, via: 'http' };
+  return info;
 }
 
-async function removeAdminMenuEditorViaBrowser(page, base, log) {
-  log('Chrome: kiểm tra / gỡ Admin Menu Editor...');
+async function deleteAmeAllWays(page, base, info, log) {
+  const ajax = await deleteAmeViaWpAjax(page, info, log);
+  if (ajax.ok) return true;
+  log(`⚠ AJAX delete không xong (${ajax.reason}) — thử click / href / bulk...`);
+
+  await gotoPluginsList(page, base);
+  info = await findAmeActionsInPage(page);
+  if (!info.found) return true;
+
+  if (await deleteAmeViaRowClick(page, log)) return true;
+
+  await gotoPluginsList(page, base);
+  info = await findAmeActionsInPage(page);
+  if (!info.found) return true;
+
+  if (await deleteAmeViaHref(page, base, info, log)) return true;
+
+  await gotoPluginsList(page, base);
+  if (!(await findAmeActionsInPage(page)).found) return true;
+
+  return deleteAmeViaBulk(page, log);
+}
+
+async function removeAmeCore(page, base, log, label) {
   await gotoPluginsList(page, base);
   let info = await findAmeActionsInPage(page);
   if (!info.found) {
     log('⏭ Không có Admin Menu Editor — bỏ qua gỡ.');
-    return { removed: false, skipped: true, via: 'browser' };
+    return { removed: false, skipped: true, via: label };
   }
 
-  log(`Phát hiện Admin Menu Editor — Deactivate + Delete (Chrome)...`);
-  const onDialog = async (dialog) => {
-    try {
-      await dialog.accept();
-    } catch {
-      /* ignore */
+  log(
+    `Phát hiện Admin Menu Editor (“${info.title || info.plugin}”, file=${info.plugin || '?'}, ${
+      info.active ? 'active' : 'inactive'
+    }) — luôn Delete (Active thì Deactivate trước).`
+  );
+
+  info = await deactivateAme(page, base, info, log);
+  if (!info.found) {
+    log('✓ Admin Menu Editor đã biến sau Deactivate — vẫn kiểm tra Delete...');
+    await gotoPluginsList(page, base);
+    info = await findAmeActionsInPage(page);
+    if (!info.found) {
+      log('✓ Không còn Admin Menu Editor trên Plugins.');
+      return { removed: true, skipped: false, via: label };
     }
-  };
-  page.on('dialog', onDialog);
-  try {
-    if (info.active && info.deactivateHref) {
-      await page.goto(absAdminUrl(base, info.deactivateHref), GOTO);
-      await sleepExact(500);
-      await gotoPluginsList(page, base);
-      info = await findAmeActionsInPage(page);
-    }
-    if (info.deleteHref) {
-      await page.goto(absAdminUrl(base, info.deleteHref), GOTO);
-      await sleep(400);
-      await page.evaluate(() => {
-        const btn =
-          document.querySelector('input[name="verify-delete"], #submit') ||
-          Array.from(document.querySelectorAll('input[type="submit"], button, a.button')).find(
-            (el) => /yes.*delete|delete|xóa/i.test((el.innerText || el.value || '').trim())
-          );
-        btn?.click?.();
-      });
-      await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
-    }
-  } finally {
-    page.off('dialog', onDialog);
+  }
+
+  if (info.active) {
+    log('⚠ Vẫn Active — vẫn thử Delete (WP thường chặn; sẽ retry Deactivate+Delete).');
+  } else {
+    log('Inactive — Delete plugin...');
+  }
+
+  if (await deleteAmeAllWays(page, base, info, log)) {
+    log('✓ Đã gỡ Admin Menu Editor (deactivate nếu cần + delete).');
+    return { removed: true, skipped: false, via: label };
+  }
+
+  // Còn hàng và vẫn Active → deactivate lần nữa rồi Delete lại
+  await gotoPluginsList(page, base);
+  info = await findAmeActionsInPage(page);
+  if (!info.found) {
+    log('✓ Đã gỡ Admin Menu Editor.');
+    return { removed: true, skipped: false, via: label };
+  }
+  if (info.active) {
+    info = await deactivateAme(page, base, info, log);
+  }
+  if (info.found && (await deleteAmeAllWays(page, base, info, log))) {
+    log('✓ Đã gỡ Admin Menu Editor (retry).');
+    return { removed: true, skipped: false, via: label };
   }
 
   await gotoPluginsList(page, base);
   const after = await findAmeActionsInPage(page);
-  if (after.found) {
-    throw new Error('Chrome: Admin Menu Editor vẫn còn sau khi gỡ.');
+  if (!after.found) {
+    log('✓ Đã gỡ Admin Menu Editor.');
+    return { removed: true, skipped: false, via: label };
   }
-  log('✓ Đã gỡ Admin Menu Editor (Chrome).');
-  return { removed: true, skipped: false, via: 'browser' };
+
+  const hint = await readPageHint(page);
+  const extra = stripHtmlText(hint.notice || '').slice(0, 120);
+  throw new Error(
+    `Vẫn còn trên Plugins list (${after.active ? 'vẫn Active' : 'inactive'}). ${
+      extra || hint.url || ''
+    }`.trim()
+  );
 }
 
 /**
- * Trước bước Backup/Updraft: nếu có Admin Menu Editor → deactivate + delete.
- * Fail → log cảnh báo, không chặn Backup (trừ khi muốn cứng sau).
+ * Trước bước Backup/Updraft: nếu có Admin Menu Editor → deactivate (nếu Active) rồi luôn Delete.
+ * Fail → log cảnh báo, không chặn Backup.
  */
 export async function removeAdminMenuEditorIfPresent(page, log) {
   const base = originOf(page.url());
   if (!base) throw new Error('Không xác định origin WP để kiểm tra plugin.');
 
   try {
-    if (isHttpStepsEnabled()) {
-      try {
-        return await removeAdminMenuEditorViaHttp(page, base, log);
-      } catch (err) {
-        log(
-          `⚠ Gỡ Admin Menu Editor HTTP fail — fallback Chrome: ${String(err?.message || err).slice(0, 140)}`
-        );
-      }
+    const via = isHttpStepsEnabled() ? 'http' : 'browser';
+    try {
+      return await removeAmeCore(page, base, log, via);
+    } catch (err) {
+      if (!isHttpStepsEnabled()) throw err;
+      log(
+        `⚠ Gỡ Admin Menu Editor lần 1 fail — thử lại: ${String(err?.message || err).slice(0, 160)}`
+      );
+      return await removeAmeCore(page, base, log, 'browser');
     }
-    return await removeAdminMenuEditorViaBrowser(page, base, log);
   } catch (err) {
     log(
-      `⚠ Không gỡ được Admin Menu Editor (${String(err?.message || err).slice(0, 140)}) — tiếp tục Backup.`
+      `⚠ Không gỡ được Admin Menu Editor (${String(err?.message || err).slice(0, 180)}) — tiếp tục Backup.`
     );
     return { removed: false, skipped: false, error: String(err?.message || err) };
   }
