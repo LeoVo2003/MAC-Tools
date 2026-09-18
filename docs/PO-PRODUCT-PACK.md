@@ -240,7 +240,7 @@ PRD, SOP user, API notes, roadmap living doc.
 ## 14. Điểm còn thiếu / chưa chắc 100%
 
 - Spec CPU/RAM **host** VPS thật (chỉ biết limit container).  
-- Nguồn/công thức chính xác field **Guide** trong Output (link doc cố định hay lấy từ đâu).  
+- Field **Guide** Output: mặc định `https://note.macmarketing.us/quan-ly-website-goi-f` (ô “Link tài liệu hướng dẫn”; không dùng Google Doc cũ).  
 - Cách dựng **Login URL** (wp-login / hide-login path).  
 - Chi tiết Notes/Role khi Add Account trên WPM (chat cũ từng có Notes=`chủ tiệm`).  
 - `develop` còn dùng cho preview hay chỉ `main`?  

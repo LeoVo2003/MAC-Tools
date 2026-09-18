@@ -321,7 +321,7 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
 
     const finalDoc =
       docLink ||
-      'https://docs.google.com/document/d/1pMuhxjAfY4i6jOyk2CcAUYWBp8CdLbJ-7IpQaiYG0wo/edit?usp=sharing';
+      'https://note.macmarketing.us/quan-ly-website-goi-f';
 
     const loginUrl = `${websiteUrl.replace(/\/$/, '')}/mac-login`;
     const existsPassNote =
