@@ -27,6 +27,8 @@ import {
   loginWithWpm,
   toPublicUser,
   getUserWpmCredentials,
+  listUsersPublic,
+  resetUserPassword,
 } from './src/userStore.js';
 import { sessionMiddleware, requireAuth, requireAdmin, currentPublicUser } from './src/auth.js';
 import { createJobQueue } from './src/jobQueue.js';
@@ -155,6 +157,20 @@ export function createApp() {
       res.json({ ok: true, user: toPublicUser(user) });
     } catch (err) {
       res.status(500).json({ error: err?.message || String(err) });
+    }
+  });
+
+  app.get('/api/users', requireAuth, requireAdmin, (_req, res) => {
+    res.json({ users: listUsersPublic() });
+  });
+
+  /** Gỡ password đã lưu — user login lại bằng pass WPM đúng thì tool lưu lại. */
+  app.post('/api/users/:id/reset-password', requireAuth, requireAdmin, (req, res) => {
+    try {
+      const user = resetUserPassword(String(req.params.id || ''));
+      res.json({ ok: true, user: toPublicUser(user) });
+    } catch (err) {
+      res.status(404).json({ error: err?.message || String(err) });
     }
   });
 

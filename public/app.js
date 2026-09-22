@@ -205,8 +205,10 @@ function applyRoleUi(user) {
     document.querySelector('.tab[data-tab="run"]')?.classList.add('active');
     const tabRun = document.getElementById('tab-run');
     const tabReports = document.getElementById('tab-reports');
+    const tabAccounts = document.getElementById('tab-accounts');
     if (tabRun) tabRun.hidden = false;
     if (tabReports) tabReports.hidden = true;
+    if (tabAccounts) tabAccounts.hidden = true;
     const mainRadio = form?.querySelector('input[name="webTargetMode"][value="main"]');
     if (mainRadio) mainRadio.checked = true;
   }
@@ -834,13 +836,88 @@ document.querySelectorAll('.tab').forEach((btn) => {
     const tab = btn.getAttribute('data-tab');
     document.getElementById('tab-run').hidden = tab !== 'run';
     const reports = document.getElementById('tab-reports');
+    const accounts = document.getElementById('tab-accounts');
     if (reports) reports.hidden = tab !== 'reports';
+    if (accounts) accounts.hidden = tab !== 'accounts';
     syncLiveLayoutClass();
     if (tab === 'reports') {
       loadReports();
       loadHealth();
     }
+    if (tab === 'accounts') loadAccounts();
   });
+});
+
+async function loadAccounts() {
+  const status = document.getElementById('accountsStatus');
+  const tbody = document.querySelector('#accountsTable tbody');
+  if (!tbody) return;
+  if (status) {
+    status.className = 'hint hint--muted';
+    status.textContent = 'Đang tải...';
+  }
+  try {
+    const res = await fetch('/api/users');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Không tải được danh sách.');
+    const users = Array.isArray(data.users) ? data.users : [];
+    tbody.innerHTML = users
+      .map((u) => {
+        const when = formatVnDateTime(u.updatedAt || u.createdAt) || '—';
+        const stored = u.passwordStored
+          ? '<span class="badge warn">Đã lưu</span>'
+          : '<span class="badge idle">Chưa lưu</span>';
+        return `<tr>
+          <td class="mono">${escapeHtml(u.username)}</td>
+          <td>${escapeHtml(u.role || 'user')}</td>
+          <td>${stored}</td>
+          <td class="muted">${escapeHtml(when)}</td>
+          <td><button type="button" class="danger tiny" data-reset-user="${escapeHtml(u.id)}" data-reset-name="${escapeHtml(u.username)}">Reset pass</button></td>
+        </tr>`;
+      })
+      .join('');
+    if (status) {
+      status.className = 'hint hint--muted';
+      status.textContent = users.length ? `${users.length} tài khoản` : 'Chưa có tài khoản.';
+    }
+  } catch (err) {
+    if (status) {
+      status.className = 'hint hint--error';
+      status.textContent = err?.message || String(err);
+    }
+  }
+}
+
+document.getElementById('refreshAccountsBtn')?.addEventListener('click', () => loadAccounts());
+
+document.getElementById('accountsTable')?.addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-reset-user]');
+  if (!btn) return;
+  const id = btn.getAttribute('data-reset-user');
+  const name = btn.getAttribute('data-reset-name') || 'user này';
+  if (!id) return;
+  const ok = window.confirm(
+    `Reset password của ${name}?\nPass đã lưu sẽ bị xóa. User login lại bằng pass WPM đúng thì tool lưu lại.`
+  );
+  if (!ok) return;
+  btn.disabled = true;
+  const status = document.getElementById('accountsStatus');
+  try {
+    const res = await fetch(`/api/users/${encodeURIComponent(id)}/reset-password`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Reset thất bại.');
+    if (status) {
+      status.className = 'hint hint--ok';
+      status.textContent = `Đã reset ${name}. Bảo user login lại bằng pass WPM đúng.`;
+    }
+    await loadAccounts();
+  } catch (err) {
+    if (status) {
+      status.className = 'hint hint--error';
+      status.textContent = err?.message || String(err);
+    }
+    btn.disabled = false;
+  }
 });
 
 function formatDuration(ms) {

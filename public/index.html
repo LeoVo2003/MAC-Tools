@@ -49,6 +49,7 @@
       <nav class="tabs" data-admin-only hidden>
         <button type="button" class="tab active" data-tab="run">Job</button>
         <button type="button" class="tab" data-tab="reports">Báo cáo</button>
+        <button type="button" class="tab" data-tab="accounts">Tài khoản</button>
       </nav>
 
       <div id="tab-run" class="run-workspace">
@@ -290,6 +291,33 @@
             <button type="button" id="refreshHealthBtn" class="secondary tiny">Refresh health</button>
           </div>
           <pre id="healthBox" class="log log-compact"></pre>
+        </section>
+      </div>
+
+      <div id="tab-accounts" hidden>
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Tài khoản</h2>
+            <button type="button" id="refreshAccountsBtn" class="secondary tiny">Refresh</button>
+          </div>
+          <p class="hint hint--muted">
+            Pass WPM được lưu lúc login. Nhập sai lần đầu thì bị khóa pass đó — Reset xóa pass đã lưu, user login lại bằng pass đúng sẽ được lưu mới.
+          </p>
+          <p id="accountsStatus" class="hint"></p>
+          <div class="table-wrap">
+            <table class="data-table accounts-table" id="accountsTable">
+              <thead>
+                <tr>
+                  <th>Email</th>
+                  <th>Role</th>
+                  <th>Pass đã lưu</th>
+                  <th>Cập nhật</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
         </section>
       </div>
 

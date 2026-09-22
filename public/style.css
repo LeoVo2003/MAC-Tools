@@ -148,6 +148,7 @@ body.live-layout .tabs {
 
 #tab-run,
 #tab-reports,
+#tab-accounts,
 #tab-backups {
   width: 100%;
   max-width: 100%;
@@ -1164,6 +1165,17 @@ kbd {
   width: 100%;
   max-width: 100%;
   -webkit-overflow-scrolling: touch;
+}
+
+.accounts-table {
+  table-layout: auto;
+}
+
+.accounts-table th:last-child,
+.accounts-table td:last-child {
+  width: 8.5rem;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .data-table {

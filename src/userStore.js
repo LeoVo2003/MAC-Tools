@@ -79,6 +79,32 @@ export function findUserById(id) {
   return readAll().users.find((u) => u.id === id) || null;
 }
 
+/** Danh sách tài khoản cho admin — không trả password. */
+export function listUsersPublic() {
+  return readAll().users.map((u) => ({
+    id: u.id,
+    username: u.username,
+    role: u.role || 'user',
+    createdAt: u.createdAt || '',
+    updatedAt: u.updatedAt || '',
+    passwordStored: Boolean(u.wpmPasswordEnc),
+  }));
+}
+
+/**
+ * Xóa password đã lưu. Lần login sau nhận pass mới (đúng pass WPM) và lưu lại.
+ */
+export function resetUserPassword(userId) {
+  const data = readAll();
+  const user = data.users.find((u) => u.id === userId);
+  if (!user) throw new Error('Không tìm thấy tài khoản.');
+  user.wpmPasswordEnc = '';
+  user.passwordHash = '';
+  user.updatedAt = new Date().toISOString();
+  writeAll(data);
+  return user;
+}
+
 export async function createUser({ username, password, role = 'user' }) {
   const name = String(username || '').trim();
   const pass = String(password || '');

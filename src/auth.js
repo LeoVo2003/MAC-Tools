@@ -39,7 +39,7 @@ export function requireAuth(req, res, next) {
 
 export function requireAdmin(req, res, next) {
   if (!req.user || req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Chỉ admin mới xem được báo cáo.' });
+    return res.status(403).json({ error: 'Chỉ admin.' });
   }
   next();
 }
