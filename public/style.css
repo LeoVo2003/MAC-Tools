@@ -155,6 +155,16 @@ body.live-layout .tabs {
   min-width: 0;
 }
 
+/* Nút Tài khoản active thì hiện panel, dù attribute hidden còn sót (JS cũ / cache). */
+body:has(.tab[data-tab="accounts"].active) #tab-accounts {
+  display: block !important;
+}
+
+body:has(.tab[data-tab="accounts"].active) #tab-run,
+body:has(.tab[data-tab="accounts"].active) #tab-reports {
+  display: none !important;
+}
+
 .run-workspace {
   display: block;
   width: 100%;

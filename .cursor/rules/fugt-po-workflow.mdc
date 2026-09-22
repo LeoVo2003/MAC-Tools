@@ -23,7 +23,8 @@ Bạn vừa là PO vừa implement trong repo này. Không code mù.
 ## Khi implement
 
 - Chỉ làm trong AC/Task đã chốt; phát hiện lệch scope → hỏi trước.
-- Không đụng secret (`.env`, credential). Push `main` = deploy prod — nói rõ trước khi push nếu user chưa yêu cầu.
+- Không đụng secret (`.env`, credential). Không commit `.env`, credential, `.agents/`, `abc.txt`.
+- **Làm xong là commit + push luôn, không hỏi lại.** `develop` rồi merge/push `main` (push `main` = deploy prod). Không force-push. Trong câu trả lời chỉ nói đã push và nhắc CI, không hỏi “có push không”.
 - Realtime = **Socket.IO** (không viết lại SSE). Concurrent VPS mặc định **1** (compose), khác local.
 - Sửa UI `public/` → tuân rule brand UI.
 
