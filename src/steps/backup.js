@@ -271,34 +271,35 @@ async function installUpdraftViaAdminAjax(page, log) {
     throw new Error('Không lấy được updates ajax_nonce để cài UpdraftPlus.');
   }
 
-  const data = installRes.json?.data || {};
-  const success =
-    installRes.json?.success === true ||
-    data.pluginName ||
-    data.activateUrl ||
-    /folder_exists|already.?installed/i.test(JSON.stringify(installRes.json || {}));
-
+  const data =
+    installRes.json?.data && typeof installRes.json.data === 'object' ? installRes.json.data : {};
+  const raw = JSON.stringify(installRes.json || installRes.text || '');
   const folderExists =
     installRes.json?.success === false &&
-    /folder_exists|already.?installed|destination folder already exists/i.test(
-      JSON.stringify(installRes.json || installRes.text || '')
-    );
+    /folder_exists|destination folder already exists|already installed/i.test(raw);
+  const success = installRes.json?.success === true && Boolean(data.activateUrl || data.pluginName);
 
   if (!success && !folderExists) {
     throw new Error(
       `Install AJAX fail (${installRes.status}): ${String(
-        installRes.json?.data?.errorMessage ||
-          installRes.json?.data?.errorCode ||
-          installRes.text ||
-          ''
+        data.errorMessage || data.errorCode || installRes.text || ''
       ).slice(0, 180)}`
     );
   }
 
-  if (folderExists) log('⏭ Plugin folder đã có — sang Activate.');
-  else log('✓ Install UpdraftPlus OK (admin-ajax).');
+  if (folderExists) {
+    log('⏭ Plugin folder đã có — sang Activate.');
+    return { activateHref: data.activateUrl || null, installed: true };
+  }
 
-  return { activateHref: data.activateUrl || null };
+  if (!data.activateUrl) {
+    throw new Error(
+      'AJAX trả success nhưng không có link Activate — chưa coi là đã cài trên web.'
+    );
+  }
+
+  log('✓ Install UpdraftPlus OK (admin-ajax, có link Activate).');
+  return { activateHref: data.activateUrl, installed: true };
 }
 
 /**
@@ -650,7 +651,7 @@ async function ensureUpdraftInstalledAndActiveViaBrowser(page, base, log) {
 
     if (cardStatus !== 'already-active') {
       log('Chờ nút Activate hiện ra (chưa bấm sớm)...');
-      const deadline = Date.now() + 180000;
+      const deadline = Date.now() + 120000;
       let installingSince = 0;
       let lastInstallLog = 0;
       while (Date.now() < deadline) {
@@ -658,16 +659,25 @@ async function ensureUpdraftInstalledAndActiveViaBrowser(page, base, log) {
         state = await readCard();
         if (state.status === 'installing') {
           if (!installingSince) installingSince = Date.now();
-          if (Date.now() - installingSince > 20000) {
-            log('Installing quá 20s — bỏ card, kiểm tra Plugins list.');
+          const waited = Date.now() - installingSince;
+          if (Date.now() - lastInstallLog > 15000) {
+            log(`… đang Installing… ${Math.round(waited / 1000)}s (đang tải, chưa có trên Plugins list thì chưa cài xong)`);
+            lastInstallLog = Date.now();
+          }
+          const listed = await wpFetchInPage(page, `${base}/wp-admin/plugins.php`, {
+            referer: `${base}/wp-admin/`,
+          }).catch(() => null);
+          if (listed && (pluginRowLooksActive(listed.text) || parseUpdraftActionHref(listed.text, 'activate'))) {
+            log('Plugins list đã có UpdraftPlus trong lúc card còn Installing — sang Activate.');
             state = { status: 'no-card' };
             break;
           }
-          if (Date.now() - lastInstallLog > 8000) {
-            log('… đang Installing… chờ (kẹt thì sang Plugins list)...');
-            lastInstallLog = Date.now();
+          if (waited > 90000) {
+            log('Installing quá 90s và Plugins list vẫn chưa có UpdraftPlus.');
+            state = { status: 'installing' };
+            break;
           }
-          await sleep(1500);
+          await sleep(4000);
           continue;
         }
         installingSince = 0;
