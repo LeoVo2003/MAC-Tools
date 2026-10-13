@@ -1030,116 +1030,140 @@ export async function syncAccountToWPM(page, projectUrl, account, log, targetOpt
   }, targetWeb.id);
   log(`Add Account... (đang có ~${countBefore} account visible trong Endpoint)`);
 
-  const added = await evaluateSafe(page, (webId) => {
-    const root =
-      document.getElementById(webId) ||
-      document.querySelector(`#websContainer [id="${webId}"]`) ||
-      document.body;
-    const visible = (el) => {
-      if (!el) return false;
-      const st = window.getComputedStyle(el);
-      if (st.display === 'none' || st.visibility === 'hidden') return false;
-      const r = el.getBoundingClientRect();
-      return r.width > 0 && r.height > 0;
-    };
-    const hit = Array.from(root.querySelectorAll('a, button, span, div[role="button"]')).find(
-      (el) => {
-        const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
-        return /^add account\s*\+?$/i.test(t) && visible(el);
-      }
-    );
-    if (!hit) return { ok: false };
-    const mark = `afp-add-acc-${Date.now()}`;
-    hit.setAttribute('data-afp-add-account', mark);
-    hit.scrollIntoView?.({ block: 'center' });
-    return { ok: true, mark };
-  }, targetWeb.id);
-
-  if (!added?.ok) {
-    throw new Error('Endpoint đã mở nhưng không thấy nút Add Account visible.');
-  }
-  try {
-    await page.click(`[data-afp-add-account="${added.mark}"]`);
-  } catch {
-    await evaluateSafe(page, (mark) => {
-      document.querySelector(`[data-afp-add-account="${mark}"]`)?.click();
-    }, added.mark);
-  }
-
   let appeared = false;
-  const waitUntil = Date.now() + 15000;
-  while (Date.now() < waitUntil) {
-    const info = await evaluateSafe(page, (webId, before) => {
+  let sawButton = false;
+  for (let attempt = 1; attempt <= 3 && !appeared; attempt += 1) {
+    await page.keyboard.press('Escape').catch(() => {});
+    const target = await evaluateSafe(page, (webId) => {
+      document
+        .querySelectorAll(
+          '.offcanvas.show .btn-close, .offcanvas.show [data-bs-dismiss="offcanvas"], .sidebar.show .btn-close, .modal-backdrop, .offcanvas-backdrop'
+        )
+        .forEach((el) => el.click());
+
       const root =
         document.getElementById(webId) ||
         document.querySelector(`#websContainer [id="${webId}"]`) ||
         document.body;
-
-      const visibleInput = (el) => {
-        if (!el || el.disabled) return false;
-        if (el.type === 'hidden' || el.type === 'checkbox' || el.type === 'radio') return false;
+      const visible = (el) => {
+        if (!el) return false;
         const st = window.getComputedStyle(el);
         if (st.display === 'none' || st.visibility === 'hidden') return false;
         const r = el.getBoundingClientRect();
-        return r.width > 0 && r.height > 0;
+        return r.width > 8 && r.height > 8;
       };
-
-      const labelCount = Array.from(
-        root.querySelectorAll('label, .form-label, span, div, p, strong')
-      ).filter((el) => {
-        const st = window.getComputedStyle(el);
-        if (st.display === 'none' || st.visibility === 'hidden') return false;
-        const r = el.getBoundingClientRect();
-        if (r.width <= 0 || r.height <= 0) return false;
-        const t = (el.childNodes?.[0]?.textContent || el.textContent || '')
-          .replace(/\s+/g, ' ')
-          .trim();
-        return /^username\s*\*?$/i.test(t) && t.length < 24;
-      }).length;
-
-      const inputs = Array.from(root.querySelectorAll('input')).filter(visibleInput);
-      const emptyText = inputs.filter(
-        (el) => el.type !== 'password' && !String(el.value || '').trim()
-      );
-
-      let emptyNearUser = false;
-      for (const lab of root.querySelectorAll('label, .form-label, span, div, p, strong')) {
-        const t = (lab.textContent || '').replace(/\s+/g, ' ').trim();
-        if (!/^username/i.test(t) || t.length > 30) continue;
-        const r = lab.getBoundingClientRect();
-        if (r.width <= 0 || r.height <= 0) continue;
-        const scope =
-          lab.closest('.mb-3, .form-group, .col, .row, .form-floating, div') || lab.parentElement;
-        const inp = scope && Array.from(scope.querySelectorAll('input')).find(visibleInput);
-        if (inp && !String(inp.value || '').trim()) {
-          emptyNearUser = true;
-          break;
-        }
-      }
-
+      const hits = Array.from(root.querySelectorAll('a, button, span, div')).filter((el) => {
+        const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        return /^add account\s*\+?$/i.test(t) && visible(el);
+      });
+      hits.sort((a, b) => {
+        const ra = a.getBoundingClientRect();
+        const rb = b.getBoundingClientRect();
+        return ra.width * ra.height - rb.width * rb.height;
+      });
+      const hit = hits[0];
+      if (!hit) return null;
+      hit.scrollIntoView({ block: 'center', inline: 'center' });
+      const r = hit.getBoundingClientRect();
+      const x = Math.round(r.left + r.width / 2);
+      const y = Math.round(r.top + r.height / 2);
+      const top = document.elementFromPoint(x, y);
+      const covered = Boolean(top && top !== hit && !hit.contains(top));
       return {
-        labelCount,
-        emptyText: emptyText.length,
-        emptyNearUser,
-        grew: labelCount > before,
-        inputCount: inputs.length,
+        x,
+        y,
+        covered,
+        top: String(top?.className || top?.tagName || '').slice(0, 80),
       };
-    }, targetWeb.id, countBefore);
+    }, targetWeb.id);
 
-    if ((info.emptyNearUser || info.grew || info.emptyText > 0) && info.inputCount > 0) {
-      appeared = true;
-      log(
-        info.grew
-          ? `Đã thêm account mới (${countBefore} → ${info.labelCount}, inputs=${info.inputCount}).`
-          : `Thấy form account trống (emptyNearUser=${info.emptyNearUser}, emptyInputs=${info.emptyText}, inputs=${info.inputCount}).`
-      );
-      break;
+    if (!target) break;
+    sawButton = true;
+    if (target.covered) {
+      log(`⚠ Add Account bị che (${target.top}) — đóng lớp phủ rồi bấm lại (${attempt}/3)...`);
+      await sleepExact(400);
+      continue;
     }
-    await sleepExact(300);
+    await page.mouse.click(target.x, target.y, { delay: 40 });
+
+    const waitUntil = Date.now() + 8000;
+    while (Date.now() < waitUntil && !appeared) {
+      const info = await evaluateSafe(page, (webId, before) => {
+        const root =
+          document.getElementById(webId) ||
+          document.querySelector(`#websContainer [id="${webId}"]`) ||
+          document.body;
+
+        const visibleInput = (el) => {
+          if (!el || el.disabled) return false;
+          if (el.type === 'hidden' || el.type === 'checkbox' || el.type === 'radio') return false;
+          const st = window.getComputedStyle(el);
+          if (st.display === 'none' || st.visibility === 'hidden') return false;
+          const r = el.getBoundingClientRect();
+          return r.width > 0 && r.height > 0;
+        };
+
+        const labelCount = Array.from(
+          root.querySelectorAll('label, .form-label, span, div, p, strong')
+        ).filter((el) => {
+          const st = window.getComputedStyle(el);
+          if (st.display === 'none' || st.visibility === 'hidden') return false;
+          const r = el.getBoundingClientRect();
+          if (r.width <= 0 || r.height <= 0) return false;
+          const t = (el.childNodes?.[0]?.textContent || el.textContent || '')
+            .replace(/\s+/g, ' ')
+            .trim();
+          return /^username\s*\*?$/i.test(t) && t.length < 24;
+        }).length;
+
+        const inputs = Array.from(root.querySelectorAll('input')).filter(visibleInput);
+        const emptyText = inputs.filter(
+          (el) => el.type !== 'password' && !String(el.value || '').trim()
+        );
+
+        let emptyNearUser = false;
+        for (const lab of root.querySelectorAll('label, .form-label, span, div, p, strong')) {
+          const t = (lab.textContent || '').replace(/\s+/g, ' ').trim();
+          if (!/^username/i.test(t) || t.length > 30) continue;
+          const r = lab.getBoundingClientRect();
+          if (r.width <= 0 || r.height <= 0) continue;
+          const scope =
+            lab.closest('.mb-3, .form-group, .col, .row, .form-floating, div') || lab.parentElement;
+          const inp = scope && Array.from(scope.querySelectorAll('input')).find(visibleInput);
+          if (inp && !String(inp.value || '').trim()) {
+            emptyNearUser = true;
+            break;
+          }
+        }
+
+        return {
+          labelCount,
+          emptyText: emptyText.length,
+          emptyNearUser,
+          grew: labelCount > before,
+          inputCount: inputs.length,
+        };
+      }, targetWeb.id, countBefore);
+
+      if ((info?.emptyNearUser || info?.grew || info?.emptyText > 0) && info?.inputCount > 0) {
+        appeared = true;
+        log(
+          info.grew
+            ? `Đã thêm account mới (${countBefore} → ${info.labelCount}, inputs=${info.inputCount}).`
+            : `Thấy form account trống (emptyNearUser=${info.emptyNearUser}, emptyInputs=${info.emptyText}, inputs=${info.inputCount}).`
+        );
+        break;
+      }
+      await sleepExact(300);
+    }
+  }
+
+  if (!sawButton) {
+    throw new Error('Endpoint đã mở nhưng không thấy nút Add Account visible.');
   }
   if (!appeared) {
     throw new Error(
-      'Bấm Add Account rồi nhưng chưa thấy ô Username/Password visible trong Endpoint. Kiểm tra Endpoint 1 đã mở chưa.'
+      'Endpoint đã mở và đã có account cũ, nhưng bấm Add Account không ra ô Username trống mới. Không ghi đè account đang có.'
     );
   }
   await sleepExact(600);
