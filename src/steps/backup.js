@@ -66,6 +66,36 @@ function pluginRowLooksActive(html) {
   );
 }
 
+/** WP hỏi FTP vì không ghi được wp-content/plugins (filesystem trực tiếp bị chặn). */
+async function detectWpFtpCredentialsPrompt(page) {
+  return evaluateSafe(page, () => {
+    const form = document.querySelector(
+      '#request-filesystem-credentials-form, #request-filesystem-credentials-dialog, form#upgrade'
+    );
+    if (form) {
+      const st = window.getComputedStyle(form);
+      const r = form.getBoundingClientRect();
+      if (st.display !== 'none' && st.visibility !== 'hidden' && (r.width > 0 || form.offsetParent)) {
+        return true;
+      }
+    }
+    const t = (document.body?.innerText || '').slice(0, 2500);
+    return (
+      /connection information/i.test(t) &&
+      /ftp credentials|ftp username|hostname/i.test(t) &&
+      /to perform the requested action|access your web server/i.test(t)
+    );
+  }).catch(() => false);
+}
+
+async function assertNoWpFtpBlock(page) {
+  if (await detectWpFtpCredentialsPrompt(page)) {
+    throw new Error(
+      'WordPress hỏi FTP (Connection Information) — host không cho ghi thư mục plugins. Cần sửa quyền file / wp-config FS_METHOD=direct trên VPS web, rồi cài UpdraftPlus (tool không điền FTP).'
+    );
+  }
+}
+
 /**
  * fetch trong Chrome (credentials include) — tránh Node fetch bị WAF/404 giả
  * (giống createUser HTTP). Retry khi trang vừa navigate (notice / redirect).
@@ -280,11 +310,15 @@ async function installUpdraftViaAdminAjax(page, log) {
   const success = installRes.json?.success === true && Boolean(data.activateUrl || data.pluginName);
 
   if (!success && !folderExists) {
-    throw new Error(
-      `Install AJAX fail (${installRes.status}): ${String(
-        data.errorMessage || data.errorCode || installRes.text || ''
-      ).slice(0, 180)}`
-    );
+    const errMsg = String(
+      data.errorMessage || data.errorCode || installRes.text || ''
+    ).slice(0, 180);
+    if (/ftp|filesystem|credentials|unable to connect|could not create directory/i.test(errMsg)) {
+      throw new Error(
+        `Install bị chặn quyền ghi (FTP/filesystem): ${errMsg}. Sửa quyền plugins trên VPS web hoặc FS_METHOD=direct.`
+      );
+    }
+    throw new Error(`Install AJAX fail (${installRes.status}): ${errMsg}`);
   }
 
   if (folderExists) {
@@ -293,6 +327,7 @@ async function installUpdraftViaAdminAjax(page, log) {
   }
 
   if (!data.activateUrl) {
+    await assertNoWpFtpBlock(page);
     throw new Error(
       'AJAX trả success nhưng không có link Activate — chưa coi là đã cài trên web.'
     );
@@ -647,6 +682,8 @@ async function ensureUpdraftInstalledAndActiveViaBrowser(page, base, log) {
           throw new Error('Không bấm được Install Now và không có updates nonce.');
         }
       }
+      await sleep(800);
+      await assertNoWpFtpBlock(page);
     }
 
     if (cardStatus !== 'already-active') {
@@ -660,6 +697,7 @@ async function ensureUpdraftInstalledAndActiveViaBrowser(page, base, log) {
         if (state.status === 'installing') {
           if (!installingSince) installingSince = Date.now();
           const waited = Date.now() - installingSince;
+          await assertNoWpFtpBlock(page);
           if (Date.now() - lastInstallLog > 15000) {
             log(`… đang Installing… ${Math.round(waited / 1000)}s (đang tải, chưa có trên Plugins list thì chưa cài xong)`);
             lastInstallLog = Date.now();
@@ -673,9 +711,10 @@ async function ensureUpdraftInstalledAndActiveViaBrowser(page, base, log) {
             break;
           }
           if (waited > 90000) {
-            log('Installing quá 90s và Plugins list vẫn chưa có UpdraftPlus.');
-            state = { status: 'installing' };
-            break;
+            await assertNoWpFtpBlock(page);
+            throw new Error(
+              'Installing UpdraftPlus quá 90s mà Plugins list vẫn trống — thường do WordPress hỏi FTP / không ghi được wp-content/plugins. Sửa quyền trên VPS web rồi Run lại.'
+            );
           }
           await sleep(4000);
           continue;
