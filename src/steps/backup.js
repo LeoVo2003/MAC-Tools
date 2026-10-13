@@ -430,6 +430,18 @@ export async function ensureUpdraftInstalledAndActiveViaHttp(page, base, log) {
     }
   }
 
+  if (!pluginRowLooksActive(plugins.text) && !activateHref) {
+    for (let i = 1; i <= 3; i += 1) {
+      log(`… chưa thấy link Activate — đọc lại Plugins list (${i}/3)...`);
+      await sleepExact(1500);
+      plugins = await wpFetchInPage(page, `${base}/wp-admin/plugins.php`, {
+        referer: adminRef,
+      });
+      activateHref = parseUpdraftActionHref(plugins.text, 'activate');
+      if (activateHref || pluginRowLooksActive(plugins.text)) break;
+    }
+  }
+
   if (!pluginRowLooksActive(plugins.text)) {
     if (!activateHref) {
       throw new Error('Không tìm thấy link Activate UpdraftPlus (HTTP).');
@@ -583,6 +595,47 @@ async function ensureUpdraftInstalledAndActiveViaBrowser(page, base, log) {
       }
     }
 
+    if (cardStatus === 'need-install' || cardStatus === 'installing') {
+      log('Card còn Install/Installing — kiểm tra Plugins list trước, tránh cài trùng...');
+      await page.goto(`${base}/wp-admin/plugins.php`, GOTO);
+      await sleep(400);
+      const onList = await page.evaluate(() => {
+        const rows = Array.from(document.querySelectorAll('#the-list > tr'));
+        for (const row of rows) {
+          if (row.classList.contains('plugin-update-tr')) continue;
+          const plugin = String(row.getAttribute('data-plugin') || '').toLowerCase();
+          const title = (row.querySelector('.plugin-title strong')?.textContent || '').trim();
+          if (!plugin.includes('updraftplus/updraftplus.php') && !/^updraftplus\b/i.test(title)) {
+            continue;
+          }
+          if (/exclude/i.test(title)) continue;
+          const activate = row.querySelector('a[href*="action=activate"]');
+          const deactivate = row.querySelector('a[href*="action=deactivate"]');
+          return {
+            found: true,
+            active: Boolean(deactivate),
+            activateHref: activate?.getAttribute('href') || null,
+          };
+        }
+        return { found: false, active: false, activateHref: null };
+      });
+      if (onList.active) {
+        cardStatus = 'already-active';
+        log('Plugins list: UpdraftPlus đã Active — bỏ qua Install Now.');
+      } else if (onList.found && onList.activateHref) {
+        log('Plugin đã có trên đĩa — Activate từ Plugins list, không bấm Install Now.');
+        const href = onList.activateHref.startsWith('http')
+          ? onList.activateHref
+          : `${base}/wp-admin/${onList.activateHref.replace(/^\//, '')}`;
+        await page.goto(href, GOTO);
+        await sleep(500);
+        cardStatus = 'already-active';
+      } else {
+        await page.goto(addPluginsUrl, GOTO);
+        await sleep(400);
+      }
+    }
+
     if (cardStatus === 'need-install') {
       log('Bấm Install Now...');
       if (!(await clickOnCard('install'))) {
@@ -598,14 +651,26 @@ async function ensureUpdraftInstalledAndActiveViaBrowser(page, base, log) {
     if (cardStatus !== 'already-active') {
       log('Chờ nút Activate hiện ra (chưa bấm sớm)...');
       const deadline = Date.now() + 180000;
+      let installingSince = 0;
+      let lastInstallLog = 0;
       while (Date.now() < deadline) {
         await sleep(500);
         state = await readCard();
         if (state.status === 'installing') {
-          log('… đang Installing… chờ...');
-          await sleep(5000);
+          if (!installingSince) installingSince = Date.now();
+          if (Date.now() - installingSince > 20000) {
+            log('Installing quá 20s — bỏ card, kiểm tra Plugins list.');
+            state = { status: 'no-card' };
+            break;
+          }
+          if (Date.now() - lastInstallLog > 8000) {
+            log('… đang Installing… chờ (kẹt thì sang Plugins list)...');
+            lastInstallLog = Date.now();
+          }
+          await sleep(1500);
           continue;
         }
+        installingSince = 0;
         if (state.status === 'ready-to-activate') {
           log('Đã hiện Activate — bấm Activate trên card...');
           if (!(await clickOnCard('activate'))) {
