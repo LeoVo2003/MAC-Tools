@@ -56,7 +56,7 @@
   --neutral-200: #e5e7eb;
   --border: #e5e7eb;
   --border-btn: #d1d5db;
-  --border-input: #868e9c; /* ≥3:1 on white — identifies the field boundary */
+  --border-input: #d1d5db; /* nhẹ, subtle */
 
   /* Log console */
   --log-bg: #0b1220;
@@ -505,7 +505,7 @@ code {
   opacity: 1;
 }
 :where(input[type="text"], input[type="email"], input[type="url"], input[type="password"], input[type="date"], select):hover {
-  border-color: var(--text-2);
+  border-color: #9ca3af;
 }
 :where(input[type="text"], input[type="email"], input[type="url"], input[type="password"], input[type="date"], select):focus-visible {
   outline: 2px solid transparent; /* shows in forced-colors mode */

@@ -1616,9 +1616,9 @@ async function loadDashboard() {
     document.getElementById('dashQueued').textContent = queued;
     document.getElementById('dashAvg').textContent = fmtDur(s.avgDurationMs);
 
-    // Tool cards
+    // Tool cards — chỉ 3 category chính
     const toolsBox = document.getElementById('dashTools');
-    const byTool = stats.byTool || [];
+    const byTool = (stats.byTool || []).filter((t) => ['f-package', 'qr', 'review-link'].includes(t.tool));
     if (!byTool.length) {
       toolsBox.innerHTML = '<p class="empty">Chưa có lượt chạy nào trong khoảng này.</p>';
     } else {
