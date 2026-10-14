@@ -823,7 +823,7 @@ copyBtn?.addEventListener('click', async () => {
 });
 
 resultPanel?.addEventListener('click', async (e) => {
-  const btn = e.target.closest('.copy-btn');
+  const btn = e.target.closest('[data-copy]');
   if (!btn || !resultPanel.contains(btn)) return;
   const id = btn.getAttribute('data-copy');
   const el = id ? document.getElementById(id) : null;
