@@ -262,11 +262,6 @@ code {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: #FFFFFF;
-  padding: 8px 10px;
-  border-radius: 12px;
-  border: 1px solid #F1F5F9;
-  box-shadow: 0 4px 20px rgba(227, 30, 36, 0.06);
   flex-shrink: 0;
   line-height: 0;
 }
