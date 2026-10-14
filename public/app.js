@@ -823,7 +823,7 @@ copyBtn?.addEventListener('click', async () => {
 });
 
 resultPanel?.addEventListener('click', async (e) => {
-  const btn = e.target.closest('.copy-one');
+  const btn = e.target.closest('.copy-btn');
   if (!btn || !resultPanel.contains(btn)) return;
   const id = btn.getAttribute('data-copy');
   const el = id ? document.getElementById(id) : null;
@@ -880,7 +880,7 @@ async function loadAccounts() {
           <td>${escapeHtml(u.role || 'user')}</td>
           <td>${stored}</td>
           <td class="muted">${escapeHtml(when)}</td>
-          <td><button type="button" class="danger tiny" data-reset-user="${escapeHtml(u.id)}" data-reset-name="${escapeHtml(u.username)}">Reset pass</button></td>
+          <td><button type="button" class="btn btn-danger btn-sm" data-reset-user="${escapeHtml(u.id)}" data-reset-name="${escapeHtml(u.username)}">Reset pass</button></td>
         </tr>`;
       })
       .join('');
@@ -1001,7 +1001,7 @@ function renderQueue(q) {
       <div class="queue-main">
         <div class="queue-top">
           <span class="queue-status ${statusClass}">${statusLabel}</span>
-          <button type="button" class="secondary tiny queue-cancel" data-id="${item.id}">Hủy</button>
+          <button type="button" class="btn btn-light btn-sm queue-cancel" data-id="${item.id}">Hủy</button>
         </div>
         <div class="queue-user" title="${who.replace(/"/g, '&quot;')}">${who}</div>
         <div class="meta">${metaBits}</div>
