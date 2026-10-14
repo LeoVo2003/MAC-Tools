@@ -17,6 +17,8 @@ import {
   finishRun,
   listRuns,
   runsStats,
+  statsByTool,
+  recentErrors,
   runsToCsv,
   clearRuns,
   deleteRunsByIds,
@@ -184,12 +186,28 @@ export function createApp() {
   app.get('/api/review-link', requireAuth, async (req, res) => {
     const url = String(req.query.url || '').trim();
     if (!url) return res.status(400).json({ ok: false, error: 'Thiếu URL.' });
+    const rlRunId = startRun({
+      tool: 'review-link',
+      userId: req.user.id,
+      toolUser: req.user.username,
+      websiteUrl: url,
+      jobId: `rl-${req.user.id}-${Date.now()}`,
+    });
     const workerBase = (process.env.REVIEW_LINK_WORKER || 'https://review-link.leo-vo.workers.dev').replace(/\/$/, '');
     try {
       const r = await fetch(`${workerBase}/api/convert?url=${encodeURIComponent(url)}`);
       const data = await r.json();
+      if (r.ok && data?.ok) {
+        finishRun(rlRunId, {
+          status: 'success',
+          result: { project: data.platform || '', loginUrl: data.reviewUrl || '' },
+        });
+      } else {
+        finishRun(rlRunId, { status: 'error', error: data?.error || 'Convert thất bại.' });
+      }
       res.status(r.ok ? 200 : 400).json(data);
     } catch (err) {
+      finishRun(rlRunId, { status: 'error', error: err?.message || String(err) });
       res.status(502).json({ ok: false, error: 'Không gọi được review-link worker: ' + (err?.message || err) });
     }
   });
@@ -221,6 +239,16 @@ export function createApp() {
 
     const logs = [];
     const fillSessionId = `fill-${req.user.id}`;
+    const fillRunId = startRun({
+      tool: 'fill-data',
+      userId: req.user.id,
+      toolUser: req.user.username,
+      wpmProjectUrl,
+      taskUrl,
+      websiteUrl,
+      webTargetMode,
+      jobId: fillSessionId,
+    });
     try {
       // Fill mới: clear Chrome Live cũ (tránh lag / timeout trên Xvfb)
       const clearedReg = await clearLiveBrowsersForUser(req.user.id);
@@ -258,13 +286,20 @@ export function createApp() {
         }
       );
       res.json({ ...data, logs });
+      finishRun(fillRunId, {
+        status: 'success',
+        result: { project: data?.shopName || '', loginUrl: data?.websiteUrl || websiteUrl },
+      });
     } catch (err) {
+      finishRun(fillRunId, { status: 'error', error: err?.message || String(err) });
       res.status(500).json({
         error: err?.message || String(err),
         logs,
       });
     }
   });
+
+  /** Review Link: GET /api/review-link?url= — bọc tracking. */
 
   app.post('/api/chrome-live/input', requireAuth, async (req, res) => {
     if (process.env.CHROME_LIVE !== 'true') {
@@ -385,6 +420,7 @@ export function createApp() {
         }
 
         const runId = startRun({
+          tool: 'f-package',
           userId: ownerId,
           toolUser: req.user.username,
           wpmUser: stored.username,
@@ -399,8 +435,41 @@ export function createApp() {
           resume: isResume,
         });
 
-        const onStep = (payload) =>
+        // Tracking theo bước: gom stepResults [{step, status, durationMs, error}]
+        const stepResults = [];
+        const stepStartAt = new Map();
+        const onStepRaw = (payload) =>
           broadcast('step', { ...payload, jobId: thisJobId }, { jobId: thisJobId, userId: ownerId });
+        const onStep = (payload) => {
+          const now = Date.now();
+          if (payload?.status === 'start') {
+            stepStartAt.set(payload.id, now);
+          } else if (payload?.status === 'done') {
+            const started = stepStartAt.get(payload.id);
+            stepResults.push({
+              step: payload.id,
+              status: 'done',
+              durationMs: started != null ? Math.max(0, now - started) : null,
+              error: null,
+            });
+            stepStartAt.delete(payload.id);
+          }
+          onStepRaw(payload);
+        };
+        // Gắn stepResults vào finishRun
+        const finishRunWithSteps = (status, extra = {}) => {
+          // Bước nào start mà chưa done → đánh dấu lỗi/hủy
+          for (const [id, started] of stepStartAt) {
+            stepResults.push({
+              step: id,
+              status,
+              durationMs: Math.max(0, Date.now() - started),
+              error: status === 'error' ? extra.error || null : null,
+            });
+          }
+          stepStartAt.clear();
+          finishRun(runId, { status, stepResults, ...extra });
+        };
 
         try {
           pushLog('=== Bắt đầu job MAC Tools ===');
@@ -427,7 +496,7 @@ export function createApp() {
                 : undefined,
           });
           if (jobRef.cancelled) throw new Error('Job đã bị hủy.');
-          finishRun(runId, { status: 'success', result });
+          finishRunWithSteps('success', { result });
           broadcast('result', { ...result, jobId: thisJobId }, { jobId: thisJobId, userId: ownerId });
           pushLog('=== Hoàn tất ===');
           broadcast('done', { running: false, jobId: thisJobId }, { jobId: thisJobId, userId: ownerId });
@@ -437,7 +506,7 @@ export function createApp() {
           const message = err?.message || String(err);
           const cancelled = Boolean(jobRef.cancelled) || /đã bị hủy/i.test(message);
           const screenshots = Array.isArray(jobRef.screenshots) ? jobRef.screenshots : [];
-          finishRun(runId, { status: cancelled ? 'cancelled' : 'error', error: message });
+          finishRunWithSteps(cancelled ? 'cancelled' : 'error', { error: message });
           broadcast(
             'job-error',
             { message, jobId: thisJobId, cancelled, screenshots },
@@ -507,27 +576,47 @@ export function createApp() {
     res.json({ files });
   });
 
-  app.get('/api/runs', requireAuth, requireAdmin, (req, res) => {
+  /** Lịch sử chạy: mọi user đăng nhập đều xem được (để biết queue). Xóa/dọn vẫn admin-only. */
+  app.get('/api/runs', requireAuth, (req, res) => {
     const limit = Math.min(500, Number(req.query.limit) || 100);
     const user = String(req.query.user || '').trim();
     const from = String(req.query.from || '').trim();
     const to = String(req.query.to || '').trim();
     const status = String(req.query.status || '').trim();
-    const runs = listRuns({ limit, user, from, to, status });
-    res.json({ stats: runsStats(runs), runs, filters: { user, from, to, status, limit } });
+    const tool = String(req.query.tool || '').trim();
+    const runs = listRuns({ limit, user, from, to, status, tool });
+    res.json({ stats: runsStats(runs), runs, filters: { user, from, to, status, tool, limit } });
   });
 
-  app.get('/api/runs.csv', requireAuth, requireAdmin, (req, res) => {
+  app.get('/api/runs.csv', requireAuth, (req, res) => {
     const limit = Math.min(2000, Number(req.query.limit) || 500);
     const user = String(req.query.user || '').trim();
     const from = String(req.query.from || '').trim();
     const to = String(req.query.to || '').trim();
     const status = String(req.query.status || '').trim();
-    const runs = listRuns({ limit, user, from, to, status });
+    const tool = String(req.query.tool || '').trim();
+    const runs = listRuns({ limit, user, from, to, status, tool });
     const csv = runsToCsv(runs);
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="runs.csv"');
     res.send(csv);
+  });
+
+  /** Thống kê dashboard: ?from=&to= (ISO date), groupBy=tool */
+  app.get('/api/runs/stats', requireAuth, (req, res) => {
+    const from = String(req.query.from || '').trim();
+    const to = String(req.query.to || '').trim();
+    const groupBy = String(req.query.groupBy || '').trim();
+    const rows = listRuns({ limit: 10000, from, to });
+    const out = { stats: runsStats(rows), from, to };
+    if (groupBy === 'tool') out.byTool = statsByTool(rows);
+    res.json(out);
+  });
+
+  /** Lỗi gần đây gom theo nội dung. */
+  app.get('/api/runs/errors', requireAuth, (req, res) => {
+    const top = Math.min(20, Math.max(1, Number(req.query.top) || 10));
+    res.json({ errors: recentErrors({ top }) });
   });
 
   app.delete('/api/runs', requireAuth, requireAdmin, (_req, res) => {

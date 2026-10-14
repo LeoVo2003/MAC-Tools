@@ -221,8 +221,8 @@ function applyRoleUi(user) {
   document.querySelectorAll('[data-admin-only]').forEach((el) => {
     el.hidden = !isAdmin;
   });
-  // Mọi role vào thẳng User Guide (#tab-run mặc định hidden trong HTML)
-  switchSection('run');
+  // Vào thẳng Dashboard để thấy queue
+  switchSection('dashboard');
   if (!isAdmin) {
     const mainRadio = form?.querySelector('input[name="webTargetMode"][value="main"]');
     if (mainRadio) mainRadio.checked = true;
@@ -231,6 +231,7 @@ function applyRoleUi(user) {
 }
 
 const SECTION_TITLES = {
+  dashboard: ['Dashboard', 'Theo dõi mọi tool, queue và lỗi.'],
   run: ['User Guide', 'F Package — Fill data, Run, Live Chrome trên một màn hình.'],
   qr: ['QR Tool', 'Tạo QR landing page tự động.'],
   reviewlink: ['Review Link', 'Tạo direct review link Google / Yelp.'],
@@ -245,7 +246,7 @@ function switchSection(tab) {
   const activeNav = document.querySelector(`.nav-item[data-tab="${tab}"]`);
   activeNav?.classList.add('is-active');
   activeNav?.setAttribute('aria-current', 'page');
-  for (const name of ['run', 'qr', 'reviewlink', 'accounts']) {
+  for (const name of ['dashboard', 'run', 'qr', 'reviewlink', 'accounts']) {
     const el = document.getElementById(`tab-${name}`);
     if (el) el.hidden = name !== tab;
   }
@@ -254,6 +255,7 @@ function switchSection(tab) {
   if (headerSub) headerSub.textContent = sub;
   syncLiveLayoutClass();
   if (tab === 'accounts') loadAccounts();
+  if (tab === 'dashboard') loadDashboard();
 }
 
 function showLoggedOut() {
@@ -1536,4 +1538,292 @@ qrForm?.addEventListener('submit', async (e) => {
   e.preventDefault();
   qrLog('QR backend chưa code — form UI xong, job chạy sẽ làm tiếp.');
   setBadge(qrStatusBadge, 'warn', 'Chưa có backend');
+});
+
+/* ============ DASHBOARD ============ */
+const TOOL_LABELS = {
+  'f-package': 'F Package',
+  'fill-data': 'Fill Data',
+  'review-link': 'Review Link',
+  'qr': 'QR Tool',
+  'chrome-live': 'Chrome Live',
+  'accounts': 'Tài khoản',
+};
+const TOOL_ICONS = {
+  'f-package': '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
+  'fill-data': '<path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>',
+  'review-link': '<path d="M10 13a5 5 0 0 0 7.07 0l2.83-2.83a5 5 0 0 0-7.07-7.07L11.5 4.5"/><path d="M14 11a5 5 0 0 0-7.07 0L4.1 13.83a5 5 0 0 0 7.07 7.07l1.33-1.33"/>',
+  'qr': '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3z"/>',
+  'chrome-live': '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/>',
+  'accounts': '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>',
+};
+function toolLabel(t) { return TOOL_LABELS[t] || t || '—'; }
+function toolIcon(t) {
+  const p = TOOL_ICONS[t] || TOOL_ICONS['f-package'];
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
+}
+
+const dashState = { range: 'today', page: 1, perPage: 20, tool: '', user: '', status: '', totalPages: 1 };
+
+function dashRangeDates() {
+  const now = new Date();
+  const to = now.toISOString().slice(0, 10);
+  let from = to;
+  if (dashState.range === '7d') from = new Date(now - 6 * 864e5).toISOString().slice(0, 10);
+  if (dashState.range === '30d') from = new Date(now - 29 * 864e5).toISOString().slice(0, 10);
+  return { from, to };
+}
+
+function runStatusPill(status) {
+  const map = { success: ['ok', 'Thành công'], error: ['err', 'Lỗi'], cancelled: ['warn', 'Đã hủy'], running: ['run', 'Đang chạy'] };
+  const [cls, label] = map[status] || ['muted', status || '—'];
+  return `<span class="pill pill--${cls}">${label}</span>`;
+}
+
+function fmtDur(ms) {
+  if (ms == null || !Number.isFinite(Number(ms))) return '—';
+  const s = Math.round(Number(ms) / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}p${s % 60 ? ` ${s % 60}s` : ''}`;
+  return `${Math.floor(m / 60)}h ${m % 60}p`;
+}
+function fmtTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+async function loadDashboard() {
+  const { from, to } = dashRangeDates();
+  try {
+    const [statsRes, errRes, queueRes] = await Promise.all([
+      fetch(`/api/runs/stats?from=${from}&to=${to}&groupBy=tool`, { credentials: 'same-origin' }),
+      fetch('/api/runs/errors?top=8', { credentials: 'same-origin' }),
+      fetch('/api/queue', { credentials: 'same-origin' }).catch(() => null),
+    ]);
+    const stats = await statsRes.json();
+    const errData = await errRes.json();
+    let queued = 0;
+    try { const q = await queueRes?.json(); queued = q?.pendingCount || q?.queue?.length || 0; } catch {}
+
+    // KPIs
+    const s = stats.stats || {};
+    document.getElementById('dashTotal').textContent = s.total ?? 0;
+    const rate = s.total ? Math.round((s.success / s.total) * 100) : 0;
+    document.getElementById('dashSuccessRate').textContent = `${rate}%`;
+    document.getElementById('dashRunning').textContent = s.running ?? 0;
+    document.getElementById('dashQueued').textContent = queued;
+    document.getElementById('dashAvg').textContent = fmtDur(s.avgDurationMs);
+
+    // Tool cards
+    const toolsBox = document.getElementById('dashTools');
+    const byTool = stats.byTool || [];
+    if (!byTool.length) {
+      toolsBox.innerHTML = '<p class="empty">Chưa có lượt chạy nào trong khoảng này.</p>';
+    } else {
+      toolsBox.innerHTML = byTool.map((t) => {
+        const errRate = t.total ? Math.round((t.error / t.total) * 100) : 0;
+        const active = dashState.tool === t.tool ? ' is-active' : '';
+        return `<button type="button" class="tool-card${active}" data-tool="${t.tool}">
+          <span class="tool-card-icon">${toolIcon(t.tool)}</span>
+          <span class="tool-card-name">${toolLabel(t.tool)}</span>
+          <span class="tool-card-num">${t.total}</span>
+          <span class="tool-card-meta">Lỗi ${errRate}% · ${t.lastRunAt ? fmtTime(t.lastRunAt) : '—'}</span>
+        </button>`;
+      }).join('');
+    }
+
+    // Errors
+    const errBox = document.getElementById('dashErrors');
+    const errors = errData.errors || [];
+    errBox.innerHTML = errors.length
+      ? errors.map((e) => `<div class="err-row">
+          <span class="err-count">${e.count}×</span>
+          <div><p class="err-msg">${escapeHtml(e.error)}</p>
+          <p class="muted small">${toolLabel(e.tool)} · ${fmtTime(e.lastAt)}</p></div>
+        </div>`).join('')
+      : '<p class="empty">Không có lỗi nào. Sạch!</p>';
+
+    loadDashTable();
+    loadDashHealth();
+  } catch (err) {
+    document.getElementById('dashTools').innerHTML = `<p class="empty">Lỗi tải dashboard: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+async function loadDashTable() {
+  const tbody = document.querySelector('#dashTable tbody');
+  tbody.innerHTML = '<tr><td colspan="8" class="empty">Đang tải…</td></tr>';
+  const params = new URLSearchParams({
+    limit: 500, tool: dashState.tool, user: dashState.user, status: dashState.status,
+  });
+  try {
+    const res = await fetch(`/api/runs?${params}`, { credentials: 'same-origin' });
+    const data = await res.json();
+    const runs = data.runs || [];
+    dashState.totalPages = Math.max(1, Math.ceil(runs.length / dashState.perPage));
+    if (dashState.page > dashState.totalPages) dashState.page = dashState.totalPages;
+    const start = (dashState.page - 1) * dashState.perPage;
+    const page = runs.slice(start, start + dashState.perPage);
+    const isAdmin = currentUser?.role === 'admin';
+    tbody.innerHTML = page.length ? page.map((r) => `<tr data-run-id="${r.id}" class="run-row">
+        ${isAdmin ? `<td><input type="checkbox" class="dash-run-check" value="${r.id}" aria-label="Chọn" /></td>` : ''}
+        <td class="nowrap">${fmtTime(r.startedAt)}</td>
+        <td><span class="tool-tag">${toolIcon(r.tool)}${toolLabel(r.tool)}</span></td>
+        <td>${escapeHtml(r.toolUser || r.username || '—')}</td>
+        <td class="url-cell">${r.websiteUrl ? `<a href="${escapeHtml(r.websiteUrl)}" target="_blank" rel="noopener">${escapeHtml(shortUrl(r.websiteUrl))}</a>` : '—'}</td>
+        <td>${runStatusPill(r.status)}</td>
+        <td class="nowrap">${fmtDur(r.durationMs)}</td>
+        <td><button type="button" class="btn btn-ghost btn-xs dash-detail" data-id="${r.id}">Chi tiết</button></td>
+      </tr>`).join('')
+      : '<tr><td colspan="8" class="empty">Không có lượt chạy nào.</td></tr>';
+    document.getElementById('dashPageInfo').textContent = `Trang ${dashState.page}/${dashState.totalPages} · ${runs.length} dòng`;
+    document.getElementById('dashPrev').disabled = dashState.page <= 1;
+    document.getElementById('dashNext').disabled = dashState.page >= dashState.totalPages;
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="8" class="empty">Lỗi: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+function shortUrl(u) {
+  try { const x = new URL(u); return x.hostname.replace(/^www\./, ''); } catch { return String(u).slice(0, 30); }
+}
+
+async function loadDashHealth() {
+  const box = document.getElementById('dashHealth');
+  try {
+    const res = await fetch('/api/health', { credentials: 'same-origin' });
+    const h = await res.json();
+    const rows = [
+      ['Trạng thái', h.ok ? 'OK' : 'Lỗi'],
+      ['Uptime', h.uptime ? fmtDur(h.uptime * 1000) : '—'],
+      ['Chrome sessions', h.chromeSessions ?? h.sessions ?? '—'],
+      ['Queue', h.queueLength ?? h.pending ?? '—'],
+    ];
+    box.innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${escapeHtml(String(v))}</dd>`).join('');
+  } catch (err) {
+    box.innerHTML = `<dt>Lỗi</dt><dd>${escapeHtml(err.message)}</dd>`;
+  }
+}
+
+/* Drawer chi tiết */
+function openRunDrawer(runId) {
+  const drawer = document.getElementById('runDrawer');
+  const backdrop = document.getElementById('runDrawerBackdrop');
+  const body = document.getElementById('runDrawerBody');
+  drawer.hidden = false; backdrop.hidden = false;
+  body.innerHTML = '<p class="empty">Đang tải…</p>';
+  fetch(`/api/runs?limit=2000`, { credentials: 'same-origin' })
+    .then((r) => r.json())
+    .then((data) => {
+      const run = (data.runs || []).find((x) => x.id === runId);
+      if (!run) { body.innerHTML = '<p class="empty">Không tìm thấy.</p>'; return; }
+      const steps = Array.isArray(run.stepResults) ? run.stepResults : [];
+      body.innerHTML = `
+        <dl class="kv">
+          <dt>Tool</dt><dd>${toolLabel(run.tool)}</dd>
+          <dt>User</dt><dd>${escapeHtml(run.toolUser || run.username || '—')}</dd>
+          <dt>Bắt đầu</dt><dd>${fmtTime(run.startedAt)}</dd>
+          <dt>Kết thúc</dt><dd>${fmtTime(run.finishedAt)}</dd>
+          <dt>Thời lượng</dt><dd>${fmtDur(run.durationMs)}</dd>
+          <dt>Trạng thái</dt><dd>${runStatusPill(run.status)}</dd>
+          <dt>Website</dt><dd>${run.websiteUrl ? `<a href="${escapeHtml(run.websiteUrl)}" target="_blank" rel="noopener">${escapeHtml(run.websiteUrl)}</a>` : '—'}</dd>
+          ${run.error ? `<dt>Lỗi</dt><dd class="err-msg">${escapeHtml(run.error)}</dd>` : ''}
+        </dl>
+        ${steps.length ? `<h3>Các bước (${steps.length})</h3>
+        <table class="steps-table"><thead><tr><th>Bước</th><th>Trạng thái</th><th>Thời lượng</th></tr></thead>
+        <tbody>${steps.map((s) => `<tr><td>${escapeHtml(s.step)}</td><td>${runStatusPill(s.status)}</td><td>${fmtDur(s.durationMs)}</td></tr>`).join('')}</tbody></table>` : ''}
+        ${run.resultSummary ? `<h3>Kết quả</h3><dl class="kv">
+          ${run.resultSummary.project ? `<dt>Project</dt><dd>${escapeHtml(run.resultSummary.project)}</dd>` : ''}
+          ${run.resultSummary.username ? `<dt>Username</dt><dd>${escapeHtml(run.resultSummary.username)}</dd>` : ''}
+          ${run.resultSummary.loginUrl ? `<dt>Login URL</dt><dd><a href="${escapeHtml(run.resultSummary.loginUrl)}" target="_blank" rel="noopener">Mở</a></dd>` : ''}
+        </dl>` : ''}`;
+    })
+    .catch((err) => { body.innerHTML = `<p class="empty">Lỗi: ${escapeHtml(err.message)}</p>`; });
+}
+function closeRunDrawer() {
+  document.getElementById('runDrawer').hidden = true;
+  document.getElementById('runDrawerBackdrop').hidden = true;
+}
+
+/* Dashboard events */
+document.querySelectorAll('.seg-btn').forEach((b) => b.addEventListener('click', () => {
+  document.querySelectorAll('.seg-btn').forEach((x) => x.classList.remove('is-active'));
+  b.classList.add('is-active');
+  dashState.range = b.dataset.range;
+  dashState.page = 1;
+  loadDashboard();
+}));
+document.getElementById('dashRefresh')?.addEventListener('click', loadDashboard);
+document.getElementById('dashHealthBtn')?.addEventListener('click', loadDashHealth);
+document.getElementById('dashTools')?.addEventListener('click', (e) => {
+  const card = e.target.closest('.tool-card');
+  if (!card) return;
+  dashState.tool = dashState.tool === card.dataset.tool ? '' : card.dataset.tool;
+  document.getElementById('dashFilterTool').value = dashState.tool;
+  dashState.page = 1;
+  loadDashboard();
+});
+['dashFilterTool', 'dashFilterUser', 'dashFilterStatus'].forEach((id) => {
+  document.getElementById(id)?.addEventListener('change', (e) => {
+    dashState.tool = document.getElementById('dashFilterTool').value;
+    dashState.user = document.getElementById('dashFilterUser').value.trim();
+    dashState.status = document.getElementById('dashFilterStatus').value;
+    dashState.page = 1;
+    loadDashTable();
+    // sync tool cards highlight
+    document.querySelectorAll('.tool-card').forEach((c) => c.classList.toggle('is-active', c.dataset.tool === dashState.tool));
+  });
+});
+document.getElementById('dashFilterUser')?.addEventListener('input', (e) => {
+  clearTimeout(window.__dashUserT);
+  window.__dashUserT = setTimeout(() => {
+    dashState.user = e.target.value.trim();
+    dashState.page = 1;
+    loadDashTable();
+  }, 400);
+});
+document.getElementById('dashPrev')?.addEventListener('click', () => { if (dashState.page > 1) { dashState.page--; loadDashTable(); } });
+document.getElementById('dashNext')?.addEventListener('click', () => { if (dashState.page < dashState.totalPages) { dashState.page++; loadDashTable(); } });
+document.getElementById('dashExportCsv')?.addEventListener('click', () => {
+  const params = new URLSearchParams({ limit: 2000, tool: dashState.tool, user: dashState.user, status: dashState.status });
+  window.open(`/api/runs.csv?${params}`, '_blank');
+});
+document.getElementById('dashTable')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.dash-detail');
+  if (btn) { openRunDrawer(btn.dataset.id); return; }
+  const row = e.target.closest('.run-row');
+  if (row && !e.target.closest('a,button,input')) openRunDrawer(row.dataset.runId);
+});
+document.getElementById('runDrawerClose')?.addEventListener('click', closeRunDrawer);
+document.getElementById('runDrawerBackdrop')?.addEventListener('click', closeRunDrawer);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeRunDrawer(); });
+
+/* Admin: xóa đã chọn + dọn */
+document.getElementById('dashSelectAll')?.addEventListener('change', (e) => {
+  document.querySelectorAll('.dash-run-check').forEach((c) => { c.checked = e.target.checked; });
+  syncDashDeleteBtn();
+});
+document.getElementById('dashTable')?.addEventListener('change', (e) => {
+  if (e.target.classList.contains('dash-run-check')) syncDashDeleteBtn();
+});
+function syncDashDeleteBtn() {
+  const n = document.querySelectorAll('.dash-run-check:checked').length;
+  const btn = document.getElementById('dashDeleteSel');
+  if (btn) { btn.disabled = !n; btn.textContent = n ? `Xóa đã chọn (${n})` : 'Xóa đã chọn'; }
+}
+document.getElementById('dashDeleteSel')?.addEventListener('click', async () => {
+  const ids = [...document.querySelectorAll('.dash-run-check:checked')].map((c) => c.value);
+  if (!ids.length || !confirm(`Xóa ${ids.length} dòng?`)) return;
+  const res = await fetch('/api/runs/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }), credentials: 'same-origin' });
+  const data = await res.json();
+  alert(data.ok ? `Đã xóa ${data.deleted} dòng.` : (data.error || 'Lỗi'));
+  loadDashboard();
+});
+document.getElementById('dashPurge')?.addEventListener('click', async () => {
+  if (!confirm('Dọn tất cả dòng lỗi & đã hủy?')) return;
+  const res = await fetch('/api/runs/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ statuses: ['error', 'cancelled'] }), credentials: 'same-origin' });
+  const data = await res.json();
+  alert(data.ok ? `Đã dọn ${data.deleted} dòng.` : (data.error || 'Lỗi'));
+  loadDashboard();
 });

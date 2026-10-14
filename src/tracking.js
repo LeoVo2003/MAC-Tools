@@ -37,7 +37,7 @@ export function startRun(meta = {}) {
   return id;
 }
 
-export function finishRun(id, { status = 'success', error = null, result = null } = {}) {
+export function finishRun(id, { status = 'success', error = null, result = null, stepResults = null } = {}) {
   ensureDataDir();
   if (!fs.existsSync(RUNS_FILE)) return;
   const lines = fs.readFileSync(RUNS_FILE, 'utf-8').split(/\r?\n/).filter(Boolean);
@@ -56,6 +56,7 @@ export function finishRun(id, { status = 'success', error = null, result = null 
         error: error || null,
         finishedAt,
         durationMs,
+        stepResults: Array.isArray(stepResults) ? stepResults : row.stepResults || null,
         resultSummary: result
           ? {
               project: result.project || '',
@@ -87,13 +88,20 @@ function readAllRuns() {
   return rows;
 }
 
+/** Chuẩn hóa tool: dòng cũ không có tool → f-package. */
+export function normalizeTool(row) {
+  const t = String(row?.tool || '').trim().toLowerCase();
+  return t || 'f-package';
+}
+
 /**
- * @param {{ limit?: number, user?: string, from?: string, to?: string, status?: string }} [opts]
+ * @param {{ limit?: number, user?: string, from?: string, to?: string, status?: string, tool?: string }} [opts]
  */
-export function listRuns({ limit = 100, user = '', from = '', to = '', status = '' } = {}) {
+export function listRuns({ limit = 100, user = '', from = '', to = '', status = '', tool = '' } = {}) {
   let rows = readAllRuns();
   const userQ = String(user || '').trim().toLowerCase();
   const statusQ = String(status || '').trim().toLowerCase();
+  const toolQ = String(tool || '').trim().toLowerCase();
   const fromMs = from ? Date.parse(from) : NaN;
   const toMs = to ? Date.parse(to) : NaN;
 
@@ -103,6 +111,7 @@ export function listRuns({ limit = 100, user = '', from = '', to = '', status = 
       if (!u.includes(userQ)) return false;
     }
     if (statusQ && String(r.status || '').toLowerCase() !== statusQ) return false;
+    if (toolQ && normalizeTool(r) !== toolQ) return false;
     const t = r.startedAt ? Date.parse(r.startedAt) : NaN;
     if (Number.isFinite(fromMs) && Number.isFinite(t) && t < fromMs) return false;
     if (Number.isFinite(toMs) && Number.isFinite(t) && t > toMs + 24 * 60 * 60 * 1000 - 1) return false;
@@ -110,9 +119,48 @@ export function listRuns({ limit = 100, user = '', from = '', to = '', status = 
   });
 
   return rows
-    .map((r) => ({ ...r, durationMs: durationOf(r) }))
+    .map((r) => ({ ...r, tool: normalizeTool(r), durationMs: durationOf(r) }))
     .slice(-Math.min(2000, Math.max(1, Number(limit) || 100)))
     .reverse();
+}
+
+/** Thống kê gom theo tool: { tool, total, success, error, running, avgDurationMs, lastRunAt } */
+export function statsByTool(rowsInput) {
+  const rows = rowsInput || listRuns({ limit: 10000 });
+  const map = new Map();
+  for (const r of rows) {
+    const t = normalizeTool(r);
+    if (!map.has(t)) map.set(t, []);
+    map.get(t).push(r);
+  }
+  return [...map.entries()].map(([tool, list]) => {
+    const s = runsStats(list);
+    const lastRunAt = list.reduce((max, r) => {
+      const t = r.startedAt ? Date.parse(r.startedAt) : NaN;
+      return Number.isFinite(t) && (!max || t > max) ? t : max;
+    }, 0);
+    return { tool, ...s, lastRunAt: lastRunAt ? new Date(lastRunAt).toISOString() : null };
+  }).sort((a, b) => b.total - a.total);
+}
+
+/** Gom lỗi gần đây theo nội dung: [{ error, count, lastAt, lastRunId, tool }] */
+export function recentErrors({ limit = 1000, top = 10 } = {}) {
+  const rows = listRuns({ limit }).filter((r) => r.status === 'error' && r.error);
+  const map = new Map();
+  for (const r of rows) {
+    const key = String(r.error).trim().slice(0, 200);
+    if (!key) continue;
+    if (!map.has(key)) map.set(key, { error: key, count: 0, lastAt: null, lastRunId: null, tool: normalizeTool(r) });
+    const e = map.get(key);
+    e.count += 1;
+    const t = r.startedAt ? Date.parse(r.startedAt) : NaN;
+    if (Number.isFinite(t) && (!e.lastAt || t > Date.parse(e.lastAt))) {
+      e.lastAt = r.startedAt;
+      e.lastRunId = r.id;
+      e.tool = normalizeTool(r);
+    }
+  }
+  return [...map.values()].sort((a, b) => b.count - a.count).slice(0, top);
 }
 
 export function runsStats(rowsInput) {
@@ -137,6 +185,7 @@ export function runsToCsv(rows) {
     'startedAt',
     'finishedAt',
     'durationMs',
+    'tool',
     'toolUser',
     'websiteUrl',
     'status',
@@ -150,6 +199,7 @@ export function runsToCsv(rows) {
         r.startedAt,
         r.finishedAt,
         durationOf(r) ?? '',
+        normalizeTool(r),
         r.toolUser || r.username || '',
         r.websiteUrl || '',
         r.status || '',

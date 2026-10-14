@@ -34,7 +34,11 @@
         <span class="logo-text"><span class="logo-name">MAC<i>.</i></span><span class="logo-sub">Web Tools</span></span>
       </div>
       <nav class="nav" aria-label="Chính">
-        <button type="button" class="nav-item is-active" data-tab="run" aria-current="page">
+        <button type="button" class="nav-item is-active" data-tab="dashboard" aria-current="page">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+          Dashboard
+        </button>
+        <button type="button" class="nav-item" data-tab="run">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6"/></svg>
           User Guide
         </button>
@@ -98,9 +102,125 @@
 
       <div id="appMain" hidden>
         <header class="page-header">
-          <h1 id="pageTitle">User Guide</h1>
-          <p id="headerSub" class="muted">Chạy job F Package.</p>
+          <h1 id="pageTitle">Dashboard</h1>
+          <p id="headerSub" class="muted">Theo dõi mọi tool.</p>
         </header>
+
+        <!-- Dashboard -->
+        <section id="tab-dashboard">
+          <div class="dash-toolbar">
+            <div class="seg" role="group" aria-label="Khoảng thời gian">
+              <button type="button" class="seg-btn is-active" data-range="today">Hôm nay</button>
+              <button type="button" class="seg-btn" data-range="7d">7 ngày</button>
+              <button type="button" class="seg-btn" data-range="30d">30 ngày</button>
+            </div>
+            <button type="button" id="dashRefresh" class="btn btn-ghost btn-sm">Refresh</button>
+          </div>
+
+          <div class="kpis" id="dashKpis" aria-label="Chỉ số tổng quan">
+            <div class="kpi">
+              <span class="kpi-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4l14 8-14 8z"/></svg></span>
+              <div><p class="kpi-label">Tổng lượt chạy</p><p class="kpi-value" id="dashTotal">—</p></div>
+            </div>
+            <div class="kpi">
+              <span class="kpi-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m3 6 2 2 4-4"/><path d="m3 16 2 2 4-4"/><path d="M13 6h8M13 16h8"/></svg></span>
+              <div><p class="kpi-label">Tỷ lệ thành công</p><p class="kpi-value" id="dashSuccessRate">—</p></div>
+            </div>
+            <div class="kpi kpi--running">
+              <span class="kpi-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
+              <div><p class="kpi-label">Đang chạy</p><p class="kpi-value" id="dashRunning">—</p></div>
+            </div>
+            <div class="kpi kpi--waiting">
+              <span class="kpi-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v4l2 2"/><circle cx="12" cy="12" r="9"/></svg></span>
+              <div><p class="kpi-label">Đang chờ queue</p><p class="kpi-value" id="dashQueued">—</p></div>
+            </div>
+            <div class="kpi">
+              <span class="kpi-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/></svg></span>
+              <div><p class="kpi-label">Thời gian TB</p><p class="kpi-value" id="dashAvg">—</p></div>
+            </div>
+          </div>
+
+          <h2 class="dash-h">Theo tool</h2>
+          <div class="tool-cards" id="dashTools"><p class="empty">Đang tải…</p></div>
+
+          <div class="dash-grid">
+            <section class="block">
+              <div class="block-head">
+                <h2>Lỗi gần đây</h2>
+                <span class="muted small">Gom theo nội dung</span>
+              </div>
+              <div id="dashErrors"><p class="empty">Đang tải…</p></div>
+            </section>
+            <section class="block">
+              <div class="block-head">
+                <h2>Hệ thống</h2>
+                <button type="button" id="dashHealthBtn" class="btn btn-ghost btn-sm">Refresh</button>
+              </div>
+              <dl class="kv" id="dashHealth"><dt>—</dt><dd>Đang tải…</dd></dl>
+            </section>
+          </div>
+
+          <section class="block">
+            <div class="block-head">
+              <h2>Lịch sử chạy</h2>
+              <div class="row">
+                <button type="button" id="dashExportCsv" class="btn btn-ghost btn-sm">Export CSV</button>
+                <span data-admin-only hidden>
+                  <button type="button" id="dashDeleteSel" class="btn btn-ghost btn-sm" disabled>Xóa đã chọn</button>
+                  <button type="button" id="dashPurge" class="btn btn-ghost btn-sm">Dọn lỗi &amp; hủy</button>
+                </span>
+              </div>
+            </div>
+            <div class="filters">
+              <label><span>Tool</span>
+                <select id="dashFilterTool">
+                  <option value="">Tất cả</option>
+                  <option value="f-package">F Package</option>
+                  <option value="fill-data">Fill Data</option>
+                  <option value="review-link">Review Link</option>
+                  <option value="qr">QR Tool</option>
+                  <option value="chrome-live">Chrome Live</option>
+                </select>
+              </label>
+              <label><span>User</span><input id="dashFilterUser" type="text" placeholder="email / username" /></label>
+              <label><span>Trạng thái</span>
+                <select id="dashFilterStatus">
+                  <option value="">Tất cả</option>
+                  <option value="success">Thành công</option>
+                  <option value="error">Lỗi</option>
+                  <option value="cancelled">Đã hủy</option>
+                  <option value="running">Đang chạy</option>
+                </select>
+              </label>
+            </div>
+            <div class="table-wrap">
+              <table id="dashTable">
+                <thead>
+                  <tr>
+                    <th data-admin-only hidden><input type="checkbox" id="dashSelectAll" aria-label="Chọn tất cả" /></th>
+                    <th>Thời gian</th><th>Tool</th><th>User</th><th>Website</th><th>Trạng thái</th><th>Thời lượng</th><th></th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <div class="dash-pager">
+              <button type="button" id="dashPrev" class="btn btn-ghost btn-sm">‹ Trước</button>
+              <span id="dashPageInfo" class="muted small">Trang 1</span>
+              <button type="button" id="dashNext" class="btn btn-ghost btn-sm">Sau ›</button>
+            </div>
+          </section>
+        </section>
+
+        <!-- Chi tiết lượt chạy (drawer) -->
+        <div class="drawer-backdrop" id="runDrawerBackdrop" hidden></div>
+        <aside class="drawer" id="runDrawer" hidden aria-label="Chi tiết lượt chạy">
+          <div class="drawer-head">
+            <h2>Chi tiết lượt chạy</h2>
+            <button type="button" id="runDrawerClose" class="btn btn-ghost btn-sm">Đóng</button>
+          </div>
+          <div id="runDrawerBody"><p class="empty">Đang tải…</p></div>
+        </aside>
 
         <!-- User Guide -->
         <section id="tab-run" class="run-workspace" hidden>
