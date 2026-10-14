@@ -506,6 +506,24 @@ code {
   color: var(--text-3);
   opacity: 1;
 }
+textarea {
+  width: 100%;
+  padding: var(--space-3);
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  resize: vertical;
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+textarea::placeholder { color: var(--text-3); opacity: 1; }
+textarea:hover { border-color: #9ca3af; }
+textarea:focus-visible {
+  outline: 2px solid transparent;
+  border-color: var(--primary-strong);
+  box-shadow: var(--ring);
+}
 :where(input[type="text"], input[type="email"], input[type="url"], input[type="password"], input[type="date"], select):hover {
   border-color: #9ca3af;
 }
@@ -1895,7 +1913,42 @@ td.empty {
 }
 .rl-result-head .btn { margin-left: auto; }
 .rl-result .kv { margin: 0; }
+#rlResults { display: flex; flex-direction: column; gap: var(--space-4); margin-top: var(--space-4); }
+#rlResults:empty { margin-top: 0; }
 .rl-link a { word-break: break-all; }
+.rl-result--error {
+  border-color: var(--danger-line);
+  background: var(--danger-soft);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+}
+/* Nút copy trong review link: nền xanh nhạt nổi bật */
+.rl-result .btn-light {
+  background: #e8f0fe;
+  border-color: #d2e3fc;
+  color: #1a73e8;
+  font-weight: 600;
+}
+.rl-result .btn-light:hover {
+  background: #d2e3fc;
+  border-color: #aecbfa;
+  color: #174ea6;
+}
+/* Platform accent */
+.rl-result--yelp {
+  border-color: #ffcdd2;
+  background: #fef2f2;
+}
+.rl-result--yelp .btn-light {
+  background: #ffe4e6;
+  border-color: #fecdd3;
+  color: #e11d48;
+}
+.rl-result--yelp .btn-light:hover {
+  background: #fecdd3;
+  border-color: #fda4af;
+  color: #be123c;
+}
 @media (max-width: 640px) {
   .rl-input-row { flex-direction: column; align-items: stretch; }
   .rl-result-head { flex-wrap: wrap; }

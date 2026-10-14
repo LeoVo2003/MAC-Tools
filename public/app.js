@@ -1487,37 +1487,62 @@ const rlError = document.getElementById('rlError');
 const rlResult = document.getElementById('rlResult');
 
 async function generateReviewLink() {
-  const url = (rlUrl?.value || '').trim();
-  if (rlError) rlError.textContent = '';
-  if (rlResult) rlResult.hidden = true;
-  if (!url) {
-    if (rlError) rlError.textContent = 'Paste Google Maps hoặc Yelp URL trước.';
+  const raw = (rlUrl?.value || '').trim();
+  const urls = raw.split('\n').map((s) => s.trim()).filter(Boolean);
+  const errBox = rlError;
+  const resultsBox = document.getElementById('rlResults');
+  if (errBox) errBox.textContent = '';
+  if (resultsBox) resultsBox.innerHTML = '';
+  if (!urls.length) {
+    if (errBox) errBox.textContent = 'Paste ít nhất 1 Google Maps hoặc Yelp URL (mỗi dòng 1 link).';
     return;
   }
-  setBadge(rlStatus, 'running', 'Đang xử lý');
+  setBadge(rlStatus, 'running', `Đang xử lý 0/${urls.length}`);
   rlBtn.disabled = true;
-  try {
-    const res = await fetch('/api/review-link?url=' + encodeURIComponent(url));
-    const data = await res.json();
-    if (!res.ok || !data.ok) throw new Error(data.error || 'Không xử lý được link.');
-    document.getElementById('rlPlatform').textContent = data.platform === 'google' ? 'Google' : 'Yelp';
-    const iconEl = document.getElementById('rlPlatformIcon');
-    if (iconEl) iconEl.innerHTML = data.platform === 'google'
-      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="24" height="24"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>'
-      : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="24" height="24"><path d="M12 2l2.4 7.2H22l-6 4.6 2.3 7.2-6.3-4.5-6.3 4.5L8 13.8 2 9.2h7.6z"/></svg>';
-    document.getElementById('rlId').textContent = data.id || '—';
-    const linkEl = document.getElementById('rlLink');
-    linkEl.textContent = data.reviewUrl;
-    linkEl.href = data.reviewUrl;
-    document.getElementById('rlOpen').href = data.reviewUrl;
-    rlResult.hidden = false;
-    setBadge(rlStatus, 'done', 'Xong');
-  } catch (err) {
-    if (rlError) rlError.textContent = err.message;
-    setBadge(rlStatus, 'error', 'Lỗi');
-  } finally {
-    rlBtn.disabled = false;
+  let done = 0, okCount = 0;
+  const cards = [];
+  for (const url of urls) {
+    try {
+      const res = await fetch('/api/review-link?url=' + encodeURIComponent(url));
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Không xử lý được link.');
+      okCount++;
+      cards.push(reviewLinkCard(data, url));
+    } catch (err) {
+      cards.push(`<div class="rl-result rl-result--error">
+        <p class="err-msg">${escapeHtml(err.message)}</p>
+        <p class="muted small">${escapeHtml(url.slice(0, 80))}</p>
+      </div>`);
+    }
+    done++;
+    setBadge(rlStatus, 'running', `Đang xử lý ${done}/${urls.length}`);
   }
+  if (resultsBox) resultsBox.innerHTML = cards.join('');
+  setBadge(rlStatus, okCount ? 'done' : 'error', `Xong ${okCount}/${urls.length}`);
+  rlBtn.disabled = false;
+}
+
+function reviewLinkCard(data, srcUrl) {
+  const platform = data.platform === 'google' ? 'Google' : 'Yelp';
+  const platClass = data.platform === 'yelp' ? ' rl-result--yelp' : '';
+  const icon = data.platform === 'google'
+    ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="24" height="24"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>'
+    : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="24" height="24"><path d="M12 2l2.4 7.2H22l-6 4.6 2.3 7.2-6.3-4.5-6.3 4.5L8 13.8 2 9.2h7.6z"/></svg>';
+  const uid = 'rl' + Math.random().toString(36).slice(2, 8);
+  return `<div class="rl-result${platClass}">
+    <div class="rl-result-head">
+      <span class="tool-card-icon">${icon}</span>
+      <div>
+        <p class="rl-platform">${platform}</p>
+        <p class="muted small">Direct review link sẵn sàng</p>
+      </div>
+      <a class="btn btn-primary" target="_blank" rel="noopener" href="${escapeHtml(data.reviewUrl)}">Mở review form</a>
+    </div>
+    <dl class="kv">
+      <dt>Place ID</dt><dd><code id="${uid}-id">${escapeHtml(data.id || '—')}</code> <button type="button" class="btn btn-light btn-sm" data-copy="${uid}-id">Copy</button></dd>
+      <dt>Review link</dt><dd class="rl-link"><a id="${uid}-link" href="${escapeHtml(data.reviewUrl)}" target="_blank" rel="noopener">${escapeHtml(data.reviewUrl)}</a> <button type="button" class="btn btn-light btn-sm" data-copy="${uid}-link">Copy</button></dd>
+    </dl>
+  </div>`;
 }
 
 rlBtn?.addEventListener('click', generateReviewLink);
@@ -1539,18 +1564,47 @@ function qrLog(line) {
 }
 
 /* Sync text hex <-> color picker */
-function syncColorPair(textId, pickerId) {
+function darkenHex(hex, pct) {
+  const m = /^#([0-9a-fA-F]{6})$/.exec(hex.trim());
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  const f = (1 - pct / 100);
+  const r = Math.round(((n >> 16) & 255) * f);
+  const g = Math.round(((n >> 8) & 255) * f);
+  const b = Math.round((n & 255) * f);
+  return '#' + [r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('').toUpperCase();
+}
+function syncColorPair(textId, pickerId, onPrimaryChange) {
   const text = document.getElementById(textId);
   const picker = document.getElementById(pickerId);
   if (!text || !picker) return;
-  picker.addEventListener('input', () => { text.value = picker.value.toUpperCase(); });
+  picker.addEventListener('input', () => {
+    text.value = picker.value.toUpperCase();
+    text.dispatchEvent(new Event('input', { bubbles: true }));
+  });
   text.addEventListener('input', () => {
     const v = text.value.trim();
-    if (/^#[0-9a-fA-F]{6}$/.test(v)) picker.value = v;
+    if (/^#[0-9a-fA-F]{6}$/.test(v)) {
+      picker.value = v;
+      onPrimaryChange?.(v);
+    }
   });
 }
-syncColorPair('qrPrimary', 'qrPrimaryPicker');
+// Màu phụ trống → preview = darken 50% từ màu chính
+function refreshSecondaryPreview() {
+  const primary = document.getElementById('qrPrimary')?.value.trim() || '';
+  const secText = document.getElementById('qrSecondary');
+  const secPicker = document.getElementById('qrSecondaryPicker');
+  if (!secText || !secPicker) return;
+  if (!secText.value.trim()) {
+    const derived = darkenHex(primary, 50);
+    if (derived) secPicker.value = derived;
+  }
+}
+syncColorPair('qrPrimary', 'qrPrimaryPicker', () => refreshSecondaryPreview());
 syncColorPair('qrSecondary', 'qrSecondaryPicker');
+document.getElementById('qrSecondary')?.addEventListener('input', refreshSecondaryPreview);
+refreshSecondaryPreview();
 
 qrForm?.addEventListener('submit', async (e) => {
   e.preventDefault();

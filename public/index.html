@@ -398,8 +398,8 @@
             <p class="muted">Paste Google Maps hoặc Yelp link để lấy direct review link — khách bấm vào đi thẳng tới form đánh giá.</p>
             <div class="rl-input-row">
               <label class="field grow">
-                <span>Google Maps / Yelp URL</span>
-                <input id="rlUrl" type="url" placeholder="https://maps.google.com/... hoặc https://yelp.com/biz/..." autocomplete="off" />
+                <span>Google Maps / Yelp URLs <em class="muted">(mỗi dòng 1 link)</em></span>
+                <textarea id="rlUrl" rows="3" placeholder="https://maps.google.com/...&#10;https://www.yelp.com/biz/..." autocomplete="off"></textarea>
               </label>
               <button type="button" id="rlBtn" class="btn btn-primary btn-lg self-end">Generate</button>
             </div>
@@ -407,20 +407,7 @@
             <div class="rl-status-row">
               <span id="rlStatus" class="badge" role="status" aria-live="polite">Idle</span>
             </div>
-            <div id="rlResult" class="rl-result" hidden>
-              <div class="rl-result-head">
-                <span class="tool-card-icon" id="rlPlatformIcon"></span>
-                <div>
-                  <p class="rl-platform" id="rlPlatform"></p>
-                  <p class="muted small">Direct review link sẵn sàng</p>
-                </div>
-                <a id="rlOpen" class="btn btn-primary" target="_blank" rel="noopener">Mở review form</a>
-              </div>
-              <dl class="kv">
-                <dt>Place ID</dt><dd><code id="rlId"></code> <button type="button" class="btn btn-light btn-sm" data-copy="rlId">Copy</button></dd>
-                <dt>Review link</dt><dd class="rl-link"><a id="rlLink" href="#" target="_blank" rel="noopener"></a> <button type="button" class="btn btn-light btn-sm" data-copy="rlLink">Copy</button></dd>
-              </dl>
-            </div>
+            <div id="rlResults"></div>
           </div>
         </section>
 
