@@ -250,11 +250,41 @@ code {
 .login-brand {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  font-size: var(--text-md);
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  gap: 12px;
 }
+
+/* Logo MAC. Web Tools */
+.logo-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #FFFFFF;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid #F1F5F9;
+  box-shadow: 0 4px 20px rgba(227, 30, 36, 0.06);
+  flex-shrink: 0;
+  line-height: 0;
+}
+.logo-text { display: flex; flex-direction: column; line-height: 1.05; }
+.logo-name {
+  color: #0F172A;
+  font-weight: 800;
+  font-size: 19px;
+  letter-spacing: -0.04em;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+.logo-name i { color: #FF6A2C; font-style: normal; }
+.logo-name-lg { font-size: 22px; }
+.logo-sub {
+  color: #64748B;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.login-brand { justify-content: center; margin-bottom: 8px; }
 .sidebar-brand {
   padding: var(--space-1) var(--space-2);
 }
@@ -1324,7 +1354,7 @@ td.mono {
   .sidebar-brand {
     padding: 0;
   }
-  .sidebar-brand span:not(.brand-mark) {
+  .sidebar-brand .logo-text {
     display: none;
   }
   .nav {
