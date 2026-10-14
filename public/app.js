@@ -219,8 +219,8 @@ const SECTION_TITLES = {
 };
 
 function switchSection(tab) {
-  document.querySelectorAll('.sidenav-item').forEach((b) => b.classList.remove('active'));
-  document.querySelector(`.sidenav-item[data-tab="${tab}"]`)?.classList.add('active');
+  document.querySelectorAll('.nav-item').forEach((b) => b.classList.remove('is-active'));
+  document.querySelector(`.nav-item[data-tab="${tab}"]`)?.classList.add('is-active');
   for (const name of ['run', 'qr', 'reviewlink', 'reports', 'accounts']) {
     const el = document.getElementById(`tab-${name}`);
     if (el) el.hidden = name !== tab;
@@ -850,7 +850,7 @@ function syncLiveLayoutClass() {
   }
 }
 
-document.querySelectorAll('.sidenav-item').forEach((btn) => {
+document.querySelectorAll('.nav-item').forEach((btn) => {
   btn.addEventListener('click', () => {
     switchSection(btn.getAttribute('data-tab'));
   });
