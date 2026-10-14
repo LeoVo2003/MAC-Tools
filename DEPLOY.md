@@ -1,4 +1,4 @@
-# F User Guide Tool v2 — Deploy guide
+# MAC Tools — Deploy guide
 
 ## Yêu cầu server
 

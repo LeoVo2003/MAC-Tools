@@ -180,6 +180,20 @@ export function createApp() {
     });
   });
 
+  /** Review Link: proxy sang Cloudflare Worker (tránh CORS browser). */
+  app.get('/api/review-link', requireAuth, async (req, res) => {
+    const url = String(req.query.url || '').trim();
+    if (!url) return res.status(400).json({ ok: false, error: 'Thiếu URL.' });
+    const workerBase = (process.env.REVIEW_LINK_WORKER || 'https://review-link.leo-vo.workers.dev').replace(/\/$/, '');
+    try {
+      const r = await fetch(`${workerBase}/api/convert?url=${encodeURIComponent(url)}`);
+      const data = await r.json();
+      res.status(r.ok ? 200 : 400).json(data);
+    } catch (err) {
+      res.status(502).json({ ok: false, error: 'Không gọi được review-link worker: ' + (err?.message || err) });
+    }
+  });
+
   /** Fill data ngầm: Project (+ Task) → website/username/password/email. */
   app.post('/api/fill-data', requireAuth, async (req, res) => {
     const body = req.body || {};
@@ -389,7 +403,7 @@ export function createApp() {
           broadcast('step', { ...payload, jobId: thisJobId }, { jobId: thisJobId, userId: ownerId });
 
         try {
-          pushLog('=== Bắt đầu job F User Guide Tool v2 ===');
+          pushLog('=== Bắt đầu job MAC Tools ===');
           const result = await runJob(jobPayload, pushLog, onStep, {
             shouldCancel: () => Boolean(jobRef.cancelled),
             jobId: thisJobId,
@@ -593,7 +607,7 @@ export async function startServer({ openBrowser: shouldOpen } = {}) {
 
   const server = app.listen(PORT, () => {
     const url = `http://localhost:${PORT}`;
-    console.log(`F User Guide Tool v2 UI: ${url}`);
+    console.log(`MAC Tools UI: ${url}`);
     console.log(`Thư mục app: ${getAppRoot()}`);
     console.log(`Download dir: ${DOWNLOADS_DIR}`);
     console.log(`Health: ${url}/api/health`);

@@ -1,7 +1,7 @@
 {
-  "name": "f-user-guide-tool",
+  "name": "mac-tools",
   "version": "2.1.1",
-  "description": "F User Guide Tool v2.1 — HTTP/DOM hybrid (createUser, Mac Role, Web Info) + Chrome fallback",
+  "description": "MAC Tools — internal ops hub (User Guide / QR Tool / Review Link)",
   "type": "module",
   "scripts": {
     "start": "node server.js",

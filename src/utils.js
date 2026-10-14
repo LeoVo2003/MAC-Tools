@@ -9,7 +9,7 @@ export const ERRORS_DIR = path.join(ROOT, 'errors');
 /** Ưu tiên Downloads của Windows; override bằng DOWNLOAD_DIR trong .env */
 export const DOWNLOADS_DIR = process.env.DOWNLOAD_DIR
   ? path.resolve(process.env.DOWNLOAD_DIR)
-  : path.join(os.homedir(), 'Downloads', 'F User Guide Tool');
+  : path.join(os.homedir(), 'Downloads', 'MAC Tools');
 
 export function ensureDirs() {
   for (const dir of [DOWNLOADS_DIR, ERRORS_DIR]) {

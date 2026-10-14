@@ -4,9 +4,11 @@ const loginBtn = document.getElementById('loginBtn');
 const loginStatus = document.getElementById('loginStatus');
 const loginError = document.getElementById('loginError');
 const appMain = document.getElementById('appMain');
-const userBar = document.getElementById('userBar');
+const sidebar = document.getElementById('sidebar');
 const whoAmI = document.getElementById('whoAmI');
 const logoutBtn = document.getElementById('logoutBtn');
+const pageTitle = document.getElementById('pageTitle');
+const headerSub = document.getElementById('headerSub');
 
 const form = document.getElementById('jobForm');
 const runBtn = document.getElementById('runBtn');
@@ -199,27 +201,46 @@ function applyRoleUi(user) {
   document.querySelectorAll('[data-admin-only]').forEach((el) => {
     el.hidden = !isAdmin;
   });
-  // User thường: không hiện tab (tránh nhầm với nút Run) — luôn ở màn job
+  // User thường: không hiện tab lạ — luôn ở màn dashboard
   if (!isAdmin) {
-    document.querySelectorAll('.tab').forEach((b) => b.classList.remove('active'));
-    document.querySelector('.tab[data-tab="run"]')?.classList.add('active');
-    const tabRun = document.getElementById('tab-run');
-    const tabReports = document.getElementById('tab-reports');
-    const tabAccounts = document.getElementById('tab-accounts');
-    if (tabRun) tabRun.hidden = false;
-    if (tabReports) tabReports.hidden = true;
-    if (tabAccounts) tabAccounts.hidden = true;
+    switchSection('reports');
     const mainRadio = form?.querySelector('input[name="webTargetMode"][value="main"]');
     if (mainRadio) mainRadio.checked = true;
   }
   updateWebTargetWarn();
 }
 
+const SECTION_TITLES = {
+  reports: ['Dashboard', 'Báo cáo lượt chạy.'],
+  run: ['User Guide', 'F Package — Fill data, Run, Live Chrome trên một màn hình.'],
+  qr: ['QR Tool', 'Tạo QR landing page tự động.'],
+  reviewlink: ['Review Link', 'Tạo direct review link Google / Yelp.'],
+  accounts: ['Tài khoản', 'Quản lý tài khoản tool.'],
+};
+
+function switchSection(tab) {
+  document.querySelectorAll('.sidenav-item').forEach((b) => b.classList.remove('active'));
+  document.querySelector(`.sidenav-item[data-tab="${tab}"]`)?.classList.add('active');
+  for (const name of ['run', 'qr', 'reviewlink', 'reports', 'accounts']) {
+    const el = document.getElementById(`tab-${name}`);
+    if (el) el.hidden = name !== tab;
+  }
+  const [title, sub] = SECTION_TITLES[tab] || ['MAC Tools', ''];
+  if (pageTitle) pageTitle.textContent = title;
+  if (headerSub) headerSub.textContent = sub;
+  syncLiveLayoutClass();
+  if (tab === 'reports') {
+    loadReports();
+    loadHealth();
+  }
+  if (tab === 'accounts') loadAccounts();
+}
+
 function showLoggedOut() {
   currentUser = null;
   loginPanel.hidden = false;
   appMain.hidden = true;
-  userBar.hidden = true;
+  if (sidebar) sidebar.hidden = true;
   if (logoutBtn) logoutBtn.hidden = true;
   whoAmI.textContent = '';
   setBadge(loginStatus, 'idle', 'Guest');
@@ -230,11 +251,11 @@ function showApp(user) {
   currentUser = user;
   loginPanel.hidden = true;
   appMain.hidden = false;
-  userBar.hidden = false;
   if (logoutBtn) logoutBtn.hidden = false;
   const isAdmin = user.role === 'admin';
   whoAmI.textContent = isAdmin ? `${user.username} (admin)` : user.username;
   setBadge(loginStatus, 'done', 'OK');
+  if (sidebar) sidebar.hidden = false;
   applyRoleUi(user);
   connectEvents();
   refreshQueue();
@@ -829,22 +850,9 @@ function syncLiveLayoutClass() {
   }
 }
 
-document.querySelectorAll('.tab').forEach((btn) => {
+document.querySelectorAll('.sidenav-item').forEach((btn) => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach((b) => b.classList.remove('active'));
-    btn.classList.add('active');
-    const tab = btn.getAttribute('data-tab');
-    document.getElementById('tab-run').hidden = tab !== 'run';
-    const reports = document.getElementById('tab-reports');
-    const accounts = document.getElementById('tab-accounts');
-    if (reports) reports.hidden = tab !== 'reports';
-    if (accounts) accounts.hidden = tab !== 'accounts';
-    syncLiveLayoutClass();
-    if (tab === 'reports') {
-      loadReports();
-      loadHealth();
-    }
-    if (tab === 'accounts') loadAccounts();
+    switchSection(btn.getAttribute('data-tab'));
   });
 });
 
@@ -1443,4 +1451,65 @@ refreshMe().catch((err) => {
   console.error(err);
   showLoggedOut();
   loginError.textContent = err.message || 'Lỗi kết nối — F5 thử lại';
+});
+
+/* ============ REVIEW LINK ============ */
+const rlUrl = document.getElementById('rlUrl');
+const rlBtn = document.getElementById('rlBtn');
+const rlStatus = document.getElementById('rlStatus');
+const rlError = document.getElementById('rlError');
+const rlResult = document.getElementById('rlResult');
+
+async function generateReviewLink() {
+  const url = (rlUrl?.value || '').trim();
+  if (rlError) rlError.textContent = '';
+  if (rlResult) rlResult.hidden = true;
+  if (!url) {
+    if (rlError) rlError.textContent = 'Paste Google Maps hoặc Yelp URL trước.';
+    return;
+  }
+  setBadge(rlStatus, 'running', 'Đang xử lý');
+  rlBtn.disabled = true;
+  try {
+    const res = await fetch('/api/review-link?url=' + encodeURIComponent(url));
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Không xử lý được link.');
+    document.getElementById('rlPlatform').textContent = data.platform === 'google' ? 'Google' : 'Yelp';
+    document.getElementById('rlId').textContent = data.id || '—';
+    const linkEl = document.getElementById('rlLink');
+    linkEl.textContent = data.reviewUrl;
+    linkEl.href = data.reviewUrl;
+    document.getElementById('rlOpen').href = data.reviewUrl;
+    rlResult.hidden = false;
+    setBadge(rlStatus, 'done', 'Xong');
+  } catch (err) {
+    if (rlError) rlError.textContent = err.message;
+    setBadge(rlStatus, 'error', 'Lỗi');
+  } finally {
+    rlBtn.disabled = false;
+  }
+}
+
+rlBtn?.addEventListener('click', generateReviewLink);
+rlUrl?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') generateReviewLink();
+});
+
+/* ============ QR TOOL (shell — backend sau) ============ */
+const qrForm = document.getElementById('qrForm');
+const qrLogBox = document.getElementById('qrLogBox');
+const qrStatusBadge = document.getElementById('qrStatusBadge');
+
+function qrLog(line) {
+  if (!qrLogBox) return;
+  const div = document.createElement('div');
+  div.textContent = line;
+  qrLogBox.appendChild(div);
+  qrLogBox.scrollTop = qrLogBox.scrollHeight;
+}
+
+qrForm?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  qrLog('QR backend chưa code — form UI xong, job chạy sẽ làm tiếp.');
+  setBadge(qrStatusBadge, 'warn', 'Chưa có backend');
 });

@@ -156,12 +156,12 @@ body.live-layout .tabs {
 }
 
 /* Nút Tài khoản active thì hiện panel, dù attribute hidden còn sót (JS cũ / cache). */
-body:has(.tab[data-tab="accounts"].active) #tab-accounts {
+body:has(.sidenav-item[data-tab="accounts"].active) #tab-accounts {
   display: block !important;
 }
 
-body:has(.tab[data-tab="accounts"].active) #tab-run,
-body:has(.tab[data-tab="accounts"].active) #tab-reports {
+body:has(.sidenav-item[data-tab="accounts"].active) #tab-run,
+body:has(.sidenav-item[data-tab="accounts"].active) #tab-reports {
   display: none !important;
 }
 
@@ -1475,3 +1475,160 @@ body.live-layout .run-sidebar .log {
   max-height: 180px;
 }
 
+
+/* ============ CRM SIDEBAR SHELL ============ */
+.app-shell {
+  max-width: 1280px;
+  display: flex;
+  gap: 0;
+  padding: 0;
+  min-height: 100vh;
+}
+
+.sidebar {
+  width: 232px;
+  flex-shrink: 0;
+  min-height: 100vh;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  padding: var(--space-5) var(--space-3);
+}
+
+.sidebar-brand {
+  padding: 0 var(--space-2);
+  margin-bottom: var(--space-6);
+}
+
+.sidebar-brand .brand-mark {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: var(--text-lg);
+  background: var(--brand-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.sidenav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1;
+}
+
+.sidenav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0.6rem 0.8rem;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  box-shadow: none;
+}
+
+.sidenav-item svg {
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.sidenav-item:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--text);
+  filter: none;
+}
+
+.sidenav-item.active {
+  background: var(--brand-gradient);
+  color: #fff;
+  border-color: transparent;
+}
+
+.sidenav-item.active svg {
+  opacity: 1;
+}
+
+.sidebar-foot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-2) 0;
+  border-top: 1px solid var(--border);
+}
+
+.sidebar-user {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-6) var(--space-5) var(--space-8);
+  max-width: 880px;
+}
+
+/* section titles */
+#pageTitle {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: var(--text-xl);
+  margin: 0;
+}
+
+/* mobile: sidebar thành topbar ngang */
+@media (max-width: 768px) {
+  .app-shell {
+    flex-direction: column;
+  }
+  .sidebar {
+    width: 100%;
+    min-height: 0;
+    height: auto;
+    position: static;
+    flex-direction: row;
+    align-items: center;
+    padding: var(--space-3);
+    gap: var(--space-3);
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar-brand {
+    margin-bottom: 0;
+  }
+  .sidenav {
+    flex-direction: row;
+    overflow-x: auto;
+    flex: 1;
+  }
+  .sidenav-item span {
+    display: none;
+  }
+  .sidenav-item {
+    padding: 0.5rem;
+  }
+  .sidebar-foot {
+    flex-direction: row;
+    align-items: center;
+    border-top: 0;
+    padding: 0;
+  }
+  .sidebar-user {
+    display: none;
+  }
+  .main {
+    padding: var(--space-4) var(--space-3) var(--space-6);
+  }
+}

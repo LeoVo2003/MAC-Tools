@@ -1,6 +1,6 @@
-# F User Guide Tool
+# MAC Tools
 
-Công cụ web tự động hóa gói F trên WordPress qua WPM (login project → backup → tạo user → sync → Mac Role → Web Info).
+Hub công cụ nội bộ MAC: **User Guide** (tự động hóa gói F trên WordPress qua WPM), **QR Tool** (tạo QR landing page), **Review Link** (tạo link review Google/Yelp).
 
 **Version:** `2.1.1` — bỏ quota CPU, cờ tắt GPU và giới hạn số job mặc định; Live hiển thị ảnh hiện tại và không giới hạn 4 fps. HTTP/DOM (createUser, Mac Core/Role, Web Info) + fallback Chrome.
 
