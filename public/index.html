@@ -14,8 +14,7 @@
     <aside class="sidebar" id="sidebar" hidden>
       <div class="sidebar-brand">MAC Tools</div>
       <nav class="nav" aria-label="Chính">
-        <button type="button" class="nav-item is-active" data-tab="reports">Dashboard</button>
-        <button type="button" class="nav-item" data-tab="run">User Guide</button>
+        <button type="button" class="nav-item is-active" data-tab="run">User Guide</button>
         <button type="button" class="nav-item" data-tab="qr">QR Tool</button>
         <button type="button" class="nav-item" data-tab="reviewlink">Review Link</button>
         <button type="button" class="nav-item" data-tab="accounts" data-admin-only hidden>Tài khoản</button>
@@ -49,66 +48,9 @@
 
       <div id="appMain" hidden>
         <header class="page-header">
-          <h1 id="pageTitle">Dashboard</h1>
-          <p id="headerSub" class="muted">Tổng quan hoạt động.</p>
+          <h1 id="pageTitle">User Guide</h1>
+          <p id="headerSub" class="muted">Chạy job F Package.</p>
         </header>
-
-        <!-- Dashboard -->
-        <section id="tab-reports">
-          <div class="stats">
-            <div class="stat"><span class="stat-label">Tổng lượt chạy</span><span class="stat-value" id="statTotal">0</span></div>
-            <div class="stat"><span class="stat-label">Thành công</span><span class="stat-value" id="statOk">0</span></div>
-            <div class="stat"><span class="stat-label">Thời gian TB</span><span class="stat-value" id="statAvg">—</span></div>
-          </div>
-
-          <section class="block">
-            <div class="block-head">
-              <h2>Lịch sử chạy</h2>
-              <div class="row">
-                <button type="button" id="refreshReportsBtn">Refresh</button>
-                <button type="button" id="exportCsvBtn">Export CSV</button>
-              </div>
-            </div>
-            <div class="filters" id="reportFilters">
-              <label><span>User</span><input id="filterUser" type="text" placeholder="email / username" /></label>
-              <label><span>Từ ngày</span><input id="filterFrom" type="date" /></label>
-              <label><span>Đến ngày</span><input id="filterTo" type="date" /></label>
-              <label><span>Trạng thái</span>
-                <select id="filterStatus">
-                  <option value="">Tất cả</option>
-                  <option value="success">Thành công</option>
-                  <option value="error">Lỗi</option>
-                  <option value="cancelled">Đã hủy</option>
-                  <option value="running">Đang chạy</option>
-                </select>
-              </label>
-            </div>
-            <div class="row mb">
-              <button type="button" id="deleteSelectedRunsBtn" disabled>Xóa đã chọn</button>
-              <button type="button" id="purgeFailedRunsBtn">Dọn lỗi &amp; hủy</button>
-              <button type="button" id="clearReportsBtn">Xóa tất cả</button>
-            </div>
-            <div class="table-wrap">
-              <table id="runsTable">
-                <thead>
-                  <tr>
-                    <th><input type="checkbox" id="runsSelectAll" aria-label="Chọn tất cả" /></th>
-                    <th>Thời gian</th><th>User</th><th>Website</th><th>Tổng TG</th><th>Trạng thái</th><th>Ghi chú</th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-              </table>
-            </div>
-          </section>
-
-          <section class="block" id="healthPanel">
-            <div class="block-head">
-              <h2>Hệ thống</h2>
-              <button type="button" id="refreshHealthBtn">Refresh</button>
-            </div>
-            <pre id="healthBox" class="code"></pre>
-          </section>
-        </section>
 
         <!-- User Guide -->
         <section id="tab-run" hidden>

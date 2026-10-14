@@ -203,7 +203,7 @@ function applyRoleUi(user) {
   });
   // User thường: không hiện tab lạ — luôn ở màn dashboard
   if (!isAdmin) {
-    switchSection('reports');
+    switchSection('run');
     const mainRadio = form?.querySelector('input[name="webTargetMode"][value="main"]');
     if (mainRadio) mainRadio.checked = true;
   }
@@ -211,7 +211,6 @@ function applyRoleUi(user) {
 }
 
 const SECTION_TITLES = {
-  reports: ['Dashboard', 'Báo cáo lượt chạy.'],
   run: ['User Guide', 'F Package — Fill data, Run, Live Chrome trên một màn hình.'],
   qr: ['QR Tool', 'Tạo QR landing page tự động.'],
   reviewlink: ['Review Link', 'Tạo direct review link Google / Yelp.'],
@@ -221,7 +220,7 @@ const SECTION_TITLES = {
 function switchSection(tab) {
   document.querySelectorAll('.nav-item').forEach((b) => b.classList.remove('is-active'));
   document.querySelector(`.nav-item[data-tab="${tab}"]`)?.classList.add('is-active');
-  for (const name of ['run', 'qr', 'reviewlink', 'reports', 'accounts']) {
+  for (const name of ['run', 'qr', 'reviewlink', 'accounts']) {
     const el = document.getElementById(`tab-${name}`);
     if (el) el.hidden = name !== tab;
   }
@@ -229,10 +228,6 @@ function switchSection(tab) {
   if (pageTitle) pageTitle.textContent = title;
   if (headerSub) headerSub.textContent = sub;
   syncLiveLayoutClass();
-  if (tab === 'reports') {
-    loadReports();
-    loadHealth();
-  }
   if (tab === 'accounts') loadAccounts();
 }
 
