@@ -221,8 +221,8 @@ function applyRoleUi(user) {
   document.querySelectorAll('[data-admin-only]').forEach((el) => {
     el.hidden = !isAdmin;
   });
-  // Vào thẳng Dashboard để thấy queue
-  switchSection('dashboard');
+  // Admin vào Dashboard, user thường vào User Guide
+  switchSection(isAdmin ? 'dashboard' : 'run');
   if (!isAdmin) {
     const mainRadio = form?.querySelector('input[name="webTargetMode"][value="main"]');
     if (mainRadio) mainRadio.checked = true;
@@ -1501,6 +1501,10 @@ async function generateReviewLink() {
     const data = await res.json();
     if (!res.ok || !data.ok) throw new Error(data.error || 'Không xử lý được link.');
     document.getElementById('rlPlatform').textContent = data.platform === 'google' ? 'Google' : 'Yelp';
+    const iconEl = document.getElementById('rlPlatformIcon');
+    if (iconEl) iconEl.innerHTML = data.platform === 'google'
+      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="24" height="24"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>'
+      : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="24" height="24"><path d="M12 2l2.4 7.2H22l-6 4.6 2.3 7.2-6.3-4.5-6.3 4.5L8 13.8 2 9.2h7.6z"/></svg>';
     document.getElementById('rlId').textContent = data.id || '—';
     const linkEl = document.getElementById('rlLink');
     linkEl.textContent = data.reviewUrl;
@@ -1533,6 +1537,20 @@ function qrLog(line) {
   qrLogBox.appendChild(div);
   qrLogBox.scrollTop = qrLogBox.scrollHeight;
 }
+
+/* Sync text hex <-> color picker */
+function syncColorPair(textId, pickerId) {
+  const text = document.getElementById(textId);
+  const picker = document.getElementById(pickerId);
+  if (!text || !picker) return;
+  picker.addEventListener('input', () => { text.value = picker.value.toUpperCase(); });
+  text.addEventListener('input', () => {
+    const v = text.value.trim();
+    if (/^#[0-9a-fA-F]{6}$/.test(v)) picker.value = v;
+  });
+}
+syncColorPair('qrPrimary', 'qrPrimaryPicker');
+syncColorPair('qrSecondary', 'qrSecondaryPicker');
 
 qrForm?.addEventListener('submit', async (e) => {
   e.preventDefault();

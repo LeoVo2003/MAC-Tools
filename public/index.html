@@ -34,7 +34,7 @@
         <span class="logo-text"><span class="logo-name">MAC<i>.</i></span><span class="logo-sub">Web Tools</span></span>
       </div>
       <nav class="nav" aria-label="Chính">
-        <button type="button" class="nav-item is-active" data-tab="dashboard" aria-current="page">
+        <button type="button" class="nav-item is-active" data-tab="dashboard" aria-current="page" data-admin-only hidden>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
           Dashboard
         </button>
@@ -106,8 +106,8 @@
           <p id="headerSub" class="muted">Theo dõi mọi tool.</p>
         </header>
 
-        <!-- Dashboard -->
-        <section id="tab-dashboard">
+        <!-- Dashboard (admin only) -->
+        <section id="tab-dashboard" data-admin-only hidden>
           <div class="dash-toolbar">
             <div class="seg" role="group" aria-label="Khoảng thời gian">
               <button type="button" class="seg-btn is-active" data-range="today">Hôm nay</button>
@@ -347,17 +347,31 @@
               <button type="button" id="qrFillBtn" class="btn btn-primary self-end">Fill data</button>
             </div>
             <p id="qrFillHint" class="hint hint--muted"></p>
+            <label class="field"><span>Tên project</span><input id="qrProjectName" type="text" readonly placeholder="Fill data sẽ tự lấy" /></label>
             <div class="grid">
-              <label class="field"><span>Tên project</span><input id="qrProjectName" type="text" readonly placeholder="Fill data sẽ tự lấy" /></label>
-              <label class="field"><span>Màu chính</span><input id="qrPrimary" type="color" value="#1877F2" required /></label>
-              <label class="field"><span>Màu phụ (trống = darken 50%)</span><input id="qrSecondary" type="color" value="#0d5bbf" /></label>
+              <label class="field"><span>Màu chính</span>
+                <div class="color-field">
+                  <input id="qrPrimary" type="text" value="#E31E24" placeholder="#E31E24" pattern="#[0-9a-fA-F]{6}" maxlength="7" required />
+                  <input id="qrPrimaryPicker" type="color" value="#E31E24" aria-label="Chọn màu chính" />
+                </div>
+              </label>
+              <label class="field"><span>Màu phụ <em class="muted">(trống = tự động darken 50%)</em></span>
+                <div class="color-field">
+                  <input id="qrSecondary" type="text" value="" placeholder="Để trống = tự động" pattern="#[0-9a-fA-F]{6}" maxlength="7" />
+                  <input id="qrSecondaryPicker" type="color" value="#E31E24" aria-label="Chọn màu phụ" />
+                </div>
+              </label>
+            </div>
+            <div class="grid grid-3">
               <label class="field"><span>Logo</span><input id="qrLogo" type="file" accept="image/*" required /></label>
               <label class="field"><span>Background 3 section</span><input id="qrBg1" type="file" accept="image/*" required /></label>
               <label class="field"><span>Hình bên trái form</span><input id="qrBg2" type="file" accept="image/*" required /></label>
+            </div>
+            <div class="grid">
               <label class="field"><span>Homepage link</span><input id="qrHomeLink" type="url" placeholder="https://" /></label>
               <label class="field"><span>Menu link</span><input id="qrMenuLink" type="url" placeholder="https://" /></label>
-              <label class="field"><span>Google review link (trống = tự suy)</span><input id="qrReviewGg" type="url" placeholder="https://" /></label>
-              <label class="field"><span>Yelp review link (trống = tự suy)</span><input id="qrReviewYelp" type="url" placeholder="https://" /></label>
+              <label class="field"><span>Google review link <em class="muted">(trống = tự suy)</em></span><input id="qrReviewGg" type="url" placeholder="https://" /></label>
+              <label class="field"><span>Yelp review link <em class="muted">(trống = tự suy)</em></span><input id="qrReviewYelp" type="url" placeholder="https://" /></label>
             </div>
             <label class="inline"><input type="checkbox" id="qrLogoFilter" checked /> Đảo màu logo (trắng)</label>
             <div class="actions">
@@ -379,25 +393,33 @@
 
         <!-- Review Link -->
         <section id="tab-reviewlink" hidden>
-          <div class="block narrow">
+          <div class="block">
             <h2>Review Link</h2>
-            <p class="muted">Paste Google Maps hoặc Yelp link để lấy direct review link.</p>
-            <label class="field">
-              <span>Google Maps / Yelp URL</span>
-              <input id="rlUrl" type="url" placeholder="https://..." autocomplete="off" />
-            </label>
+            <p class="muted">Paste Google Maps hoặc Yelp link để lấy direct review link — khách bấm vào đi thẳng tới form đánh giá.</p>
+            <div class="rl-input-row">
+              <label class="field grow">
+                <span>Google Maps / Yelp URL</span>
+                <input id="rlUrl" type="url" placeholder="https://maps.google.com/... hoặc https://yelp.com/biz/..." autocomplete="off" />
+              </label>
+              <button type="button" id="rlBtn" class="btn btn-primary btn-lg self-end">Generate</button>
+            </div>
             <p id="rlError" class="error-text" role="alert"></p>
-            <div class="actions">
-              <button type="button" id="rlBtn" class="btn btn-primary btn-lg">Generate</button>
+            <div class="rl-status-row">
               <span id="rlStatus" class="badge" role="status" aria-live="polite">Idle</span>
             </div>
-            <div id="rlResult" hidden>
+            <div id="rlResult" class="rl-result" hidden>
+              <div class="rl-result-head">
+                <span class="tool-card-icon" id="rlPlatformIcon"></span>
+                <div>
+                  <p class="rl-platform" id="rlPlatform"></p>
+                  <p class="muted small">Direct review link sẵn sàng</p>
+                </div>
+                <a id="rlOpen" class="btn btn-primary" target="_blank" rel="noopener">Mở review form</a>
+              </div>
               <dl class="kv">
-                <dt>Platform</dt><dd><span id="rlPlatform"></span></dd>
-                <dt>ID</dt><dd><code id="rlId"></code> <button type="button" class="btn btn-light btn-sm" data-copy="rlId">Copy</button></dd>
-                <dt>Review link</dt><dd><a id="rlLink" href="#" target="_blank" rel="noopener"></a> <button type="button" class="btn btn-light btn-sm" data-copy="rlLink">Copy</button></dd>
+                <dt>Place ID</dt><dd><code id="rlId"></code> <button type="button" class="btn btn-light btn-sm" data-copy="rlId">Copy</button></dd>
+                <dt>Review link</dt><dd class="rl-link"><a id="rlLink" href="#" target="_blank" rel="noopener"></a> <button type="button" class="btn btn-light btn-sm" data-copy="rlLink">Copy</button></dd>
               </dl>
-              <a id="rlOpen" class="btn" target="_blank" rel="noopener">Mở review form</a>
             </div>
           </div>
         </section>
