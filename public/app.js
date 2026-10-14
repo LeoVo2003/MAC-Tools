@@ -128,6 +128,22 @@ function stepInputs() {
   return [...document.querySelectorAll('input[name="step"]')];
 }
 
+const kpiRunning = document.getElementById('kpiRunning');
+const kpiWaiting = document.getElementById('kpiWaiting');
+const kpiSteps = document.getElementById('kpiSteps');
+
+function setKpi(el, text, active = false) {
+  if (!el) return;
+  el.textContent = String(text);
+  el.closest('.kpi')?.classList.toggle('is-active', Boolean(active));
+}
+
+function updateStepsKpi() {
+  const all = stepInputs();
+  const picked = all.filter((el) => el.checked).length;
+  setKpi(kpiSteps, `${picked}/${all.length}`);
+}
+
 function getSelectedSteps() {
   return stepInputs().filter((el) => el.checked).map((el) => el.value);
 }
@@ -138,6 +154,7 @@ function setAllSteps(checked) {
     el.closest('.step-item')?.classList.remove('done', 'running');
   }
   doneThisRun.clear();
+  updateStepsKpi();
 }
 
 function clearStepStyles() {
@@ -172,11 +189,14 @@ function untickCompletedAfterError() {
       el.closest('.step-item')?.classList.remove('running');
     }
   }
+  updateStepsKpi();
   appendLog(`↳ Đã bỏ tick ${doneThisRun.size} bước xong — tick còn lại để Run tiếp.`);
 }
 
 stepsAllBtn?.addEventListener('click', () => setAllSteps(true));
 stepsNoneBtn?.addEventListener('click', () => setAllSteps(false));
+document.getElementById('stepsList')?.addEventListener('change', updateStepsKpi);
+updateStepsKpi();
 
 function showResult(result) {
   resultPanel.hidden = false;
@@ -201,9 +221,9 @@ function applyRoleUi(user) {
   document.querySelectorAll('[data-admin-only]').forEach((el) => {
     el.hidden = !isAdmin;
   });
-  // User thường: không hiện tab lạ — luôn ở màn dashboard
+  // Mọi role vào thẳng User Guide (#tab-run mặc định hidden trong HTML)
+  switchSection('run');
   if (!isAdmin) {
-    switchSection('run');
     const mainRadio = form?.querySelector('input[name="webTargetMode"][value="main"]');
     if (mainRadio) mainRadio.checked = true;
   }
@@ -218,8 +238,13 @@ const SECTION_TITLES = {
 };
 
 function switchSection(tab) {
-  document.querySelectorAll('.nav-item').forEach((b) => b.classList.remove('is-active'));
-  document.querySelector(`.nav-item[data-tab="${tab}"]`)?.classList.add('is-active');
+  document.querySelectorAll('.nav-item').forEach((b) => {
+    b.classList.remove('is-active');
+    b.removeAttribute('aria-current');
+  });
+  const activeNav = document.querySelector(`.nav-item[data-tab="${tab}"]`);
+  activeNav?.classList.add('is-active');
+  activeNav?.setAttribute('aria-current', 'page');
   for (const name of ['run', 'qr', 'reviewlink', 'accounts']) {
     const el = document.getElementById(`tab-${name}`);
     if (el) el.hidden = name !== tab;
@@ -966,6 +991,10 @@ function runDurationMs(r) {
 
 function renderQueue(q) {
   const max = Number(q?.maxConcurrent) || 0;
+  const runningNow = Number(q?.runningCount) || 0;
+  const waitingNow = Number(q?.pendingCount) || 0;
+  setKpi(kpiRunning, runningNow, runningNow > 0);
+  setKpi(kpiWaiting, waitingNow, waitingNow > 0);
   if (q?.runningCount > 0 || q?.pendingCount > 0) {
     queueHint.textContent = `Đang chạy ${q.runningCount || 0}${max > 0 ? `/${max}` : ' job'}${q.pendingCount ? ` · chờ ${q.pendingCount}` : ''}`;
   } else {
@@ -975,7 +1004,7 @@ function renderQueue(q) {
   if (!box) return;
   const items = q?.queue || [];
   if (!items.length) {
-    box.innerHTML = '<p class="hint">Trống.</p>';
+    box.innerHTML = '<p class="empty">Chưa có job trong hàng đợi.</p>';
     return;
   }
   box.innerHTML = '';

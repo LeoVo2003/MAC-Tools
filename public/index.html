@@ -3,45 +3,59 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#F5F5F7" />
   <title>MAC Tools</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/style.css?v=20261014f" />
+  <link rel="stylesheet" href="/style.css?v=20261014g" />
 </head>
 <body>
+  <a class="skip-link" href="#content">Bỏ qua điều hướng</a>
   <div class="app">
     <aside class="sidebar" id="sidebar" hidden>
-      <div class="sidebar-brand">MAC Tools</div>
+      <div class="sidebar-brand"><span class="brand-mark" aria-hidden="true">M</span><span>MAC Tools</span></div>
       <nav class="nav" aria-label="Chính">
-        <button type="button" class="nav-item is-active" data-tab="run">User Guide</button>
-        <button type="button" class="nav-item" data-tab="qr">QR Tool</button>
-        <button type="button" class="nav-item" data-tab="reviewlink">Review Link</button>
-        <button type="button" class="nav-item" data-tab="accounts" data-admin-only hidden>Tài khoản</button>
+        <button type="button" class="nav-item is-active" data-tab="run" aria-current="page">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6"/></svg>
+          User Guide
+        </button>
+        <button type="button" class="nav-item" data-tab="qr">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h3M20 17v4"/></svg>
+          QR Tool
+        </button>
+        <button type="button" class="nav-item" data-tab="reviewlink">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M10 13a5 5 0 0 0 7.07 0l2.83-2.83a5 5 0 0 0-7.07-7.07L11.5 4.5"/><path d="M14 11a5 5 0 0 0-7.07 0L4.1 13.83a5 5 0 0 0 7.07 7.07l1.33-1.33"/></svg>
+          Review Link
+        </button>
+        <button type="button" class="nav-item" data-tab="accounts" data-admin-only hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          Tài khoản
+        </button>
       </nav>
       <div class="sidebar-footer">
         <span id="whoAmI"></span>
-        <button type="button" id="logoutBtn">Đăng xuất</button>
+        <button type="button" id="logoutBtn" class="btn-sm">Đăng xuất</button>
       </div>
     </aside>
 
-    <main class="main">
+    <main class="main" id="content">
       <!-- Login -->
       <div class="login-screen" id="loginPanel">
         <form class="login-card" id="loginForm" novalidate>
-          <div class="login-brand">MAC Tools</div>
+          <div class="login-brand"><span class="brand-mark" aria-hidden="true">M</span><span>MAC Tools</span></div>
           <h1>Đăng nhập</h1>
           <p class="muted">Dùng email và mật khẩu WPM.</p>
-          <label>
+          <label class="field">
             <span>Email WPM</span>
             <input id="loginUser" name="username" type="email" required autocomplete="username" placeholder="you@macusaone.com" />
           </label>
-          <label>
+          <label class="field">
             <span>Mật khẩu</span>
             <input id="loginPass" name="password" type="password" required autocomplete="current-password" placeholder="••••••••" />
           </label>
-          <p id="loginError" class="error-text"></p>
-          <button type="submit" id="loginBtn">Đăng nhập</button>
+          <p id="loginError" class="error-text" role="alert"></p>
+          <button type="submit" id="loginBtn" class="btn btn-primary btn-lg btn-block">Đăng nhập</button>
           <p class="muted small">Lần đầu đăng nhập, tool tự tạo tài khoản và lưu mật khẩu WPM. <span id="loginStatus" class="badge">Guest</span></p>
         </form>
       </div>
@@ -53,93 +67,118 @@
         </header>
 
         <!-- User Guide -->
-        <section id="tab-run" hidden>
-          <form class="block" id="jobForm">
-            <h2>Thông tin job</h2>
-            <div class="field-row">
-              <label class="grow">
-                <span>WPM Project URL</span>
-                <input name="wpmProjectUrl" type="url" required placeholder="https://wpm.macusaone.com/projects/627/edit" />
-              </label>
-              <button type="button" id="fillDataBtn" class="self-end">Fill data</button>
+        <section id="tab-run" class="run-workspace" hidden>
+          <div class="kpis" aria-label="Tổng quan">
+            <div class="kpi kpi--running">
+              <span class="kpi-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M6 4l14 8-14 8z"/></svg></span>
+              <div><p class="kpi-label">Đang chạy</p><p class="kpi-value" id="kpiRunning">0</p></div>
             </div>
-            <p id="fillDataHint" class="muted small"></p>
-            <div class="grid">
-              <label><span>Task URL (tuỳ chọn)</span><input name="taskUrl" type="url" placeholder="https://wpm.macusaone.com/tasks/16694/edit" /></label>
-              <label><span>Website URL</span><input name="websiteUrl" id="fieldWebsiteUrl" type="url" required placeholder="Fill data sẽ tự lấy" /></label>
-              <label><span>Username chủ tiệm</span><input name="username" id="fieldUsername" type="text" required autocomplete="off" /></label>
-              <label><span>Password chủ tiệm</span><input name="password" id="fieldPassword" type="text" required autocomplete="off" /></label>
-              <label><span>Email khách</span><input name="email" id="fieldEmail" type="email" required /></label>
-              <label><span>Link tài liệu</span><input name="docLink" type="url" value="https://note.macmarketing.us/quan-ly-website-goi-f" /></label>
+            <div class="kpi kpi--waiting">
+              <span class="kpi-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
+              <div><p class="kpi-label">Đang chờ</p><p class="kpi-value" id="kpiWaiting">0</p></div>
             </div>
+            <div class="kpi kpi--steps">
+              <span class="kpi-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="m3 6 2 2 4-4"/><path d="m3 16 2 2 4-4"/><path d="M13 6h8M13 16h8"/></svg></span>
+              <div><p class="kpi-label">Bước đã chọn</p><p class="kpi-value" id="kpiSteps">6/6</p></div>
+            </div>
+          </div>
 
-            <div class="note" data-admin-only hidden>
-              <strong>Target web (admin)</strong>
-              <p class="muted small">Test subdomain → điền ô Website = subdomain → chọn “Khớp ô Website”.</p>
-              <label class="inline"><input type="radio" name="webTargetMode" value="main" checked /> Main Web (an toàn)</label>
-              <label class="inline"><input type="radio" name="webTargetMode" value="website" /> Khớp ô Website</label>
-              <p id="webTargetWarn" class="error-text" hidden>Đang chạy NON-Main Web.</p>
-            </div>
+          <div class="run-primary">
+            <form class="block" id="jobForm">
+              <div class="section">
+                <h2>Thông tin job</h2>
+                <div class="field-row">
+                  <label class="field grow">
+                    <span>WPM Project URL</span>
+                    <input name="wpmProjectUrl" type="url" required placeholder="https://wpm.macusaone.com/projects/627/edit" />
+                  </label>
+                  <button type="button" id="fillDataBtn" class="btn btn-primary self-end">Fill data</button>
+                </div>
+                <p id="fillDataHint" class="hint hint--muted"></p>
+                <div class="grid">
+                  <label class="field"><span>Task URL (tuỳ chọn)</span><input name="taskUrl" type="url" placeholder="https://wpm.macusaone.com/tasks/16694/edit" /></label>
+                  <label class="field"><span>Website URL</span><input name="websiteUrl" id="fieldWebsiteUrl" type="url" required placeholder="Fill data sẽ tự lấy" /></label>
+                  <label class="field"><span>Username chủ tiệm</span><input name="username" id="fieldUsername" type="text" required autocomplete="off" /></label>
+                  <label class="field"><span>Password chủ tiệm</span><input name="password" id="fieldPassword" type="text" required autocomplete="off" /></label>
+                  <label class="field"><span>Email khách</span><input name="email" id="fieldEmail" type="email" required /></label>
+                  <label class="field"><span>Link tài liệu</span><input name="docLink" type="url" value="https://note.macmarketing.us/quan-ly-website-goi-f" /></label>
+                </div>
+                <div id="fillFieldStatus" hidden></div>
 
-            <h2>Bước chạy</h2>
-            <p class="muted small">Login WPM + Quick Login luôn chạy. Tối đa 4 job Chrome cùng lúc.</p>
-            <div class="row mb">
-              <button type="button" id="stepsAllBtn">Chọn hết</button>
-              <button type="button" id="stepsNoneBtn">Bỏ hết</button>
-            </div>
-            <div class="steps" id="stepsList">
-              <label class="inline"><input type="checkbox" name="step" value="backup" checked /> Backup UpdraftPlus</label>
-              <label class="inline"><input type="checkbox" name="step" value="createUser" checked /> Tạo tài khoản khách</label>
-              <label class="inline"><input type="checkbox" name="step" value="syncWpm" checked /> Sync tài khoản lên WPM</label>
-              <label class="inline"><input type="checkbox" name="step" value="macCore" checked /> Mac Core → cài Mac Role</label>
-              <label class="inline"><input type="checkbox" name="step" value="macRole" checked /> Mac Role → F Package User</label>
-              <label class="inline"><input type="checkbox" name="step" value="webInfo" checked /> Web Info → Dashboard</label>
-            </div>
+                <div class="note" data-admin-only hidden>
+                  <strong>Target web (admin)</strong>
+                  <p class="muted small">Test subdomain → điền ô Website = subdomain → chọn “Khớp ô Website”.</p>
+                  <div>
+                    <label class="inline"><input type="radio" name="webTargetMode" value="main" checked /> Main Web (an toàn)</label>
+                    <label class="inline"><input type="radio" name="webTargetMode" value="website" /> Khớp ô Website</label>
+                  </div>
+                  <p id="webTargetWarn" class="error-text" hidden>Đang chạy NON-Main Web.</p>
+                </div>
+              </div>
 
-            <div class="actions">
-              <button type="submit" id="runBtn">Run</button>
-              <button type="button" id="cancelBtn" hidden>Hủy</button>
-              <button type="button" id="resumeBtn" hidden>Resume</button>
-              <span id="statusBadge" class="badge" role="status" aria-live="polite">Idle</span>
-              <span id="queueHint" class="muted small"></span>
-            </div>
-            <div id="fillFieldStatus" hidden></div>
-          </form>
+              <div class="section">
+                <h2>Bước chạy</h2>
+                <p class="muted small">Login WPM + Quick Login luôn chạy. Tối đa 4 job Chrome cùng lúc.</p>
+                <div class="row mb">
+                  <button type="button" id="stepsAllBtn" class="btn btn-ghost btn-sm">Chọn hết</button>
+                  <button type="button" id="stepsNoneBtn" class="btn btn-ghost btn-sm">Bỏ hết</button>
+                </div>
+                <div class="steps" id="stepsList">
+                  <label class="step-item"><span class="step-index" aria-hidden="true"></span><span class="step-title">Backup UpdraftPlus</span><input type="checkbox" name="step" value="backup" checked /></label>
+                  <label class="step-item"><span class="step-index" aria-hidden="true"></span><span class="step-title">Tạo tài khoản khách</span><input type="checkbox" name="step" value="createUser" checked /></label>
+                  <label class="step-item"><span class="step-index" aria-hidden="true"></span><span class="step-title">Sync tài khoản lên WPM</span><input type="checkbox" name="step" value="syncWpm" checked /></label>
+                  <label class="step-item"><span class="step-index" aria-hidden="true"></span><span class="step-title">Mac Core → cài Mac Role</span><input type="checkbox" name="step" value="macCore" checked /></label>
+                  <label class="step-item"><span class="step-index" aria-hidden="true"></span><span class="step-title">Mac Role → F Package User</span><input type="checkbox" name="step" value="macRole" checked /></label>
+                  <label class="step-item"><span class="step-index" aria-hidden="true"></span><span class="step-title">Web Info → Dashboard</span><input type="checkbox" name="step" value="webInfo" checked /></label>
+                </div>
 
-          <section class="block" id="queuePanel">
-            <h2>Hàng đợi</h2>
-            <div id="queueList"><p class="muted small">Trống.</p></div>
-          </section>
+                <div class="actions">
+                  <button type="submit" id="runBtn" class="btn btn-primary btn-lg">Run</button>
+                  <button type="button" id="cancelBtn" class="btn btn-danger btn-lg" hidden>Hủy</button>
+                  <button type="button" id="resumeBtn" class="btn btn-lg" hidden>Resume</button>
+                  <span id="statusBadge" class="badge" role="status" aria-live="polite">Idle</span>
+                  <span id="queueHint" class="muted small"></span>
+                </div>
+              </div>
+            </form>
 
-          <section class="block">
-            <h2>Log</h2>
-            <div id="logBox" class="code" role="log" aria-live="polite"></div>
-          </section>
+            <section class="block" id="logPanel">
+              <h2>Log</h2>
+              <div id="logBox" class="code" role="log" aria-live="polite" tabindex="0"></div>
+            </section>
+          </div>
 
-          <section class="block" id="resultPanel" hidden>
-            <h2>Kết quả</h2>
-            <dl class="kv">
-              <dt>Login URL</dt><dd><a id="outLogin" href="#" target="_blank" rel="noopener"></a> <button type="button" data-copy="outLogin">Copy</button></dd>
-              <dt>Guide File</dt><dd><a id="outDoc" href="#" target="_blank" rel="noopener"></a> <button type="button" data-copy="outDoc">Copy</button></dd>
-              <dt>Username</dt><dd><span id="outUser"></span> <button type="button" data-copy="outUser">Copy</button></dd>
-              <dt>Password</dt><dd><code id="outPass"></code> <button type="button" data-copy="outPass">Copy</button></dd>
-            </dl>
-            <button type="button" id="copyBtn">Copy tất cả</button>
-          </section>
+          <div class="run-secondary">
+            <section class="block" id="queuePanel">
+              <h2>Hàng đợi</h2>
+              <div id="queueList"><p class="empty">Chưa có job trong hàng đợi.</p></div>
+            </section>
 
-          <section class="block" id="liveChromePanel" hidden>
-            <div class="block-head">
-              <h2>Live Chrome <span class="badge" id="liveChromeBadge">OFF</span></h2>
-              <button type="button" id="liveChromeToggle">Mở Live</button>
-            </div>
-            <p class="muted small live-chrome-hint">Live mặc định tắt để tiết kiệm CPU.</p>
-            <div id="liveChromeFrameWrap" hidden>
-              <img id="liveShot" alt="Live Chrome snapshot" hidden />
-              <iframe id="liveChromeFrame" title="Live Chrome noVNC" allow="clipboard-read; clipboard-write; fullscreen" hidden></iframe>
-              <p class="muted small" id="liveShotEmpty">Chưa có ảnh — chạy Fill/Run khi Live đang mở.</p>
-              <p><a id="liveChromeNewTab" href="/chrome-live/" target="_blank" rel="noopener" hidden>Mở tab mới</a></p>
-            </div>
-          </section>
+            <section class="block" id="resultPanel" hidden>
+              <h2>Kết quả</h2>
+              <dl class="kv">
+                <dt>Login URL</dt><dd><a id="outLogin" href="#" target="_blank" rel="noopener"></a> <button type="button" class="btn btn-light btn-sm" data-copy="outLogin">Copy</button></dd>
+                <dt>Guide File</dt><dd><a id="outDoc" href="#" target="_blank" rel="noopener"></a> <button type="button" class="btn btn-light btn-sm" data-copy="outDoc">Copy</button></dd>
+                <dt>Username</dt><dd><span id="outUser"></span> <button type="button" class="btn btn-light btn-sm" data-copy="outUser">Copy</button></dd>
+                <dt>Password</dt><dd><code id="outPass"></code> <button type="button" class="btn btn-light btn-sm" data-copy="outPass">Copy</button></dd>
+              </dl>
+              <button type="button" id="copyBtn" class="btn btn-primary btn-block">Copy tất cả</button>
+            </section>
+
+            <section class="block" id="liveChromePanel" hidden>
+              <div class="block-head">
+                <h2>Live Chrome <span class="badge" id="liveChromeBadge">OFF</span></h2>
+                <button type="button" id="liveChromeToggle" class="btn-sm">Mở Live</button>
+              </div>
+              <p class="muted small live-chrome-hint">Live mặc định tắt để tiết kiệm CPU.</p>
+              <div id="liveChromeFrameWrap" hidden>
+                <img id="liveShot" alt="Live Chrome snapshot" hidden />
+                <iframe id="liveChromeFrame" title="Live Chrome noVNC" allow="clipboard-read; clipboard-write; fullscreen" hidden></iframe>
+                <p class="muted small" id="liveShotEmpty">Chưa có ảnh — chạy Fill/Run khi Live đang mở.</p>
+                <p><a id="liveChromeNewTab" href="/chrome-live/" target="_blank" rel="noopener" hidden>Mở tab mới</a></p>
+              </div>
+            </section>
+          </div>
         </section>
 
         <!-- QR Tool -->
@@ -147,39 +186,39 @@
           <form class="block" id="qrForm">
             <h2>Tạo QR landing page</h2>
             <div class="field-row">
-              <label class="grow">
+              <label class="field grow">
                 <span>WPM Project URL</span>
                 <input id="qrWpmUrl" name="qrWpmUrl" type="url" required placeholder="https://wpm.macusaone.com/projects/627/edit" />
               </label>
-              <button type="button" id="qrFillBtn" class="self-end">Fill data</button>
+              <button type="button" id="qrFillBtn" class="btn btn-primary self-end">Fill data</button>
             </div>
-            <p id="qrFillHint" class="muted small"></p>
+            <p id="qrFillHint" class="hint hint--muted"></p>
             <div class="grid">
-              <label><span>Tên project</span><input id="qrProjectName" type="text" readonly placeholder="Fill data sẽ tự lấy" /></label>
-              <label><span>Màu chính</span><input id="qrPrimary" type="color" value="#1877F2" required /></label>
-              <label><span>Màu phụ (trống = darken 50%)</span><input id="qrSecondary" type="color" value="#0d5bbf" /></label>
-              <label><span>Logo</span><input id="qrLogo" type="file" accept="image/*" required /></label>
-              <label><span>Background 3 section</span><input id="qrBg1" type="file" accept="image/*" required /></label>
-              <label><span>Hình bên trái form</span><input id="qrBg2" type="file" accept="image/*" required /></label>
-              <label><span>Homepage link</span><input id="qrHomeLink" type="url" placeholder="https://" /></label>
-              <label><span>Menu link</span><input id="qrMenuLink" type="url" placeholder="https://" /></label>
-              <label><span>Google review link (trống = tự suy)</span><input id="qrReviewGg" type="url" placeholder="https://" /></label>
-              <label><span>Yelp review link (trống = tự suy)</span><input id="qrReviewYelp" type="url" placeholder="https://" /></label>
+              <label class="field"><span>Tên project</span><input id="qrProjectName" type="text" readonly placeholder="Fill data sẽ tự lấy" /></label>
+              <label class="field"><span>Màu chính</span><input id="qrPrimary" type="color" value="#1877F2" required /></label>
+              <label class="field"><span>Màu phụ (trống = darken 50%)</span><input id="qrSecondary" type="color" value="#0d5bbf" /></label>
+              <label class="field"><span>Logo</span><input id="qrLogo" type="file" accept="image/*" required /></label>
+              <label class="field"><span>Background 3 section</span><input id="qrBg1" type="file" accept="image/*" required /></label>
+              <label class="field"><span>Hình bên trái form</span><input id="qrBg2" type="file" accept="image/*" required /></label>
+              <label class="field"><span>Homepage link</span><input id="qrHomeLink" type="url" placeholder="https://" /></label>
+              <label class="field"><span>Menu link</span><input id="qrMenuLink" type="url" placeholder="https://" /></label>
+              <label class="field"><span>Google review link (trống = tự suy)</span><input id="qrReviewGg" type="url" placeholder="https://" /></label>
+              <label class="field"><span>Yelp review link (trống = tự suy)</span><input id="qrReviewYelp" type="url" placeholder="https://" /></label>
             </div>
             <label class="inline"><input type="checkbox" id="qrLogoFilter" checked /> Đảo màu logo (trắng)</label>
             <div class="actions">
-              <button type="submit" id="qrRunBtn">Tạo QR Page</button>
+              <button type="submit" id="qrRunBtn" class="btn btn-primary btn-lg">Tạo QR Page</button>
               <span id="qrStatusBadge" class="badge" role="status" aria-live="polite">Idle</span>
             </div>
           </form>
           <section class="block">
             <h2>Log</h2>
-            <div id="qrLogBox" class="code" role="log" aria-live="polite"></div>
+            <div id="qrLogBox" class="code" role="log" aria-live="polite" tabindex="0"></div>
           </section>
           <section class="block" id="qrResultPanel" hidden>
             <h2>Kết quả</h2>
             <dl class="kv">
-              <dt>QR Page URL</dt><dd><a id="qrOutUrl" href="#" target="_blank" rel="noopener"></a> <button type="button" data-copy="qrOutUrl">Copy</button></dd>
+              <dt>QR Page URL</dt><dd><a id="qrOutUrl" href="#" target="_blank" rel="noopener"></a> <button type="button" class="btn btn-light btn-sm" data-copy="qrOutUrl">Copy</button></dd>
             </dl>
           </section>
         </section>
@@ -189,22 +228,22 @@
           <div class="block narrow">
             <h2>Review Link</h2>
             <p class="muted">Paste Google Maps hoặc Yelp link để lấy direct review link.</p>
-            <label>
+            <label class="field">
               <span>Google Maps / Yelp URL</span>
               <input id="rlUrl" type="url" placeholder="https://..." autocomplete="off" />
             </label>
-            <p id="rlError" class="error-text"></p>
+            <p id="rlError" class="error-text" role="alert"></p>
             <div class="actions">
-              <button type="button" id="rlBtn">Generate</button>
-              <span id="rlStatus" class="badge">Idle</span>
+              <button type="button" id="rlBtn" class="btn btn-primary btn-lg">Generate</button>
+              <span id="rlStatus" class="badge" role="status" aria-live="polite">Idle</span>
             </div>
             <div id="rlResult" hidden>
               <dl class="kv">
                 <dt>Platform</dt><dd><span id="rlPlatform"></span></dd>
-                <dt>ID</dt><dd><code id="rlId"></code> <button type="button" data-copy="rlId">Copy</button></dd>
-                <dt>Review link</dt><dd><a id="rlLink" href="#" target="_blank" rel="noopener"></a> <button type="button" data-copy="rlLink">Copy</button></dd>
+                <dt>ID</dt><dd><code id="rlId"></code> <button type="button" class="btn btn-light btn-sm" data-copy="rlId">Copy</button></dd>
+                <dt>Review link</dt><dd><a id="rlLink" href="#" target="_blank" rel="noopener"></a> <button type="button" class="btn btn-light btn-sm" data-copy="rlLink">Copy</button></dd>
               </dl>
-              <p><a id="rlOpen" target="_blank" rel="noopener"><button type="button">Mở review form</button></a></p>
+              <a id="rlOpen" class="btn" target="_blank" rel="noopener">Mở review form</a>
             </div>
           </div>
         </section>
@@ -214,12 +253,12 @@
           <div class="block">
             <div class="block-head">
               <h2>Tài khoản</h2>
-              <button type="button" id="refreshAccountsBtn">Refresh</button>
+              <button type="button" id="refreshAccountsBtn" class="btn-sm">Refresh</button>
             </div>
-            <p id="accountsStatus" class="muted small"></p>
+            <p id="accountsStatus" class="hint hint--muted"></p>
             <div class="table-wrap">
               <table id="accountsTable">
-                <thead><tr><th>Email</th><th>Role</th><th>Pass đã lưu</th><th>Cập nhật</th><th></th></tr></thead>
+                <thead><tr><th scope="col">Email</th><th scope="col">Role</th><th scope="col">Pass đã lưu</th><th scope="col">Cập nhật</th><th scope="col"><span class="sr-only">Thao tác</span></th></tr></thead>
                 <tbody></tbody>
               </table>
             </div>
@@ -229,6 +268,6 @@
     </main>
   </div>
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/app.js?v=20261014f"></script>
+  <script src="/app.js?v=20261014g"></script>
 </body>
 </html>
