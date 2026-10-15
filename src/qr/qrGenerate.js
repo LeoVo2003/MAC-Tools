@@ -34,6 +34,18 @@ const OLD_ATTACHMENTS = {
   // 9507 (placeholder) và 9510 (dưới form): giữ nguyên
 };
 
+/** Tokens cho social thêm tay: { tiktok: url } → { '{{soc_tiktok}}': url } */
+function buildExtraSocialTokens(socialExtra) {
+  const tokens = {};
+  try {
+    const extra = typeof socialExtra === 'string' ? JSON.parse(socialExtra) : (socialExtra || {});
+    for (const [platform, url] of Object.entries(extra)) {
+      if (platform && url) tokens[`{{soc_${platform}}}`] = String(url).trim();
+    }
+  } catch {}
+  return tokens;
+}
+
 /** Darken hex 50% */
 function darkenHex(hex, pct = 50) {  const m = /^#([0-9a-fA-F]{6})$/.exec(String(hex || '').trim());
   if (!m) return '#000000';
@@ -255,6 +267,7 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
     '{{soc_ig}}': socialLinks.instagram,
     '{{soc_yelp}}': socialLinks.yelp,
     '{{soc_gg}}': socialLinks.google,
+    ...buildExtraSocialTokens(inputs.socialExtra),
     '{{link_home}}': inputs.homeLink || '',
     '{{link_menu}}': inputs.menuLink || '',
     '{{link_rv_gg}}': reviewLinks.google || '',
