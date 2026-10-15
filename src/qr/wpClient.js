@@ -88,10 +88,14 @@ export async function wpGetElementorData(postId) {
     const data = await wpFetch(`/qr/v1/template/${postId}`);
     if (data?.elementor_data) return data.elementor_data;
   } catch { /* fallback */ }
-  // Fallback: REST pages với context=edit (cần meta được expose)
-  const page = await wpFetch(`/wp/v2/pages/${postId}?context=edit`);
-  const ed = page?.meta?._elementor_data;
-  if (ed) return typeof ed === 'string' ? JSON.parse(ed) : ed;
+  // Fallback: thử các post type (pages, elementor_library)
+  for (const type of ['pages', 'elementor_library']) {
+    try {
+      const page = await wpFetch(`/wp/v2/${type}/${postId}?context=edit`);
+      const ed = page?.meta?._elementor_data;
+      if (ed) return typeof ed === 'string' ? JSON.parse(ed) : ed;
+    } catch { /* thử type tiếp theo */ }
+  }
   throw new Error(`Không lấy được _elementor_data của post ${postId}. Cần mu-plugin qr-template.`);
 }
 
