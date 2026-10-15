@@ -2060,8 +2060,23 @@ document.getElementById('qrFillBtn')?.addEventListener('click', async () => {
     (data.logs || []).forEach((l) => {
       if (!skipPatterns.some((p) => p.test(l))) qrLog(l);
     });
+    // Tự convert social → review link, điền vào input cho thấy trước
+    const social = window.__qrWpmData.social || {};
+    const convertOne = async (socialUrl, inputId, platform) => {
+      if (!socialUrl || !socialUrl.startsWith('http')) return;
+      try {
+        const r = await fetch(`/api/review-link?url=${encodeURIComponent(socialUrl)}`, { credentials: 'same-origin' });
+        const d = await r.json();
+        if (d.ok && d.reviewUrl) {
+          document.getElementById(inputId).value = d.reviewUrl;
+          qrLog(`${platform}: đã suy ra review link.`);
+        }
+      } catch {}
+    };
+    await convertOne(social.google, 'qrReviewGg', 'Google');
+    await convertOne(social.yelp, 'qrReviewYelp', 'Yelp');
     if (hint) { hint.textContent = `Đã lấy: ${data.shopName || 'OK'}`; hint.className = 'hint hint--ok'; }
-    qrLog('Fill xong.');
+    qrLog('Fill xong. Kéo màu rồi bấm Tạo QR Page.');
   } catch (err) {
     if (hint) { hint.textContent = err.message; hint.className = 'hint hint--error'; }
     qrLog('Lỗi fill: ' + err.message);
