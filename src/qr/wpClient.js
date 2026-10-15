@@ -62,15 +62,16 @@ export async function wpUploadMedia(fileBuffer, filename, mimeType) {
   const ctrl = new AbortController();
   const timeout = setTimeout(() => ctrl.abort(), 60000);
   try {
-    // Dùng FormData của Node 18+
-    const form = new FormData();
-    const blob = new Blob([fileBuffer], { type: mimeType });
-    form.append('file', blob, filename);
+    // Gửi raw binary với Content-Disposition (ổn định hơn FormData)
     const res = await fetch(url, {
       method: 'POST',
       signal: ctrl.signal,
-      headers: { Authorization: authHeader() },
-      body: form,
+      headers: {
+        Authorization: authHeader(),
+        'Content-Type': mimeType || 'application/octet-stream',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+      },
+      body: fileBuffer,
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(`Upload ${filename}: ${data?.message || `HTTP ${res.status}`}`);
