@@ -180,6 +180,21 @@ export async function wpRegenerateElementorCss(pageId) {
   }
 }
 
+/** Xóa PHP fatal log đầu job (để log chỉ chứa lỗi của run hiện tại) */
+export async function wpClearErrorLog() {
+  try { await wpFetch('/qr/v1/error-log-clear', { method: 'POST' }); } catch { /* snippet cũ: bỏ qua */ }
+}
+
+/** Đọc PHP fatal log (40 dòng cuối) — dùng khi frontend critical error */
+export async function wpGetErrorLog() {
+  try {
+    const r = await wpFetch('/qr/v1/error-log');
+    return r?.log || '';
+  } catch {
+    return '';
+  }
+}
+
 export function wpConfigOk() {
   const user = overrideUser || getWpUser();
   const pass = overridePass || getWpAppPassword();

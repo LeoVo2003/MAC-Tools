@@ -12,6 +12,8 @@ import {
   wpPublishPage,
   wpRegenerateElementorCss,
   wpConfigOk,
+  wpClearErrorLog,
+  wpGetErrorLog,
   getWpBase,
 } from './wpClient.js';
 import {
@@ -133,6 +135,9 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   if (!isHex(secondaryRaw) && !isGradient(secondaryRaw)) throw new Error('Màu phụ không hợp lệ (hex hoặc gradient)');
   const secondary = secondaryRaw;
   step('validate', true, `${title} / ${slug}`);
+
+  // Xóa PHP fatal log đầu job (snippet v5+) để log chỉ chứa lỗi run này
+  await wpClearErrorLog();
 
   // 2. Check slug trùng
   const existing = await wpFindPageBySlug(slug);
@@ -338,13 +343,25 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   await wpRegenerateElementorCss(pageId);
   step('regenerate-css', true);
 
-  // 10. Verify
+  // 12. Verify bằng GET (trigger render thật, không phải HEAD)
   try {
     const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 15000);
-    const res = await fetch(result.page.url, { signal: ctrl.signal, method: 'HEAD' });
+    const t = setTimeout(() => ctrl.abort(), 25000);
+    const res = await fetch(result.page.url, { signal: ctrl.signal });
     clearTimeout(t);
-    step('verify', res.ok, `HTTP ${res.status}`);
+    const body = await res.text();
+    const hasCritical = /critical error/i.test(body);
+    if (res.ok && !hasCritical) {
+      step('verify', true, `HTTP ${res.status}`);
+    } else {
+      // Đọc PHP fatal log thật từ server
+      const elog = await wpGetErrorLog();
+      if (elog) {
+        log('[qr] PHP fatal log từ server:');
+        for (const line of elog.split('\n')) log(`[php] ${line}`);
+      }
+      step('verify', false, `HTTP ${res.status}${hasCritical ? ' + critical error (xem [php] log)' : ''}`);
+    }
   } catch (err) {
     step('verify', false, err.message);
   }
