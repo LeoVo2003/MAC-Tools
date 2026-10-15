@@ -1616,6 +1616,12 @@ syncColorPair('qrPrimary', 'qrPrimaryPicker', () => refreshSecondaryPreview());
 syncColorPair('qrSecondary', 'qrSecondaryPicker');
 document.getElementById('qrSecondary')?.addEventListener('input', refreshSecondaryPreview);
 refreshSecondaryPreview();
+// Opacity sliders: update label
+for (const [sliderId, labelId] of [['qrPrimaryOp', 'qrPrimaryOpVal'], ['qrSecondaryOp', 'qrSecondaryOpVal']]) {
+  const slider = document.getElementById(sliderId);
+  const label = document.getElementById(labelId);
+  slider?.addEventListener('input', () => { if (label) label.textContent = slider.value + '%'; });
+}
 
 qrForm?.addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -1640,7 +1646,9 @@ qrForm?.addEventListener('submit', async (e) => {
   fd.append('qrWpmUrl', getVal('qrWpmUrl'));
   fd.append('qrProjectName', getVal('qrProjectName'));
   fd.append('qrPrimary', getVal('qrPrimary'));
+  fd.append('qrPrimaryOp', document.getElementById('qrPrimaryOp')?.value || '100');
   fd.append('qrSecondary', getVal('qrSecondary'));
+  fd.append('qrSecondaryOp', document.getElementById('qrSecondaryOp')?.value || '100');
   fd.append('qrHomeLink', getVal('qrHomeLink'));
   fd.append('qrMenuLink', getVal('qrMenuLink'));
   fd.append('qrReviewGg', getVal('qrReviewGg'));
