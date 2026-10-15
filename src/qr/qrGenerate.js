@@ -25,7 +25,7 @@ import {
 } from './elementor.js';
 import { installBridge, removeBridge } from './sftpBridge.js';
 
-const TEMPLATE_ID = Number(process.env.QR_TEMPLATE_ID) || 2806;
+function getTemplateId() { return Number(process.env.QR_TEMPLATE_ID) || 2806; }
 
 // Mapping attachment cũ trong template (đã chốt với user 2026-10-15)
 const OLD_ATTACHMENTS = {
@@ -231,7 +231,7 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   }
 
   // 6. Lấy template Elementor
-  const templateData = await wpGetElementorData(TEMPLATE_ID);
+  const templateData = await wpGetElementorData(getTemplateId());
   if (!Array.isArray(templateData)) throw new Error('Template _elementor_data không phải array');
   step('template', true, `${countElements(templateData)} elements`);
 
