@@ -194,12 +194,22 @@ export function replaceLogoInHeader(elements, logoMedia) {
   };
   const header = findHeader(elements);
   if (!header) return false;
-  // Trong header, tìm HTML widget và thay src của <img>
   walkElements([header], (el) => {
     if (replaced) return;
+    const s = el.settings || {};
+    const cssId = String(s.css_id || s._css_id || '');
     const wt = String(el.widgetType || '').toLowerCase();
+    // 1. Image widget có css_id = 'img-logo' → thay image id/url
+    if (cssId === 'img-logo' && wt.includes('image')) {
+      if (s.image) {
+        s.image.id = logoMedia.id;
+        s.image.url = logoMedia.url;
+        replaced = true;
+      }
+      return;
+    }
+    // 2. HTML widget → thay src của <img>
     if (wt === 'html' || wt.includes('html')) {
-      const s = el.settings || {};
       const htmlKey = s.html ? 'html' : (s.custom_html ? 'custom_html' : null);
       if (htmlKey && typeof s[htmlKey] === 'string') {
         const newHtml = s[htmlKey].replace(
