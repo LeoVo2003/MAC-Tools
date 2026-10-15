@@ -58,7 +58,7 @@ async function wpFetch(path, { method = 'GET', body = null, headers = {} } = {})
 
 /** Upload 1 file lên WP Media → { id, url } */
 export async function wpUploadMedia(fileBuffer, filename, mimeType) {
-  const url = `${WP_BASE}/wp-json/wp/v2/media`;
+  const url = `${getWpBase()}/wp-json/wp/v2/media`;
   const ctrl = new AbortController();
   const timeout = setTimeout(() => ctrl.abort(), 60000);
   try {
