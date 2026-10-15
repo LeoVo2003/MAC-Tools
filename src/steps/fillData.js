@@ -11,6 +11,7 @@ import {
   readProjectName,
   readProjectZipcode,
   readProjectEmail,
+  readProjectLocationData,
   openWebsiteInformationTab,
   resolveTargetWeb,
 } from './wpm.js';
@@ -285,6 +286,24 @@ export async function fillCustomerDataFromUrls(
     if (wpmEmail) log(`Email (Project Information): ${wpmEmail}`);
     else log('⚠ Chưa đọc được Email Project Information (hoặc trùng email user đăng nhập — đã bỏ).');
 
+    // Đọc location panel: business name, phones, address, social, email, website
+    let locationData = null;
+    try {
+      locationData = await readProjectLocationData(page);
+      if (locationData) {
+        if (locationData.businessName) log(`Business Name: ${locationData.businessName}`);
+        if (locationData.phones?.length) log(`Phones: ${locationData.phones.map((p) => p.number).join(', ')}`);
+        if (locationData.address) log(`Address: ${locationData.address}`);
+        if (locationData.email) log(`Email (location): ${locationData.email}`);
+        if (locationData.facebook) log(`Facebook: ${locationData.facebook}`);
+        if (locationData.instagram) log(`Instagram: ${locationData.instagram}`);
+        if (locationData.yelp) log(`Yelp: ${locationData.yelp}`);
+        if (locationData.website) log(`Website: ${locationData.website}`);
+      }
+    } catch (e) {
+      log(`⚠ Không đọc được location panel: ${e.message}`);
+    }
+
     log(
       webTargetMode === 'website'
         ? 'Chọn web khớp Website URL trên Website Information...'
@@ -438,13 +457,31 @@ export async function fillCustomerDataFromUrls(
       log('✓ Đủ field — kiểm tra nhanh rồi Run.');
     }
 
+    // Ưu tiên data từ location panel WPM
+    const loc = locationData || {};
+    const finalPhone = loc.phones?.[0]?.number || '';
+    const finalAddress = loc.address || '';
+    const finalEmail = loc.email || email || '';
+    const social = {
+      facebook: loc.facebook || '',
+      instagram: loc.instagram || '',
+      yelp: loc.yelp || '',
+      google: '',  // WPM không có Google, để trống
+    };
+
     return {
       ok: needManual.length === 0,
-      shopName,
+      shopName: loc.businessName || shopName,
       websiteUrl,
       username,
       password,
-      email: email || '',
+      email: finalEmail,
+      phone: finalPhone,
+      phones: loc.phones || [],
+      address: finalAddress,
+      social,
+      businessHours: loc.businessHours || '',
+      website: loc.website || '',
       state: state || '',
       zip: zip || '',
       warnings,

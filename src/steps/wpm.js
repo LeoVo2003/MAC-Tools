@@ -1632,3 +1632,98 @@ export async function syncAccountToWPM(page, projectUrl, account, log, targetOpt
     `Không sync được account "${account.username}" lên WPM (chưa Submit / chưa thấy trên form).`
   );
 }
+
+/**
+ * Đọc toàn bộ location panel trên tab Project Information.
+ * Trả về: { businessName, phones[], address, email, website, facebook, instagram, yelp, businessHours, bookingLink }
+ */
+export async function readProjectLocationData(page) {
+  return page.evaluate(() => {
+    const result = {
+      businessName: '',
+      phones: [],
+      address: '',
+      email: '',
+      website: '',
+      facebook: '',
+      instagram: '',
+      yelp: '',
+      businessHours: '',
+      bookingLink: '',
+    };
+
+    // Helper: tìm location-field theo label text
+    const findField = (labelText) => {
+      const fields = document.querySelectorAll('.location-field');
+      for (const f of fields) {
+        const label = f.querySelector('.location-field__label');
+        if (!label) continue;
+        const text = (label.textContent || '').replace(/\s+/g, ' ').trim();
+        if (text.toLowerCase().includes(labelText.toLowerCase())) return f;
+      }
+      return null;
+    };
+
+    const getValue = (field) => {
+      if (!field) return '';
+      // Ưu tiên link
+      const link = field.querySelector('a.location-link');
+      if (link) return (link.href || link.textContent || '').trim();
+      const val = field.querySelector('.location-field__value');
+      if (!val) return '';
+      const text = (val.textContent || '').trim();
+      return text === 'N/A' ? '' : text;
+    };
+
+    // Business Name
+    result.businessName = getValue(findField('Business Name'));
+
+    // Phones — có thể nhiều số
+    const phoneField = findField('Phones');
+    if (phoneField) {
+      const items = phoneField.querySelectorAll('.location-phone-item, .location-field__value');
+      for (const item of items) {
+        const text = (item.textContent || '').trim();
+        if (!text || text === 'N/A') continue;
+        // Tách số phone và loại: "(910) 238-2478 (Business phone)"
+        const m = text.match(/(\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4})/);
+        if (m) {
+          const typeM = text.match(/\((Business phone|Cell phone)\)/i);
+          result.phones.push({
+            number: m[1].trim(),
+            type: typeM ? typeM[1] : '',
+          });
+        }
+      }
+    }
+
+    // Address
+    result.address = getValue(findField('Address'));
+
+    // Email
+    result.email = getValue(findField('Email'));
+
+    // Website
+    result.website = getValue(findField('Website'));
+
+    // Social — structure khác: .location-social-item__value a
+    const getSocial = (labelText) => {
+      const field = findField(labelText);
+      if (!field) return '';
+      const link = field.querySelector('.location-social-item a.location-link, a.location-link');
+      if (link) return (link.href || '').trim();
+      return '';
+    };
+    result.facebook = getSocial('Facebook');
+    result.instagram = getSocial('Instagram');
+    result.yelp = getSocial('Yelp');
+
+    // Business Hours
+    result.businessHours = getValue(findField('Business Hours'));
+
+    // Booking Link
+    result.bookingLink = getValue(findField('Booking Link'));
+
+    return result;
+  });
+}
