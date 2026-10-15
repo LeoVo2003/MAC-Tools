@@ -1647,7 +1647,13 @@ function dashRangeDates() {
 }
 
 function runStatusPill(status) {
-  const map = { success: ['ok', 'Thành công'], error: ['err', 'Lỗi'], cancelled: ['warn', 'Đã hủy'], running: ['run', 'Đang chạy'] };
+  const map = {
+    success: ['ok', 'Thành công'],
+    error: ['err', 'Lỗi'],
+    cancelled: ['warn', 'Đã hủy'],
+    running: ['run', 'Đang chạy'],
+    interrupted: ['warn', 'Gián đoạn'],
+  };
   const [cls, label] = map[status] || ['muted', status || '—'];
   return `<span class="pill pill--${cls}">${label}</span>`;
 }
@@ -1893,8 +1899,8 @@ document.getElementById('dashDeleteSel')?.addEventListener('click', async () => 
   loadDashboard();
 });
 document.getElementById('dashPurge')?.addEventListener('click', async () => {
-  if (!confirm('Dọn tất cả dòng lỗi & đã hủy?')) return;
-  const res = await fetch('/api/runs/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ statuses: ['error', 'cancelled'] }), credentials: 'same-origin' });
+  if (!confirm('Dọn tất cả dòng lỗi, đã hủy & gián đoạn?')) return;
+  const res = await fetch('/api/runs/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ statuses: ['error', 'cancelled', 'interrupted'] }), credentials: 'same-origin' });
   const data = await res.json();
   alert(data.ok ? `Đã dọn ${data.deleted} dòng.` : (data.error || 'Lỗi'));
   loadDashboard();

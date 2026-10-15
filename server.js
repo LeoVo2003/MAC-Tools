@@ -23,6 +23,7 @@ import {
   clearRuns,
   deleteRunsByIds,
   deleteRunsByStatuses,
+  closeInterruptedRuns,
 } from './src/tracking.js';
 import {
   ensureKnownUsers,
@@ -577,7 +578,7 @@ export function createApp() {
   });
 
   /** Lịch sử chạy: mọi user đăng nhập đều xem được (để biết queue). Xóa/dọn vẫn admin-only. */
-  app.get('/api/runs', requireAuth, (req, res) => {
+  app.get('/api/runs', requireAuth, requireAdmin, (req, res) => {
     const limit = Math.min(500, Number(req.query.limit) || 100);
     const user = String(req.query.user || '').trim();
     const from = String(req.query.from || '').trim();
@@ -588,7 +589,7 @@ export function createApp() {
     res.json({ stats: runsStats(runs), runs, filters: { user, from, to, status, tool, limit } });
   });
 
-  app.get('/api/runs.csv', requireAuth, (req, res) => {
+  app.get('/api/runs.csv', requireAuth, requireAdmin, (req, res) => {
     const limit = Math.min(2000, Number(req.query.limit) || 500);
     const user = String(req.query.user || '').trim();
     const from = String(req.query.from || '').trim();
@@ -603,7 +604,7 @@ export function createApp() {
   });
 
   /** Thống kê dashboard: ?from=&to= (ISO date), groupBy=tool */
-  app.get('/api/runs/stats', requireAuth, (req, res) => {
+  app.get('/api/runs/stats', requireAuth, requireAdmin, (req, res) => {
     const from = String(req.query.from || '').trim();
     const to = String(req.query.to || '').trim();
     const groupBy = String(req.query.groupBy || '').trim();
@@ -614,7 +615,7 @@ export function createApp() {
   });
 
   /** Lỗi gần đây gom theo nội dung. */
-  app.get('/api/runs/errors', requireAuth, (req, res) => {
+  app.get('/api/runs/errors', requireAuth, requireAdmin, (req, res) => {
     const top = Math.min(20, Math.max(1, Number(req.query.top) || 10));
     res.json({ errors: recentErrors({ top }) });
   });
@@ -701,6 +702,13 @@ export async function startServer({ openBrowser: shouldOpen } = {}) {
     console.log(`Download dir: ${DOWNLOADS_DIR}`);
     console.log(`Health: ${url}/api/health`);
     if (chromeLiveEnabled()) console.log(`Live Chrome: ${url}/chrome-live/`);
+    // Đóng các run kẹt 'running' từ lần chạy trước (restart/crash)
+    try {
+      const { closed } = closeInterruptedRuns();
+      if (closed > 0) console.log(`[tracking] Đã đóng ${closed} run kẹt (interrupted).`);
+    } catch (err) {
+      console.log('[tracking] closeInterruptedRuns lỗi:', err?.message || err);
+    }
     if (autoOpen) setTimeout(() => openBrowser(url), 400);
   });
 

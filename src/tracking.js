@@ -261,3 +261,44 @@ export function deleteRunsByStatuses(statuses) {
   return { deleted };
 }
 
+
+/**
+ * Đóng các run bị kẹt ở 'running' (server restart/crash giữa chừng).
+ * Đánh dấu 'interrupted' để dashboard không hiện đang chạy mãi.
+ * Gọi 1 lần khi server khởi động.
+ * @returns {{ closed: number }}
+ */
+export function closeInterruptedRuns() {
+  ensureDataDir();
+  if (!fs.existsSync(RUNS_FILE)) return { closed: 0 };
+  const lines = fs.readFileSync(RUNS_FILE, 'utf-8').split(/\r?\n/).filter(Boolean);
+  const finishedAt = new Date().toISOString();
+  let closed = 0;
+  const updated = lines.map((line) => {
+    try {
+      const row = JSON.parse(line);
+      if (row.status !== 'running') return line;
+      closed++;
+      const startMs = row.startedAt ? Date.parse(row.startedAt) : NaN;
+      const endMs = Date.parse(finishedAt);
+      const durationMs =
+        Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, endMs - startMs) : null;
+      // Bước nào start mà chưa done → đánh dấu interrupted
+      const stepResults = Array.isArray(row.stepResults) ? row.stepResults : [];
+      return JSON.stringify({
+        ...row,
+        status: 'interrupted',
+        error: 'Server restart giữa chừng (interrupted).',
+        finishedAt,
+        durationMs,
+        stepResults,
+      });
+    } catch {
+      return line;
+    }
+  });
+  if (closed > 0) {
+    fs.writeFileSync(RUNS_FILE, `${updated.join('\n')}\n`, 'utf-8');
+  }
+  return { closed };
+}
