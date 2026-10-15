@@ -384,7 +384,8 @@ export function createApp() {
         menuLink: req.body.qrMenuLink || '',
         reviewGg: req.body.qrReviewGg || '',
         reviewYelp: req.body.qrReviewYelp || '',
-        socialExtra: req.body.qrSocialExtra || '{}',
+        tiktok: req.body.qrTiktok || '',
+        youtube: req.body.qrYoutube || '',
         logoFilter: req.body.qrLogoFilter === 'on' || req.body.qrLogoFilter === 'true',
       };
 

@@ -364,8 +364,12 @@
                   <label class="field"><span>Yelp</span><input id="qrEditYelp" type="url" /></label>
                   <label class="field"><span>Google</span><input id="qrEditGg" type="url" /></label>
                 </div>
-                <div id="qrSocialExtra"></div>
-                <button type="button" id="qrAddSocial" class="btn btn-sm btn-secondary">+ Thêm social</button>
+                <div class="grid" id="qrSocialTiktokRow" hidden>
+                  <label class="field"><span>TikTok</span><input id="qrEditTiktok" type="url" /></label>
+                </div>
+                <div class="grid" id="qrSocialYoutubeRow" hidden>
+                  <label class="field"><span>YouTube</span><input id="qrEditYoutube" type="url" /></label>
+                </div>
                 <div class="grid">
                   <label class="field"><span>Google review link <em class="muted">(xóa trống = bỏ nút; #link_ = giữ nút)</em></span><input id="qrReviewGg" type="text" value="#link_gg_rv" placeholder="https://" /></label>
                   <label class="field"><span>Yelp review link <em class="muted">(xóa trống = bỏ nút; #link_ = giữ nút)</em></span><input id="qrReviewYelp" type="text" value="#link_yelp_rv" placeholder="https://" /></label>

@@ -1648,6 +1648,8 @@ export async function readProjectLocationData(page) {
       facebook: '',
       instagram: '',
       yelp: '',
+      tiktok: '',
+      youtube: '',
       businessHours: '',
       bookingLink: '',
     };
@@ -1719,6 +1721,9 @@ export async function readProjectLocationData(page) {
     result.yelp = getSocial('Yelp');
     // Google = Maps field (link Google Maps trong Project Information)
     result.google = getSocial('Maps') || getValue(findField('Maps'));
+    // TikTok / YouTube (nếu có)
+    result.tiktok = getSocial('TikTok') || getValue(findField('TikTok'));
+    result.youtube = getSocial('YouTube') || getValue(findField('YouTube'));
 
     // Business Hours
     result.businessHours = getValue(findField('Business Hours'));

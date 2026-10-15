@@ -314,6 +314,8 @@ export async function fillCustomerDataFromUrls(
         instagram: loc.instagram || '',
         yelp: loc.yelp || '',
         google: loc.google || '',
+        tiktok: loc.tiktok || '',
+        youtube: loc.youtube || '',
       };
       if (loc.google) log(`Google (Maps): ${loc.google}`);
       log('✓ Đủ data WPM cho QR — kiểm tra rồi Run.');

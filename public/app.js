@@ -1654,7 +1654,9 @@ qrForm?.addEventListener('submit', async (e) => {
   fd.append('qrMenuLink', getVal('qrMenuLink'));
   fd.append('qrReviewGg', getVal('qrReviewGg'));
   fd.append('qrReviewYelp', getVal('qrReviewYelp'));
-  fd.append('qrSocialExtra', JSON.stringify(collectSocialExtra()));
+  fd.append('qrTiktok', getVal('qrEditTiktok'));
+  fd.append('qrYoutube', getVal('qrEditYoutube'));
+
   fd.append('qrLogoFilter', document.getElementById('qrLogoFilter')?.checked ? 'true' : 'false');
   fd.append('qrLogoUrl', getVal('qrLogoUrl'));
   fd.append('qrBg1Url', getVal('qrBg1Url'));
@@ -2103,6 +2105,15 @@ document.getElementById('qrFillBtn')?.addEventListener('click', async () => {
       const el = document.getElementById(id);
       if (el) el.value = val;
     }
+    // TikTok/YouTube: chỉ hiện khi WPM có data
+    if (social.tiktok) {
+      document.getElementById('qrSocialTiktokRow').hidden = false;
+      document.getElementById('qrEditTiktok').value = social.tiktok;
+    }
+    if (social.youtube) {
+      document.getElementById('qrSocialYoutubeRow').hidden = false;
+      document.getElementById('qrEditYoutube').value = social.youtube;
+    }
     document.getElementById('qrDataEdit').hidden = false;
     const processReviewInput = async (socialUrl, inputId, defaultTag, platform) => {
       const input = document.getElementById(inputId);
@@ -2510,39 +2521,4 @@ function UIPicker(swatchEl, textInput, opts = {}) {
 
   render();
   return this;
-}
-
-// QR: thêm social tùy chỉnh (TikTok, etc.)
-let qrSocialExtraCount = 0;
-document.getElementById('qrAddSocial')?.addEventListener('click', () => {
-  qrSocialExtraCount++;
-  const id = `qrSocialExtra${qrSocialExtraCount}`;
-  const div = document.createElement('div');
-  div.className = 'grid';
-  div.id = id + '_row';
-  div.innerHTML = `
-    <label class="field"><span>Nền tảng</span>
-      <select id="${id}_platform">
-        <option value="tiktok">TikTok</option>
-        <option value="youtube">YouTube</option>
-        <option value="twitter">Twitter/X</option>
-        <option value="linkedin">LinkedIn</option>
-        <option value="pinterest">Pinterest</option>
-      </select>
-    </label>
-    <label class="field"><span>Link</span><input id="${id}_url" type="url" placeholder="https://" /></label>
-    <div class="field" style="align-self:end"><button type="button" class="btn btn-sm btn-danger" onclick="document.getElementById('${id}_row').remove()">×</button></div>
-  `;
-  document.getElementById('qrSocialExtra').appendChild(div);
-});
-
-// Thu thập social extra khi submit
-function collectSocialExtra() {
-  const result = {};
-  document.querySelectorAll('#qrSocialExtra .grid').forEach((row) => {
-    const platform = row.querySelector('select')?.value;
-    const url = row.querySelector('input[type="url"]')?.value?.trim();
-    if (platform && url) result[platform] = url;
-  });
-  return result;
 }
