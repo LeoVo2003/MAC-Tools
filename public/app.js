@@ -2161,14 +2161,14 @@ function UIPicker(swatchEl, textInput, opts = {}) {
   wrap.innerHTML = `
     <button type="button" class="uipick-swatch" aria-label="Chọn màu"><span></span></button>
     <div class="uipick-pop" hidden>
-      <div class="uipick-tabs">
+      <div class="uipick-tabs-wrap"><div class="uipick-tabs">
         <button type="button" data-tab="solid" class="on">Solid</button>
         <button type="button" data-tab="gradient">Gradient</button>
-      </div>
+      </div></div>
       <div class="uipick-solid">
         <div class="uipick-area"><div class="uipick-area-thumb"></div></div>
-        <div class="uipick-slider uipick-hue"><div class="uipick-slider-thumb"></div></div>
-        <div class="uipick-slider uipick-alpha"><div class="uipick-alpha-fill"></div><div class="uipick-slider-thumb"></div></div>
+        <div class="uipick-slider"><div class="uipick-slider-track uipick-hue-track"></div><div class="uipick-slider-thumb"></div></div>
+        <div class="uipick-slider"><div class="uipick-slider-track uipick-alpha-track"><div class="uipick-alpha-fill"></div></div><div class="uipick-slider-thumb"></div></div>
       </div>
       <div class="uipick-gradient" hidden>
         <div class="uipick-gpreview"></div>
@@ -2177,12 +2177,17 @@ function UIPicker(swatchEl, textInput, opts = {}) {
             <option value="linear">Linear</option>
             <option value="radial">Radial</option>
           </select>
-          <button type="button" class="uipick-gadd btn btn-sm">+ Add stop</button>
+          <button type="button" class="uipick-gadd">+ Add stop</button>
         </div>
-        <div class="uipick-gbar"><div class="uipick-gbar-fill"></div></div>
+        <div class="uipick-gbar"><div class="uipick-gbar-track"></div></div>
         <div class="uipick-gstops"></div>
       </div>
-      <div class="uipick-row"><input class="uipick-hex" spellcheck="false" /></div>
+      <div class="uipick-row">
+        <input class="uipick-hex" spellcheck="false" placeholder="#000000" />
+        <button type="button" class="uipick-eyedrop" title="Eyedropper">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2 22 1-4 9.5-9.5 3 3L6 21l-4 1z"/><path d="m14.5 5.5 3 3L21 5l-3-3-3.5 3.5z"/></svg>
+        </button>
+      </div>
       <div class="uipick-saved">
         <div class="uipick-saved-head"><span>Saved</span><button type="button" class="uipick-saved-add">+ Add</button></div>
         <div class="uipick-saved-row"></div>
@@ -2197,10 +2202,11 @@ function UIPicker(swatchEl, textInput, opts = {}) {
   const $ = (s) => pop.querySelector(s);
   const solidPane = $('.uipick-solid'), gradPane = $('.uipick-gradient');
   const area = $('.uipick-area'), areaThumb = $('.uipick-area-thumb');
-  const hueSlider = $('.uipick-hue'), hueThumb = hueSlider.querySelector('.uipick-slider-thumb');
-  const alphaSlider = $('.uipick-alpha'), alphaFill = $('.uipick-alpha-fill'), alphaThumb = alphaSlider.querySelector('.uipick-slider-thumb');
+  const sliders = pop.querySelectorAll('.uipick-solid .uipick-slider');
+  const hueSlider = sliders[0], hueThumb = hueSlider.querySelector('.uipick-slider-thumb');
+  const alphaSlider = sliders[1], alphaFill = alphaSlider.querySelector('.uipick-alpha-fill'), alphaThumb = alphaSlider.querySelector('.uipick-slider-thumb');
   const hexInput = $('.uipick-hex');
-  const gpreview = $('.uipick-gpreview'), gbar = $('.uipick-gbar'), gbarFill = $('.uipick-gbar-fill');
+  const gpreview = $('.uipick-gpreview'), gbar = $('.uipick-gbar'), gbarFill = gbar.querySelector('.uipick-gbar-track');
   const gstopsEl = $('.uipick-gstops'), gtypeSel = $('.uipick-gtype');
 
   // --- Color utils ---
@@ -2430,6 +2436,22 @@ function UIPicker(swatchEl, textInput, opts = {}) {
     stops.push({ pos, h: st.h, s: st.s, v: st.v, a: st.a });
     activeStop = stops.length - 1;
     render();
+  });
+
+  // Eyedropper (EyeDropper API)
+  pop.querySelector('.uipick-eyedrop').addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (!window.EyeDropper) return;
+    try {
+      const ed = new EyeDropper();
+      const res = await ed.open();
+      const p = parseHex8(res.sRGBHex);
+      if (p) {
+        if (mode === 'gradient') { const st = stops[activeStop]; if (st) { st.h = p.h; st.s = p.s; st.v = p.v; st.a = 1; } syncSolidToStop(); }
+        else { h = p.h; s = p.s; v = p.v; a = 1; }
+        render();
+      }
+    } catch {}
   });
 
   // Toggle popup — giữ mở khi tương tác bên trong
