@@ -17,6 +17,7 @@ import {
   replaceColors,
   replaceLogoInHeader,
   buildCssVariablesBlock,
+  replaceCssVariables,
   rebindCF7,
   removeReviewCta,
   slugify,
@@ -221,8 +222,9 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
     '--qr-logo-filter': inputs.logoFilter ? 'brightness(0) invert(1)' : 'none',
   };
   const cssVarsBlock = buildCssVariablesBlock(cssVars);
+  const cssOk = replaceCssVariables(elements, cssVarsBlock);
   step('replace-colors', true, `${colorCount} chỗ, primary=${primary}, secondary=${secondary}`);
-  // TODO: inject cssVarsBlock vào page (qua Elementor custom CSS hoặc HTML widget)
+  step('css-variables', cssOk, cssOk ? 'đã thay trong widget' : 'không tìm thấy widget CSS');
 
   // 7d. Rebind CF7
   const cf7Count = rebindCF7(elements, cf7Form.id);

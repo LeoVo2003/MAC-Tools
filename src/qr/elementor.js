@@ -217,13 +217,48 @@ export function replaceLogoInHeader(elements, logoMedia) {
 }
 
 /**
- * Tạo CSS variables block để inject vào page.
+ * Tạo CSS variables block.
  * @param {object} variables - { '--qr-primary': '#E31E24', ... }
  * @returns {string} CSS text
  */
 export function buildCssVariablesBlock(variables) {
   const lines = Object.entries(variables).map(([k, v]) => `  ${k}: ${v};`);
   return `:root {\n${lines.join('\n')}\n}`;
+}
+
+/**
+ * Thay CSS variables trong HTML widget có sẵn (template 2806 đã có widget này).
+ * Tìm widget chứa '--qr-primary' và thay toàn bộ block :root.
+ * @param {Array} elements
+ * @param {string} cssVarsBlock - CSS từ buildCssVariablesBlock()
+ * @returns {boolean} có thay được không
+ */
+export function replaceCssVariables(elements, cssVarsBlock) {
+  let replaced = false;
+  walkElements(elements, (el) => {
+    if (replaced) return;
+    const wt = String(el.widgetType || '').toLowerCase();
+    if (wt === 'html' || wt.includes('html') || wt.includes('custom-css')) {
+      const s = el.settings || {};
+      for (const key of ['html', 'custom_html', 'custom_css']) {
+        const val = s[key];
+        if (typeof val === 'string' && val.includes('--qr-primary')) {
+          // Thay block :root { ... } cũ bằng block mới
+          const newVal = val.replace(/:root\s*\{[^}]*\}/s, cssVarsBlock.trim());
+          if (newVal !== val) {
+            s[key] = newVal;
+            replaced = true;
+          } else {
+            // Không match regex, append vào cuối
+            s[key] = val + '\n' + cssVarsBlock;
+            replaced = true;
+          }
+          break;
+        }
+      }
+    }
+  });
+  return replaced;
 }
 export function slugify(text) {
   return String(text || '')
