@@ -2093,10 +2093,10 @@ document.getElementById('qrFillBtn')?.addEventListener('click', async () => {
       qrEditEmail: data.email || '',
       qrEditPhone: data.phone || '',
       qrEditAddress: data.address || '',
-      qrEditFb: social.facebook || '',
-      qrEditIg: social.instagram || '',
-      qrEditYelp: social.yelp || '',
-      qrEditGg: social.google || '',
+      qrEditFb: social.facebook || '#link_fb',
+      qrEditIg: social.instagram || '#link_ig',
+      qrEditYelp: social.yelp || '#link_yelp',
+      qrEditGg: social.google || '#link_gg',
     };
     for (const [id, val] of Object.entries(editIds)) {
       const el = document.getElementById(id);
