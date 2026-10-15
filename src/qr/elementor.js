@@ -173,7 +173,8 @@ export function removeReviewCta(elements, platform) {
 }
 
 /**
- * Tìm và thay logo: img duy nhất bên trong #custom-header (template 2806).
+ * Tìm và thay logo: HTML widget duy nhất bên trong #custom-header (template 2806).
+ * Thay src của <img> trong HTML code.
  * @param {Array} elements
  * @param {{id:number, url:string}} logoMedia
  * @returns {boolean} có thay được không
@@ -193,15 +194,22 @@ export function replaceLogoInHeader(elements, logoMedia) {
   };
   const header = findHeader(elements);
   if (!header) return false;
-  // Trong header, tìm image widget đầu tiên và thay
+  // Trong header, tìm HTML widget và thay src của <img>
   walkElements([header], (el) => {
     if (replaced) return;
     const wt = String(el.widgetType || '').toLowerCase();
-    if (wt === 'image' || wt.includes('image')) {
+    if (wt === 'html' || wt.includes('html')) {
       const s = el.settings || {};
-      if (s.image) {
-        s.image = { ...s.image, id: logoMedia.id, url: logoMedia.url };
-        replaced = true;
+      const htmlKey = s.html ? 'html' : (s.custom_html ? 'custom_html' : null);
+      if (htmlKey && typeof s[htmlKey] === 'string') {
+        const newHtml = s[htmlKey].replace(
+          /<img([^>]*)\ssrc=["'][^"']*["']/i,
+          `<img$1 src="${logoMedia.url}"`
+        );
+        if (newHtml !== s[htmlKey]) {
+          s[htmlKey] = newHtml;
+          replaced = true;
+        }
       }
     }
   });
