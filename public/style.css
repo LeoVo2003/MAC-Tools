@@ -1979,3 +1979,53 @@ td.empty {
 
 /* QR form */
 .qr-url-input { margin-top: var(--space-2); }
+
+/* Untitled UI-style color picker */
+.uipick { position: relative; display: inline-block; }
+.uipick-swatch {
+  width: 44px; height: var(--control-h);
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-control);
+  cursor: pointer; padding: 0; overflow: hidden;
+  background:
+    linear-gradient(45deg, #ccc 25%, transparent 25%, transparent 75%, #ccc 75%),
+    linear-gradient(45deg, #ccc 25%, transparent 25%, transparent 75%, #ccc 75%);
+  background-size: 12px 12px; background-position: 0 0, 6px 6px;
+}
+.uipick-swatch > span { display: block; width: 100%; height: 100%; }
+.uipick-pop {
+  position: absolute; z-index: 100; top: calc(100% + 8px); left: 0;
+  width: 248px; padding: var(--space-4);
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
+}
+.uipick-area {
+  position: relative; width: 100%; height: 160px;
+  border-radius: var(--radius-sm); cursor: crosshair; margin-bottom: var(--space-3);
+}
+.uipick-area-thumb {
+  position: absolute; width: 16px; height: 16px; border-radius: 50%;
+  border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.3);
+  transform: translate(-50%, -50%); pointer-events: none;
+}
+.uipick-slider { position: relative; height: 14px; border-radius: 7px; margin-bottom: var(--space-3); cursor: pointer; }
+.uipick-slider-thumb {
+  position: absolute; top: 50%; width: 16px; height: 16px; border-radius: 50%;
+  border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.3);
+  transform: translate(-50%, -50%); pointer-events: none;
+}
+.uipick-hue { background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00); }
+.uipick-alpha {
+  background:
+    linear-gradient(45deg, #ccc 25%, transparent 25%, transparent 75%, #ccc 75%),
+    linear-gradient(45deg, #ccc 25%, transparent 25%, transparent 75%, #ccc 75%);
+  background-size: 12px 12px; background-position: 0 0, 6px 6px;
+}
+.uipick-alpha-fill { position: absolute; inset: 0; border-radius: 7px; }
+.uipick-row { display: flex; gap: var(--space-2); align-items: center; }
+.uipick-hex {
+  flex: 1; font-family: var(--font-mono); text-transform: uppercase;
+  height: 36px; padding: 0 var(--space-3);
+  border: 1px solid var(--border-input); border-radius: var(--radius-control);
+  background: var(--surface); color: var(--text); font-size: var(--text-sm);
+}

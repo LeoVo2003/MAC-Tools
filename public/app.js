@@ -1603,18 +1603,26 @@ function syncColorPair(textId, pickerId, onPrimaryChange) {
   });
 }
 // Màu phụ trống → preview = darken 50% từ màu chính
+let qrPrimaryPicker, qrSecondaryPicker;
 function refreshSecondaryPreview() {
   const primary = document.getElementById('qrPrimary')?.value.trim() || '';
   const secText = document.getElementById('qrSecondary');
-  const secPicker = document.getElementById('qrSecondaryPicker');
-  if (!secText || !secPicker) return;
+  if (!secText) return;
   if (!secText.value.trim()) {
-    const derived = darkenHex(primary, 50);
-    if (derived) secPicker.value = derived;
+    const derived = darkenHex(primary.slice(0, 7), 50);
+    if (derived && qrSecondaryPicker) qrSecondaryPicker.set(derived);
   }
 }
-syncColorPair('qrPrimary', 'qrPrimaryPicker', () => refreshSecondaryPreview());
-syncColorPair('qrSecondary', 'qrSecondaryPicker');
+// Khởi tạo Untitled UI-style pickers
+qrPrimaryPicker = new UIPicker(
+  document.getElementById('qrPrimarySwatch'),
+  document.getElementById('qrPrimary'),
+  { onChange: () => refreshSecondaryPreview() }
+);
+qrSecondaryPicker = new UIPicker(
+  document.getElementById('qrSecondarySwatch'),
+  document.getElementById('qrSecondary')
+);
 document.getElementById('qrSecondary')?.addEventListener('input', refreshSecondaryPreview);
 refreshSecondaryPreview();
 
@@ -2122,3 +2130,151 @@ document.getElementById('qrFillBtn')?.addEventListener('click', async () => {
     btn.disabled = false;
   }
 });
+
+/* ============ Untitled UI-style Color Picker (vanilla) ============ */
+function UIPicker(swatchEl, textInput, opts = {}) {
+  const { onChange } = opts;
+  let h = 0, s = 100, v = 100, a = 1; // HSV + alpha
+
+  // Parse hex ban đầu
+  const initHex = (textInput?.value || '#E31E24').trim();
+  const parsed = parseHex8(initHex);
+  if (parsed) { h = parsed.h; s = parsed.s; v = parsed.v; a = parsed.a; }
+
+  // Tạo DOM
+  const wrap = document.createElement('div');
+  wrap.className = 'uipick';
+  const swatch = document.createElement('button');
+  swatch.type = 'button';
+  swatch.className = 'uipick-swatch';
+  swatch.setAttribute('aria-label', 'Chọn màu');
+  const swatchFill = document.createElement('span');
+  swatch.appendChild(swatchFill);
+  const pop = document.createElement('div');
+  pop.className = 'uipick-pop';
+  pop.hidden = true;
+  pop.innerHTML = `
+    <div class="uipick-area"><div class="uipick-area-thumb"></div></div>
+    <div class="uipick-slider uipick-hue"><div class="uipick-slider-thumb"></div></div>
+    <div class="uipick-slider uipick-alpha"><div class="uipick-alpha-fill"></div><div class="uipick-slider-thumb"></div></div>
+    <div class="uipick-row"><input class="uipick-hex" spellcheck="false" maxlength="9" /></div>
+  `;
+  wrap.appendChild(swatch);
+  wrap.appendChild(pop);
+  swatchEl.replaceWith(wrap);
+
+  const area = pop.querySelector('.uipick-area');
+  const areaThumb = pop.querySelector('.uipick-area-thumb');
+  const hueSlider = pop.querySelector('.uipick-hue');
+  const hueThumb = hueSlider.querySelector('.uipick-slider-thumb');
+  const alphaSlider = pop.querySelector('.uipick-alpha');
+  const alphaFill = pop.querySelector('.uipick-alpha-fill');
+  const alphaThumb = alphaSlider.querySelector('.uipick-slider-thumb');
+  const hexInput = pop.querySelector('.uipick-hex');
+
+  function hsvToRgb(h, s, v) {
+    s /= 100; v /= 100;
+    const c = v * s, x = c * (1 - Math.abs(((h / 60) % 2) - 1)), m = v - c;
+    let r, g, b;
+    if (h < 60) [r, g, b] = [c, x, 0];
+    else if (h < 120) [r, g, b] = [x, c, 0];
+    else if (h < 180) [r, g, b] = [0, c, x];
+    else if (h < 240) [r, g, b] = [0, x, c];
+    else if (h < 300) [r, g, b] = [x, 0, c];
+    else [r, g, b] = [c, 0, x];
+    return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
+  }
+  function rgbToHsv(r, g, b) {
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+    let hh = 0;
+    if (d) {
+      if (max === r) hh = ((g - b) / d + (g < b ? 6 : 0)) * 60;
+      else if (max === g) hh = ((b - r) / d + 2) * 60;
+      else hh = ((r - g) / d + 4) * 60;
+    }
+    return { h: hh, s: max ? (d / max) * 100 : 0, v: max * 100 };
+  }
+  function toHex8() {
+    const [r, g, b] = hsvToRgb(h, s, v);
+    const hex = '#' + [r, g, b].map((x) => x.toString(16).padStart(2, '0')).join('').toUpperCase();
+    if (a >= 1) return hex;
+    return hex + Math.round(a * 255).toString(16).padStart(2, '0').toUpperCase();
+  }
+  function parseHex8(hex) {
+    const m = /^#([0-9a-fA-F]{6})([0-9a-fA-F]{2})?$/.exec(hex.trim());
+    if (!m) return null;
+    const r = parseInt(m[1].slice(0, 2), 16), g = parseInt(m[1].slice(2, 4), 16), b = parseInt(m[1].slice(4, 6), 16);
+    const alpha = m[2] ? parseInt(m[2], 16) / 255 : 1;
+    const hsv = rgbToHsv(r, g, b);
+    return { ...hsv, a: alpha };
+  }
+
+  function render() {
+    const [r, g, b] = hsvToRgb(h, s, v);
+    const rgb = `rgb(${r},${g},${b})`;
+    const hex8 = toHex8();
+    // Swatch
+    swatchFill.style.background = a < 1 ? `rgba(${r},${g},${b},${a})` : rgb;
+    // Area background: hue + white/black gradients
+    area.style.background = `linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, hsl(${h},100%,50%))`;
+    areaThumb.style.left = s + '%';
+    areaThumb.style.top = (100 - v) + '%';
+    areaThumb.style.background = rgb;
+    // Hue thumb
+    hueThumb.style.left = (h / 360 * 100) + '%';
+    // Alpha
+    alphaFill.style.background = `linear-gradient(to right, rgba(${r},${g},${b},0), rgba(${r},${g},${b},1))`;
+    alphaThumb.style.left = (a * 100) + '%';
+    // Hex input
+    hexInput.value = hex8;
+    // Sync text input ngoài
+    if (textInput && textInput.value.toUpperCase() !== hex8) {
+      textInput.value = hex8;
+      textInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    onChange?.(hex8);
+  }
+
+  function drag(el, fn) {
+    const move = (e) => {
+      const rect = el.getBoundingClientRect();
+      const x = Math.min(1, Math.max(0, ((e.clientX ?? e.touches?.[0]?.clientX) - rect.left) / rect.width));
+      const y = Math.min(1, Math.max(0, ((e.clientY ?? e.touches?.[0]?.clientY) - rect.top) / rect.height));
+      fn(x, y);
+      render();
+    };
+    const down = (e) => {
+      e.preventDefault();
+      move(e);
+      const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
+      document.addEventListener('mousemove', move);
+      document.addEventListener('mouseup', up);
+    };
+    el.addEventListener('mousedown', down);
+  }
+
+  drag(area, (x, y) => { s = x * 100; v = (1 - y) * 100; });
+  drag(hueSlider, (x) => { h = x * 360; });
+  drag(alphaSlider, (x) => { a = x; });
+  hexInput.addEventListener('input', () => {
+    const p = parseHex8(hexInput.value);
+    if (p) { h = p.h; s = p.s; v = p.v; a = p.a; render(); }
+  });
+
+  // Toggle popup
+  swatch.addEventListener('click', (e) => {
+    e.stopPropagation();
+    pop.hidden = !pop.hidden;
+  });
+  document.addEventListener('click', (e) => {
+    if (!wrap.contains(e.target)) pop.hidden = true;
+  });
+
+  // API
+  this.set = (hex) => { const p = parseHex8(hex); if (p) { h = p.h; s = p.s; v = p.v; a = p.a; render(); } };
+  this.get = () => toHex8();
+
+  render();
+  return this;
+}

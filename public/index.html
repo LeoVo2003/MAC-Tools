@@ -372,13 +372,13 @@
                 <label class="field"><span>Màu chính <em class="muted">(hex 6 hoặc 8 ký tự, VD #E31E24CC)</em></span>
                   <div class="color-field">
                     <input id="qrPrimary" type="text" value="#E31E24" placeholder="#E31E24" pattern="#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?" maxlength="9" required />
-                    <input id="qrPrimaryPicker" type="color" value="#E31E24" aria-label="Chọn màu chính" />
+                    <span id="qrPrimarySwatch"></span>
                   </div>
                 </label>
                 <label class="field"><span>Màu phụ <em class="muted">(trống = tự động darken 50%)</em></span>
                   <div class="color-field">
                     <input id="qrSecondary" type="text" value="" placeholder="Để trống = tự động" pattern="#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?" maxlength="9" />
-                    <input id="qrSecondaryPicker" type="color" value="#E31E24" aria-label="Chọn màu phụ" />
+                    <span id="qrSecondarySwatch"></span>
                   </div>
                 </label>
               </div>
