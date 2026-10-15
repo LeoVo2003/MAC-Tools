@@ -150,12 +150,24 @@ export async function wpSetElementorData(pageId, elementorData) {
   return res;
 }
 
-/** Publish page → trả về page object (có link) */
+/** Publish page qua custom endpoint (bắt fatal message thật nếu critical error) */
 export async function wpPublishPage(pageId) {
-  return wpFetch(`/wp/v2/pages/${pageId}`, {
-    method: 'POST',
-    body: { status: 'publish' },
-  });
+  try {
+    const res = await wpFetch(`/qr/v1/publish/${pageId}`, { method: 'POST' });
+    if (res?.ok) return { id: pageId, link: res.link };
+    throw new Error(res?.error || 'Publish thất bại');
+  } catch (err) {
+    // Snippet chưa update (404) → fallback publish qua REST
+    if (/HTTP 404/.test(err.message)) {
+      return wpFetch(`/wp/v2/pages/${pageId}`, { method: 'POST', body: { status: 'publish' } });
+    }
+    // Đọc fatal message thật từ server (nếu có)
+    try {
+      const f = await wpFetch('/qr/v1/last-fatal');
+      if (f?.fatal) throw new Error(`Publish critical error: ${f.fatal}`);
+    } catch { /* bỏ qua */ }
+    throw err;
+  }
 }
 
 /** Xóa cache Elementor CSS của page (force regenerate) */
