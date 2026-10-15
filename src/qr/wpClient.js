@@ -123,24 +123,21 @@ export async function wpCreatePage({ title, slug, elementorData }) {
     body: { title, slug, status: 'draft', template: 'elementor_canvas' },
   });
   if (!page?.id) throw new Error('Tạo page thất bại: không có ID');
-  // Bước 2: ghi Elementor data
+  // Bước 2: ghi Elementor data qua custom endpoint (bypass REST meta restriction)
   const edJson = JSON.stringify(elementorData);
   try {
-    await wpFetch(`/wp/v2/pages/${page.id}`, {
+    await wpFetch(`/qr/v1/set-elementor/${page.id}`, {
       method: 'POST',
-      body: {
-        status: 'publish',
-        meta: {
-          _elementor_data: edJson,
-          _elementor_edit_mode: 'builder',
-          _elementor_template_type: 'wp-page',
-        },
-      },
+      body: { elementor_data: edJson },
     });
   } catch (e) {
-    // Nếu meta không expose, thử qua custom endpoint (nếu có mu-plugin)
-    throw new Error(`Ghi Elementor data thất bại (page #${page.id} đã tạo ở draft): ${e.message}`);
+    throw new Error(`Ghi Elementor data thất bại (page #${page.id} đã tạo ở draft, cần snippet qr-set-elementor): ${e.message}`);
   }
+  // Bước 3: publish page
+  await wpFetch(`/wp/v2/pages/${page.id}`, {
+    method: 'POST',
+    body: { status: 'publish' },
+  });
   return { ...page, status: 'publish' };
 }
 
