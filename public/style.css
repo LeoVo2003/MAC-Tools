@@ -356,6 +356,11 @@ code {
   max-width: 1280px;
   margin: 0 auto;
 }
+/* Mọi tab cùng full width */
+#tab-dashboard, #tab-run, #tab-qr, #tab-reviewlink, #tab-accounts {
+  width: 100%;
+  min-width: 0;
+}
 
 .page-header {
   margin-bottom: var(--space-5);

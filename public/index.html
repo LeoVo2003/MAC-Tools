@@ -110,9 +110,9 @@
         <section id="tab-dashboard" data-admin-only hidden>
           <div class="dash-toolbar">
             <div class="seg" role="group" aria-label="Khoảng thời gian">
-              <button type="button" class="seg-btn is-active" data-range="today">Hôm nay</button>
+              <button type="button" class="seg-btn" data-range="today">Hôm nay</button>
               <button type="button" class="seg-btn" data-range="7d">7 ngày</button>
-              <button type="button" class="seg-btn" data-range="30d">30 ngày</button>
+              <button type="button" class="seg-btn is-active" data-range="30d">30 ngày</button>
             </div>
             <button type="button" id="dashRefresh" class="btn btn-ghost btn-sm">Refresh</button>
           </div>
@@ -370,8 +370,8 @@
             <div class="grid">
               <label class="field"><span>Homepage link</span><input id="qrHomeLink" type="url" placeholder="https://" /></label>
               <label class="field"><span>Menu link</span><input id="qrMenuLink" type="url" placeholder="https://" /></label>
-              <label class="field"><span>Google review link <em class="muted">(trống = tự suy)</em></span><input id="qrReviewGg" type="url" placeholder="https://" /></label>
-              <label class="field"><span>Yelp review link <em class="muted">(trống = tự suy)</em></span><input id="qrReviewYelp" type="url" placeholder="https://" /></label>
+              <label class="field"><span>Google review link <em class="muted">(trống = tự suy)</em></span><input id="qrReviewGg" type="text" value="#link_gg_rv" placeholder="https://" /></label>
+              <label class="field"><span>Yelp review link <em class="muted">(trống = tự suy)</em></span><input id="qrReviewYelp" type="text" value="#link_yelp_rv" placeholder="https://" /></label>
             </div>
             <label class="inline"><input type="checkbox" id="qrLogoFilter" checked /> Đảo màu logo (trắng)</label>
             <div class="actions">

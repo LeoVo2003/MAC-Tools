@@ -1635,7 +1635,7 @@ function toolIcon(t) {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
 }
 
-const dashState = { range: 'today', page: 1, perPage: 20, tool: '', user: '', status: '', totalPages: 1 };
+const dashState = { range: '30d', page: 1, perPage: 20, tool: '', user: '', status: '', totalPages: 1 };
 
 function dashRangeDates() {
   const now = new Date();
