@@ -15,6 +15,8 @@ import {
   replaceMedia,
   replaceTokens,
   replaceColors,
+  replaceLogoInHeader,
+  buildCssVariablesBlock,
   rebindCF7,
   removeReviewCta,
   slugify,
@@ -178,16 +180,16 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   // 7. Replace
   const elements = JSON.parse(JSON.stringify(templateData)); // deep clone
 
-  // 7a. Media
+  // 7a. Media (bg sections + hình form)
   const mediaCount = replaceMedia(elements, [
     { ...OLD_ATTACHMENTS.bgSections, newId: bg1Media.id, newUrl: bg1Media.url },
     { ...OLD_ATTACHMENTS.formLeft, newId: bg2Media.id, newUrl: bg2Media.url },
-    // Logo: tìm image widget trống ở hero (id=0 hoặc không có) → thay bằng logo mới
-    // Tạm: replace mọi image có url rỗng hoặc placeholder logo
   ]);
-  // Logo: tìm widget image đầu tiên (hero) — heuristic
-  // TODO: cần xác định chính xác widget logo trong template 2806
   step('replace-media', true, `${mediaCount} chỗ`);
+
+  // 7a2. Logo: img duy nhất trong #custom-header
+  const logoOk = replaceLogoInHeader(elements, { id: logoMedia.id, url: logoMedia.url });
+  step('replace-logo', logoOk, logoOk ? `logo #${logoMedia.id}` : 'không tìm thấy #custom-header');
 
   // 7b. Tokens text
   const tokens = {
@@ -212,9 +214,15 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
     { hex: '#1D1BE0', variable: '--qr-primary' },
     { hex: '#567445', variable: '--qr-secondary' },
   ]);
-  // Inject CSS variables vào page (qua custom CSS)
-  // TODO: cần xác định cách inject vào template 2806 (page settings custom_css)
+  // Build CSS variables block để inject vào page
+  const cssVars = {
+    '--qr-primary': primary,
+    '--qr-secondary': secondary,
+    '--qr-logo-filter': inputs.logoFilter ? 'brightness(0) invert(1)' : 'none',
+  };
+  const cssVarsBlock = buildCssVariablesBlock(cssVars);
   step('replace-colors', true, `${colorCount} chỗ, primary=${primary}, secondary=${secondary}`);
+  // TODO: inject cssVarsBlock vào page (qua Elementor custom CSS hoặc HTML widget)
 
   // 7d. Rebind CF7
   const cf7Count = rebindCF7(elements, cf7Form.id);
@@ -253,11 +261,8 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   }
 
   // CSS variables để inject (trả về cho frontend log)
-  result.cssVariables = {
-    '--qr-primary': primary,
-    '--qr-secondary': secondary,
-    '--qr-logo-filter': inputs.logoFilter ? 'brightness(0) invert(1)' : 'none',
-  };
+  result.cssVariables = cssVars;
+  result.cssVariablesBlock = cssVarsBlock;
 
   return result;
   } finally {

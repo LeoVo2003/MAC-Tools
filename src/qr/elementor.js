@@ -172,7 +172,51 @@ export function removeReviewCta(elements, platform) {
   return removed;
 }
 
-/** Slugify: "La Vie Nail Spa" → "la-vie-nail-spa" */
+/**
+ * Tìm và thay logo: img duy nhất bên trong #custom-header (template 2806).
+ * @param {Array} elements
+ * @param {{id:number, url:string}} logoMedia
+ * @returns {boolean} có thay được không
+ */
+export function replaceLogoInHeader(elements, logoMedia) {
+  let replaced = false;
+  // Tìm element có css_id = 'custom-header'
+  const findHeader = (arr) => {
+    for (const el of arr) {
+      if (el.settings?.css_id === 'custom-header' || el.id === 'custom-header') return el;
+      if (Array.isArray(el.elements)) {
+        const found = findHeader(el.elements);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+  const header = findHeader(elements);
+  if (!header) return false;
+  // Trong header, tìm image widget đầu tiên và thay
+  walkElements([header], (el) => {
+    if (replaced) return;
+    const wt = String(el.widgetType || '').toLowerCase();
+    if (wt === 'image' || wt.includes('image')) {
+      const s = el.settings || {};
+      if (s.image) {
+        s.image = { ...s.image, id: logoMedia.id, url: logoMedia.url };
+        replaced = true;
+      }
+    }
+  });
+  return replaced;
+}
+
+/**
+ * Tạo CSS variables block để inject vào page.
+ * @param {object} variables - { '--qr-primary': '#E31E24', ... }
+ * @returns {string} CSS text
+ */
+export function buildCssVariablesBlock(variables) {
+  const lines = Object.entries(variables).map(([k, v]) => `  ${k}: ${v};`);
+  return `:root {\n${lines.join('\n')}\n}`;
+}
 export function slugify(text) {
   return String(text || '')
     .normalize('NFD')
