@@ -46,6 +46,23 @@ function darkenHex(hex, pct = 50) {
   return '#' + [r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('').toUpperCase();
 }
 
+/** Convert social URL → review URL qua worker */
+async function convertToReviewUrl(socialUrl) {
+  if (!socialUrl || !socialUrl.startsWith('http')) return null;
+  const workerBase = (process.env.REVIEW_LINK_WORKER || 'https://review-link.leo-vo.workers.dev').replace(/\/$/, '');
+  try {
+    const ctrl = new AbortController();
+    const timeout = setTimeout(() => ctrl.abort(), 15000);
+    const r = await fetch(`${workerBase}/api/convert?url=${encodeURIComponent(socialUrl)}`, { signal: ctrl.signal });
+    clearTimeout(timeout);
+    const data = await r.json();
+    if (data?.ok && data?.reviewUrl) return data.reviewUrl;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /** Download ảnh từ URL → { buffer, filename, mimetype } */
 async function downloadImage(url) {
   const ctrl = new AbortController();
@@ -140,22 +157,31 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   step('upload', true, `logo=${logoMedia.id}, bg1=${bg1Media.id}, bg2=${bg2Media.id}`);
   result.media = { logo: logoMedia, bg1: bg1Media, bg2: bg2Media };
 
-  // 4. Review links: manual → derive từ social → ẩn nút
+  // 4. Review links: manual → convert từ social qua worker → ẩn nút
   const reviewLinks = {};
+  const isManual = (v) => v?.trim() && !v.includes('#link_');
   // Google
-  if (inputs.reviewGg?.trim() && !inputs.reviewGg.includes('#link_')) {
+  if (isManual(inputs.reviewGg)) {
     reviewLinks.google = inputs.reviewGg.trim();
+    step('review-gg', true, 'link tay');
   } else if (wpmData.social?.google) {
-    // TODO: gọi worker convert khi có social URL
-    reviewLinks.google = wpmData.social.google; // tạm, sẽ convert ở bước sau
+    log('Convert Google social → review link...');
+    reviewLinks.google = await convertToReviewUrl(wpmData.social.google);
+    step('review-gg', !!reviewLinks.google, reviewLinks.google ? 'tự convert' : 'không convert được → ẩn nút');
+  } else {
+    step('review-gg', true, 'trống → ẩn nút');
   }
   // Yelp
-  if (inputs.reviewYelp?.trim() && !inputs.reviewYelp.includes('#link_')) {
+  if (isManual(inputs.reviewYelp)) {
     reviewLinks.yelp = inputs.reviewYelp.trim();
+    step('review-yelp', true, 'link tay');
   } else if (wpmData.social?.yelp) {
-    reviewLinks.yelp = wpmData.social.yelp;
+    log('Convert Yelp social → review link...');
+    reviewLinks.yelp = await convertToReviewUrl(wpmData.social.yelp);
+    step('review-yelp', !!reviewLinks.yelp, reviewLinks.yelp ? 'tự convert' : 'không convert được → ẩn nút');
+  } else {
+    step('review-yelp', true, 'trống → ẩn nút');
   }
-  step('review-links', true, `google=${reviewLinks.google ? 'có' : 'ẩn'}, yelp=${reviewLinks.yelp ? 'có' : 'ẩn'}`);
 
   // 5. Tạo CF7 form
   const cf7Title = title;
