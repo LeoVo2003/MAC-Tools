@@ -1650,7 +1650,23 @@ qrForm?.addEventListener('submit', async (e) => {
   fd.append('qrBg1Url', getVal('qrBg1Url'));
   fd.append('qrBg2Url', getVal('qrBg2Url'));
   // wpmData: lấy từ lần fill gần nhất (lưu ở window)
-  fd.append('wpmData', JSON.stringify(window.__qrWpmData || {}));
+  // Đọc data từ ô edit (user có thể sửa sau fill)
+  const getEdit = (id) => document.getElementById(id)?.value?.trim() || '';
+  const wpmData = {
+    shopName: getEdit('qrEditName') || window.__qrWpmData?.shopName || '',
+    projectName: getEdit('qrEditName') || window.__qrWpmData?.shopName || '',
+    zip: getEdit('qrEditZip') || window.__qrWpmData?.zip || '',
+    email: getEdit('qrEditEmail') || window.__qrWpmData?.email || '',
+    phone: getEdit('qrEditPhone') || window.__qrWpmData?.phone || '',
+    address: getEdit('qrEditAddress') || window.__qrWpmData?.address || '',
+    social: {
+      facebook: getEdit('qrEditFb') || window.__qrWpmData?.social?.facebook || '',
+      instagram: getEdit('qrEditIg') || window.__qrWpmData?.social?.instagram || '',
+      yelp: getEdit('qrEditYelp') || window.__qrWpmData?.social?.yelp || '',
+      google: getEdit('qrEditGg') || window.__qrWpmData?.social?.google || '',
+    },
+  };
+  fd.append('wpmData', JSON.stringify(wpmData));
   const logoFile = getFile('qrLogo'); if (logoFile) fd.append('qrLogo', logoFile);
   const bg1File = getFile('qrBg1'); if (bg1File) fd.append('qrBg1', bg1File);
   const bg2File = getFile('qrBg2'); if (bg2File) fd.append('qrBg2', bg2File);
@@ -2060,10 +2076,24 @@ document.getElementById('qrFillBtn')?.addEventListener('click', async () => {
     (data.logs || []).forEach((l) => {
       if (!skipPatterns.some((p) => p.test(l))) qrLog(l);
     });
-    // Tự xử lý review link: WPM có social → convert → fail thì default
-    // WPM không có → default #link_{platform}_rv
-    // User xóa trống → backend sẽ xóa nút
+    // Hiện form edit data
     const social = window.__qrWpmData.social || {};
+    const editIds = {
+      qrEditName: data.shopName || '',
+      qrEditZip: data.zip || '',
+      qrEditEmail: data.email || '',
+      qrEditPhone: data.phone || '',
+      qrEditAddress: data.address || '',
+      qrEditFb: social.facebook || '',
+      qrEditIg: social.instagram || '',
+      qrEditYelp: social.yelp || '',
+      qrEditGg: social.google || '',
+    };
+    for (const [id, val] of Object.entries(editIds)) {
+      const el = document.getElementById(id);
+      if (el) el.value = val;
+    }
+    document.getElementById('qrDataEdit').hidden = false;
     const processReviewInput = async (socialUrl, inputId, defaultTag, platform) => {
       const input = document.getElementById(inputId);
       if (socialUrl && socialUrl.startsWith('http')) {
