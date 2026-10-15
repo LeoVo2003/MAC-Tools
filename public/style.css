@@ -25,6 +25,12 @@
   --primary-line: #fecaca;
   --primary-gradient: linear-gradient(110deg, var(--red, #E31E24) 0%, var(--orange, #FF6A2C) 100%);
 
+  /* Info — riêng cho Running (không trùng Danger) */
+  --info: #2563eb;
+  --info-text: #1d4ed8;
+  --info-soft: #eff6ff;
+  --info-line: #bfdbfe;
+
   --secondary: #8b5cf6;
   --secondary-text: #6d28d9;
   --secondary-soft: #f5f3ff;
@@ -1701,8 +1707,8 @@ td.mono {
   color: var(--warning-text);
 }
 .pill--run {
-  background: var(--primary-soft);
-  color: var(--primary-hover);
+  background: var(--info-soft);
+  color: var(--info-text);
 }
 .pill--run::before {
   animation: pulse 1.6s ease-in-out infinite;
@@ -1959,3 +1965,14 @@ td.empty {
   .rl-result-head { flex-wrap: wrap; }
   .rl-result-head .btn { margin-left: 0; width: 100%; }
 }
+
+/* Dashboard alerts */
+.dash-alert-dt { margin-top: var(--space-3); }
+.dash-alert {
+  font-size: var(--text-sm);
+  margin: 0 0 var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+}
+.dash-alert--warn { background: var(--warning-soft); color: var(--warning-text); }
+.dash-alert--error { background: var(--danger-soft); color: var(--danger-text); }

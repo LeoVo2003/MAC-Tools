@@ -143,14 +143,24 @@ export function statsByTool(rowsInput) {
   }).sort((a, b) => b.total - a.total);
 }
 
+/** Chuẩn hóa message để gom: thay URL và số bằng placeholder */
+function normalizeErrorKey(msg) {
+  return String(msg || '')
+    .replace(/https?:\/\/[^\s]+/g, '<url>')
+    .replace(/\b\d+(\.\d+)?\b/g, '<n>')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 200);
+}
+
 /** Gom lỗi gần đây theo nội dung: [{ error, count, lastAt, lastRunId, tool }] */
 export function recentErrors({ limit = 1000, top = 10 } = {}) {
   const rows = listRuns({ limit }).filter((r) => r.status === 'error' && r.error);
   const map = new Map();
   for (const r of rows) {
-    const key = String(r.error).trim().slice(0, 200);
+    const key = normalizeErrorKey(r.error);
     if (!key) continue;
-    if (!map.has(key)) map.set(key, { error: key, count: 0, lastAt: null, lastRunId: null, tool: normalizeTool(r) });
+    if (!map.has(key)) map.set(key, { error: r.error, errorKey: key, count: 0, lastAt: null, lastRunId: null, tool: normalizeTool(r) });
     const e = map.get(key);
     e.count += 1;
     const t = r.startedAt ? Date.parse(r.startedAt) : NaN;
@@ -158,6 +168,7 @@ export function recentErrors({ limit = 1000, top = 10 } = {}) {
       e.lastAt = r.startedAt;
       e.lastRunId = r.id;
       e.tool = normalizeTool(r);
+      e.error = r.error; // giữ message gốc mới nhất để hiển thị
     }
   }
   return [...map.values()].sort((a, b) => b.count - a.count).slice(0, top);
@@ -301,4 +312,21 @@ export function closeInterruptedRuns() {
     fs.writeFileSync(RUNS_FILE, `${updated.join('\n')}\n`, 'utf-8');
   }
   return { closed };
+}
+
+/**
+ * Lấy runs trong khoảng ngày KHÔNG giới hạn 2000 dòng (cho thống kê).
+ * @param {{ from?: string, to?: string }} [opts]
+ */
+export function listRunsUnlimited({ from = '', to = '' } = {}) {
+  let rows = readAllRuns();
+  const fromMs = from ? Date.parse(from) : NaN;
+  const toMs = to ? Date.parse(to) : NaN;
+  rows = rows.filter((r) => {
+    const t = r.startedAt ? Date.parse(r.startedAt) : NaN;
+    if (Number.isFinite(fromMs) && Number.isFinite(t) && t < fromMs) return false;
+    if (Number.isFinite(toMs) && Number.isFinite(t) && t > toMs + 24 * 60 * 60 * 1000 - 1) return false;
+    return true;
+  });
+  return rows.map((r) => ({ ...r, tool: normalizeTool(r), durationMs: durationOf(r) }));
 }

@@ -16,6 +16,7 @@ import {
   startRun,
   finishRun,
   listRuns,
+  listRunsUnlimited,
   runsStats,
   statsByTool,
   recentErrors,
@@ -196,7 +197,10 @@ export function createApp() {
     });
     const workerBase = (process.env.REVIEW_LINK_WORKER || 'https://review-link.leo-vo.workers.dev').replace(/\/$/, '');
     try {
-      const r = await fetch(`${workerBase}/api/convert?url=${encodeURIComponent(url)}`);
+      const ctrl = new AbortController();
+      const timeout = setTimeout(() => ctrl.abort(), 15000);
+      const r = await fetch(`${workerBase}/api/convert?url=${encodeURIComponent(url)}`, { signal: ctrl.signal });
+      clearTimeout(timeout);
       const data = await r.json();
       if (r.ok && data?.ok) {
         finishRun(rlRunId, {
@@ -603,15 +607,24 @@ export function createApp() {
     res.send(csv);
   });
 
-  /** Thống kê dashboard: ?from=&to= (ISO date), groupBy=tool */
+  /** Thống kê dashboard: ?from=&to= (ISO date), groupBy=tool — đếm trên TOÀN BỘ dòng */
   app.get('/api/runs/stats', requireAuth, requireAdmin, (req, res) => {
     const from = String(req.query.from || '').trim();
     const to = String(req.query.to || '').trim();
     const groupBy = String(req.query.groupBy || '').trim();
-    const rows = listRuns({ limit: 10000, from, to });
+    const rows = listRunsUnlimited({ from, to });
     const out = { stats: runsStats(rows), from, to };
     if (groupBy === 'tool') out.byTool = statsByTool(rows);
     res.json(out);
+  });
+
+  /** Chi tiết 1 run (cho drawer) */
+  app.get('/api/runs/:id', requireAuth, requireAdmin, (req, res) => {
+    const id = String(req.params.id || '').trim();
+    const runs = listRuns({ limit: 2000 });
+    const run = runs.find((r) => String(r.id) === id);
+    if (!run) return res.status(404).json({ error: 'Không tìm thấy.' });
+    res.json({ run });
   });
 
   /** Lỗi gần đây gom theo nội dung. */

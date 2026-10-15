@@ -844,17 +844,28 @@ copyBtn?.addEventListener('click', async () => {
   }, 1500);
 });
 
-resultPanel?.addEventListener('click', async (e) => {
+document.addEventListener('click', async (e) => {
   const btn = e.target.closest('[data-copy]');
-  if (!btn || !resultPanel.contains(btn)) return;
+  if (!btn) return;
   const id = btn.getAttribute('data-copy');
   const el = id ? document.getElementById(id) : null;
   if (!el) return;
-  const val = String(el.textContent || '').trim();
-  if (!val) return;
-  await navigator.clipboard.writeText(val);
+  const val = el.tagName === 'A' ? (el.href || el.textContent) : String(el.textContent || '').trim();
+  if (!val || val === '#') return;
+  try {
+    await navigator.clipboard.writeText(val);
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = val;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+  }
+  const orig = btn.textContent;
+  btn.textContent = 'Đã copy';
   btn.classList.add('copied');
-  setTimeout(() => btn.classList.remove('copied'), 1200);
+  setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1200);
 });
 
 /* Tabs */
@@ -1638,11 +1649,13 @@ function toolIcon(t) {
 const dashState = { range: '30d', page: 1, perPage: 20, tool: '', user: '', status: '', totalPages: 1 };
 
 function dashRangeDates() {
+  // Dùng giờ VN, không phải UTC
+  const fmtVN = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
   const now = new Date();
-  const to = now.toISOString().slice(0, 10);
+  const to = fmtVN(now);
   let from = to;
-  if (dashState.range === '7d') from = new Date(now - 6 * 864e5).toISOString().slice(0, 10);
-  if (dashState.range === '30d') from = new Date(now - 29 * 864e5).toISOString().slice(0, 10);
+  if (dashState.range === '7d') from = fmtVN(new Date(now - 6 * 864e5));
+  if (dashState.range === '30d') from = fmtVN(new Date(now - 29 * 864e5));
   return { from, to };
 }
 
@@ -1683,7 +1696,7 @@ async function loadDashboard() {
     const stats = await statsRes.json();
     const errData = await errRes.json();
     let queued = 0;
-    try { const q = await queueRes?.json(); queued = q?.pendingCount || q?.queue?.length || 0; } catch {}
+    try { const q = await queueRes?.json(); queued = q?.pendingCount ?? 0; } catch {}
 
     // KPIs
     const s = stats.stats || {};
@@ -1772,13 +1785,19 @@ async function loadDashHealth() {
   try {
     const res = await fetch('/api/health', { credentials: 'same-origin' });
     const h = await res.json();
+    const q = h.queue || {};
     const rows = [
-      ['Trạng thái', h.ok ? 'OK' : 'Lỗi'],
-      ['Uptime', h.uptime ? fmtDur(h.uptime * 1000) : '—'],
-      ['Chrome sessions', h.chromeSessions ?? h.sessions ?? '—'],
-      ['Queue', h.queueLength ?? h.pending ?? '—'],
+      ['Trạng thái', h.ok ? 'OK' : 'Có lỗi'],
+      ['Chrome', h.chrome?.ok ? 'OK' : ('Lỗi: ' + (h.chrome?.error || '?'))],
+      ['Disk downloads', h.disk?.mb != null ? `${h.disk.mb} MB` : '—'],
+      ['Queue', `chạy ${q.runningCount ?? 0} · chờ ${q.pendingCount ?? 0}`],
     ];
-    box.innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${escapeHtml(String(v))}</dd>`).join('');
+    let html = rows.map(([k, v]) => `<dt>${k}</dt><dd>${escapeHtml(String(v))}</dd>`).join('');
+    const alerts = Array.isArray(h.alerts) ? h.alerts : [];
+    if (alerts.length) {
+      html += `<dt class="dash-alert-dt">Cảnh báo (${alerts.length})</dt><dd>${alerts.map((a) => `<p class="dash-alert dash-alert--${a.level}">${escapeHtml(a.message)}</p>`).join('')}</dd>`;
+    }
+    box.innerHTML = html;
   } catch (err) {
     box.innerHTML = `<dt>Lỗi</dt><dd>${escapeHtml(err.message)}</dd>`;
   }
@@ -1786,15 +1805,25 @@ async function loadDashHealth() {
 
 /* Drawer chi tiết */
 function openRunDrawer(runId) {
+  const STEP_LABELS = {
+    backup: 'Backup UpdraftPlus',
+    createUser: 'Tạo tài khoản khách',
+    syncWpm: 'Sync tài khoản lên WPM',
+    macCore: 'Mac Core → cài Mac Role',
+    macRole: 'Mac Role → F Package User',
+    webInfo: 'Web Info → Dashboard',
+    fillTask: 'Fill Task',
+  };
+  const stepLabel = (id) => STEP_LABELS[id] || id;
   const drawer = document.getElementById('runDrawer');
   const backdrop = document.getElementById('runDrawerBackdrop');
   const body = document.getElementById('runDrawerBody');
   drawer.hidden = false; backdrop.hidden = false;
   body.innerHTML = '<p class="empty">Đang tải…</p>';
-  fetch(`/api/runs?limit=2000`, { credentials: 'same-origin' })
+  fetch(`/api/runs/${encodeURIComponent(runId)}`, { credentials: 'same-origin' })
     .then((r) => r.json())
     .then((data) => {
-      const run = (data.runs || []).find((x) => x.id === runId);
+      const run = data.run;
       if (!run) { body.innerHTML = '<p class="empty">Không tìm thấy.</p>'; return; }
       const steps = Array.isArray(run.stepResults) ? run.stepResults : [];
       body.innerHTML = `
@@ -1810,7 +1839,7 @@ function openRunDrawer(runId) {
         </dl>
         ${steps.length ? `<h3>Các bước (${steps.length})</h3>
         <table class="steps-table"><thead><tr><th>Bước</th><th>Trạng thái</th><th>Thời lượng</th></tr></thead>
-        <tbody>${steps.map((s) => `<tr><td>${escapeHtml(s.step)}</td><td>${runStatusPill(s.status)}</td><td>${fmtDur(s.durationMs)}</td></tr>`).join('')}</tbody></table>` : ''}
+        <tbody>${steps.map((s) => `<tr><td>${escapeHtml(stepLabel(s.step))}</td><td>${runStatusPill(s.status)}</td><td>${fmtDur(s.durationMs)}</td></tr>`).join('')}</tbody></table>` : ''}
         ${run.resultSummary ? `<h3>Kết quả</h3><dl class="kv">
           ${run.resultSummary.project ? `<dt>Project</dt><dd>${escapeHtml(run.resultSummary.project)}</dd>` : ''}
           ${run.resultSummary.username ? `<dt>Username</dt><dd>${escapeHtml(run.resultSummary.username)}</dd>` : ''}
