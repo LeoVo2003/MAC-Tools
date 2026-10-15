@@ -157,30 +157,48 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   step('upload', true, `logo=${logoMedia.id}, bg1=${bg1Media.id}, bg2=${bg2Media.id}`);
   result.media = { logo: logoMedia, bg1: bg1Media, bg2: bg2Media };
 
-  // 4. Review links: manual → convert từ social qua worker → ẩn nút
+  // 4. Review links + Social defaults
+  // Logic: WPM có link → convert bằng tool → fail thì về default
+  //        WPM không có → default #link_{platform}_rv
+  //        User xóa trống ô input → xóa nút khỏi page
   const reviewLinks = {};
-  const isManual = (v) => v?.trim() && !v.includes('#link_');
-  // Google
-  if (isManual(inputs.reviewGg)) {
-    reviewLinks.google = inputs.reviewGg.trim();
-    step('review-gg', true, 'link tay');
-  } else if (wpmData.social?.google) {
-    log('Convert Google social → review link...');
-    reviewLinks.google = await convertToReviewUrl(wpmData.social.google);
-    step('review-gg', !!reviewLinks.google, reviewLinks.google ? 'tự convert' : 'không convert được → ẩn nút');
-  } else {
-    step('review-gg', true, 'trống → ẩn nút');
-  }
-  // Yelp
-  if (isManual(inputs.reviewYelp)) {
-    reviewLinks.yelp = inputs.reviewYelp.trim();
-    step('review-yelp', true, 'link tay');
-  } else if (wpmData.social?.yelp) {
-    log('Convert Yelp social → review link...');
-    reviewLinks.yelp = await convertToReviewUrl(wpmData.social.yelp);
-    step('review-yelp', !!reviewLinks.yelp, reviewLinks.yelp ? 'tự convert' : 'không convert được → ẩn nút');
-  } else {
-    step('review-yelp', true, 'trống → ẩn nút');
+  const socialLinks = {};
+  const isManual = (v) => v?.trim() && !v.startsWith('#link_');
+  const isEmpty = (v) => !v?.trim();
+
+  // Helper: xử lý 1 platform
+  const processPlatform = async (platform, socialUrl, manualInput) => {
+    const defaultTag = `#link_${platform}_rv`;
+    // User xóa trống → xóa nút
+    if (isEmpty(manualInput) && !socialUrl) return { action: 'remove' };
+    if (isEmpty(manualInput)) return { action: 'remove' };
+    // User nhập tay (không phải default tag)
+    if (isManual(manualInput)) return { action: 'use', url: manualInput.trim() };
+    // Có social từ WPM → convert
+    if (socialUrl && socialUrl.startsWith('http')) {
+      log(`Convert ${platform} social → review link...`);
+      const converted = await convertToReviewUrl(socialUrl);
+      if (converted) {
+        step(`review-${platform}`, true, 'tự convert từ social');
+        return { action: 'use', url: converted };
+      }
+      log(`${platform}: convert thất bại → dùng default.`);
+    }
+    // Default
+    step(`review-${platform}`, true, 'dùng default');
+    return { action: 'use', url: defaultTag };
+  };
+
+  const ggResult = await processPlatform('gg', wpmData.social?.google, inputs.reviewGg);
+  const yelpResult = await processPlatform('yelp', wpmData.social?.yelp, inputs.reviewYelp);
+
+  if (ggResult.action === 'use') reviewLinks.google = ggResult.url;
+  if (yelpResult.action === 'use') reviewLinks.yelp = yelpResult.url;
+
+  // Social defaults: #link_{social} nếu WPM không có
+  for (const [key, tag] of [['facebook', 'fb'], ['instagram', 'ig'], ['yelp', 'yelp'], ['google', 'gg']]) {
+    const url = wpmData.social?.[key];
+    socialLinks[key] = (url && url.startsWith('http')) ? url : `#link_${tag}`;
   }
 
   // 5. Tạo CF7 form
@@ -218,16 +236,17 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   const logoOk = replaceLogoInHeader(elements, { id: logoMedia.id, url: logoMedia.url });
   step('replace-logo', logoOk, logoOk ? `logo #${logoMedia.id}` : 'không tìm thấy #custom-header');
 
-  // 7b. Tokens text
+  // 7b. Tokens text (hiển thị đầy đủ: tên, zip, mail, phone, địa chỉ, social)
   const tokens = {
     '{{ten}}': businessName,
+    '{{zip}}': zip,
     '{{dia_chi}}': wpmData.address || '',
     '{{phone}}': wpmData.phone || '',
     '{{email}}': shopEmail,
-    '{{soc_fb}}': wpmData.social?.facebook || '',
-    '{{soc_ig}}': wpmData.social?.instagram || '',
-    '{{soc_yelp}}': wpmData.social?.yelp || '',
-    '{{soc_gg}}': wpmData.social?.google || '',
+    '{{soc_fb}}': socialLinks.facebook,
+    '{{soc_ig}}': socialLinks.instagram,
+    '{{soc_yelp}}': socialLinks.yelp,
+    '{{soc_gg}}': socialLinks.google,
     '{{link_home}}': inputs.homeLink || '',
     '{{link_menu}}': inputs.menuLink || '',
     '{{link_rv_gg}}': reviewLinks.google || '',
@@ -256,10 +275,10 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   const cf7Count = rebindCF7(elements, cf7Form.id);
   step('rebind-cf7', true, `${cf7Count} widget`);
 
-  // 7e. Ẩn nút review nếu không có link
+  // 7e. Xóa nút review nếu user xóa trống ô input
   let removedGg = 0, removedYelp = 0;
-  if (!reviewLinks.google) removedGg = removeReviewCta(elements, 'google');
-  if (!reviewLinks.yelp) removedYelp = removeReviewCta(elements, 'yelp');
+  if (ggResult.action === 'remove') removedGg = removeReviewCta(elements, 'google');
+  if (yelpResult.action === 'remove') removedYelp = removeReviewCta(elements, 'yelp');
   if (removedGg || removedYelp) step('remove-cta', true, `google=${removedGg}, yelp=${removedYelp}`);
 
   // 8. Tạo/update page

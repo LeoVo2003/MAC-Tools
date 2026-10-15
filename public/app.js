@@ -2060,21 +2060,28 @@ document.getElementById('qrFillBtn')?.addEventListener('click', async () => {
     (data.logs || []).forEach((l) => {
       if (!skipPatterns.some((p) => p.test(l))) qrLog(l);
     });
-    // Tự convert social → review link, điền vào input cho thấy trước
+    // Tự xử lý review link: WPM có social → convert → fail thì default
+    // WPM không có → default #link_{platform}_rv
+    // User xóa trống → backend sẽ xóa nút
     const social = window.__qrWpmData.social || {};
-    const convertOne = async (socialUrl, inputId, platform) => {
-      if (!socialUrl || !socialUrl.startsWith('http')) return;
-      try {
-        const r = await fetch(`/api/review-link?url=${encodeURIComponent(socialUrl)}`, { credentials: 'same-origin' });
-        const d = await r.json();
-        if (d.ok && d.reviewUrl) {
-          document.getElementById(inputId).value = d.reviewUrl;
-          qrLog(`${platform}: đã suy ra review link.`);
-        }
-      } catch {}
+    const processReviewInput = async (socialUrl, inputId, defaultTag, platform) => {
+      const input = document.getElementById(inputId);
+      if (socialUrl && socialUrl.startsWith('http')) {
+        try {
+          const r = await fetch(`/api/review-link?url=${encodeURIComponent(socialUrl)}`, { credentials: 'same-origin' });
+          const d = await r.json();
+          if (d.ok && d.reviewUrl) {
+            input.value = d.reviewUrl;
+            qrLog(`${platform}: đã convert từ social.`);
+            return;
+          }
+        } catch {}
+        qrLog(`${platform}: convert thất bại → dùng default.`);
+      }
+      input.value = defaultTag;
     };
-    await convertOne(social.google, 'qrReviewGg', 'Google');
-    await convertOne(social.yelp, 'qrReviewYelp', 'Yelp');
+    await processReviewInput(social.google, 'qrReviewGg', '#link_gg_rv', 'Google');
+    await processReviewInput(social.yelp, 'qrReviewYelp', '#link_yelp_rv', 'Yelp');
     if (hint) { hint.textContent = `Đã lấy: ${data.shopName || 'OK'}`; hint.className = 'hint hint--ok'; }
     qrLog('Fill xong. Kéo màu rồi bấm Tạo QR Page.');
   } catch (err) {
