@@ -4,7 +4,8 @@
  */
 
 // Đọc env lazy (dotenv.config chạy sau khi modules load)
-function getWpBase() {
+/** Base URL của WP (để build page URL khi REST không trả link) */
+export function getWpBase() {
   return (process.env.QR_WP_BASE || 'https://qr.macmarketing.us').replace(/\/$/, '');
 }
 function getWpUser() { return process.env.QR_WP_USER || ''; }
@@ -115,43 +116,45 @@ export async function wpFindPageBySlug(slug) {
   return Array.isArray(pages) && pages.length ? pages[0] : null;
 }
 
-/** Tạo page mới (2 bước: tạo trống trước, rồi ghi Elementor data) */
-export async function wpCreatePage({ title, slug, elementorData }) {
-  // Bước 1: tạo page trống
+/** Tạo page trống (draft, canvas) — chưa có Elementor data */
+export async function wpCreatePage({ title, slug }) {
   const page = await wpFetch('/wp/v2/pages', {
     method: 'POST',
     body: { title, slug, status: 'draft', template: 'elementor_canvas' },
   });
   if (!page?.id) throw new Error('Tạo page thất bại: không có ID');
-  // Bước 2: ghi Elementor data qua custom endpoint (bypass REST meta restriction)
-  const edJson = JSON.stringify(elementorData);
-  try {
-    await wpFetch(`/qr/v1/set-elementor/${page.id}`, {
-      method: 'POST',
-      body: { elementor_data: edJson },
-    });
-  } catch (e) {
-    throw new Error(`Ghi Elementor data thất bại (page #${page.id} đã tạo ở draft, cần snippet qr-set-elementor): ${e.message}`);
-  }
-  // Bước 3: publish page
-  await wpFetch(`/wp/v2/pages/${page.id}`, {
-    method: 'POST',
-    body: { status: 'publish' },
-  });
-  return { ...page, status: 'publish' };
+  return page;
 }
 
-/** Update page có sẵn (ghi đè) */
-export async function wpUpdatePage(pageId, { title, elementorData }) {
+/**
+ * Import template NGUYÊN BẢN vào page (server-side verbatim copy,
+ * không JSON round-trip qua Node). Page sau bước này phải render
+ * giống hệt template preview.
+ */
+export async function wpImportTemplate(pageId, templateId) {
+  const res = await wpFetch(`/qr/v1/import-template/${pageId}`, {
+    method: 'POST',
+    body: { template_id: templateId },
+  });
+  if (!res?.ok) throw new Error(`Import template thất bại: ${res?.message || 'unknown'}`);
+  return res;
+}
+
+/** Ghi _elementor_data đã mutate qua custom endpoint (đã fix wp_slash) */
+export async function wpSetElementorData(pageId, elementorData) {
+  const res = await wpFetch(`/qr/v1/set-elementor/${pageId}`, {
+    method: 'POST',
+    body: { elementor_data: JSON.stringify(elementorData) },
+  });
+  if (!res?.ok) throw new Error(`Ghi Elementor data thất bại (page #${pageId})`);
+  return res;
+}
+
+/** Publish page → trả về page object (có link) */
+export async function wpPublishPage(pageId) {
   return wpFetch(`/wp/v2/pages/${pageId}`, {
     method: 'POST',
-    body: {
-      title,
-      meta: {
-        _elementor_data: JSON.stringify(elementorData),
-        _elementor_edit_mode: 'builder',
-      },
-    },
+    body: { status: 'publish' },
   });
 }
 

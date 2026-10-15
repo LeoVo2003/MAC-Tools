@@ -7,9 +7,12 @@ import {
   wpCreateCF7Form,
   wpFindPageBySlug,
   wpCreatePage,
-  wpUpdatePage,
+  wpImportTemplate,
+  wpSetElementorData,
+  wpPublishPage,
   wpRegenerateElementorCss,
   wpConfigOk,
+  getWpBase,
 } from './wpClient.js';
 import {
   replaceMedia,
@@ -230,13 +233,37 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
     step('cf7', true, 'bỏ qua (skipCf7)');
   }
 
-  // 6. Lấy template Elementor
-  const templateData = await wpGetElementorData(getTemplateId());
-  if (!Array.isArray(templateData)) throw new Error('Template _elementor_data không phải array');
-  step('template', true, `${countElements(templateData)} elements`);
+  // 6. Validate template tồn tại + có Elementor data (fail sớm nếu sai template ID)
+  const templateId = getTemplateId();
+  const templateData = await wpGetElementorData(templateId);
+  if (!Array.isArray(templateData)) throw new Error(`Template #${templateId}: _elementor_data không phải array`);
+  const templateTopLevel = templateData.length;
+  step('template', true, `#${templateId}: ${countElements(templateData)} elements, ${templateTopLevel} top-level`);
 
-  // 7. Replace
-  const elements = JSON.parse(JSON.stringify(templateData)); // deep clone
+  // 7. Tạo page → import template NGUYÊN BẢN server-side (verbatim, không JSON round-trip)
+  // Page sau bước này phải render giống hệt template preview.
+  let pageId;
+  if (existing && force) {
+    pageId = existing.id;
+    step('page', true, `dùng lại page #${pageId} (ghi đè)`);
+  } else {
+    const created = await wpCreatePage({ title, slug });
+    pageId = created.id;
+    step('page', true, `created #${pageId}`);
+  }
+  const imported = await wpImportTemplate(pageId, templateId);
+  const importOk = imported.top_level === templateTopLevel && imported.top_level > 0;
+  step('import-template', importOk, `verbatim ${imported.bytes} bytes, ${imported.top_level}/${templateTopLevel} top-level`);
+  if (!importOk) {
+    throw new Error(`Import lệch: template ${templateTopLevel} top-level nhưng page chỉ ${imported.top_level}. Kiểm tra snippet qr-set-elementor v2 trên site.`);
+  }
+
+  // 7b. Đọc lại data từ page (chính data vừa import) rồi mutate trên đó
+  let elements = await wpGetElementorData(pageId);
+  if (!Array.isArray(elements)) throw new Error('Page _elementor_data không phải array sau import');
+  elements = JSON.parse(JSON.stringify(elements)); // deep clone để mutate
+
+  // 8. Replace trên data của page
 
   // 7a. Media (bg sections + hình form)
   const mediaCount = replaceMedia(elements, [
@@ -298,19 +325,17 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   if (yelpResult.action === 'remove') removedYelp = removeReviewCta(elements, 'yelp');
   if (removedGg || removedYelp) step('remove-cta', true, `google=${removedGg}, yelp=${removedYelp}`);
 
-  // 8. Tạo/update page
-  let page;
-  if (existing && force) {
-    page = await wpUpdatePage(existing.id, { title, elementorData: elements });
-    step('page', true, `updated #${existing.id}`);
-  } else {
-    page = await wpCreatePage({ title, slug, elementorData: elements });
-    step('page', true, `created #${page.id}`);
-  }
-  result.page = { id: page.id, slug, url: page.link || `https://qr.macmarketing.us/${slug}/` };
+  // 9. Ghi data đã mutate vào page (custom endpoint đã fix wp_slash)
+  const written = await wpSetElementorData(pageId, elements);
+  step('write-elementor', true, `${countElements(elements)} elements, ${written.bytes} bytes`);
 
-  // 9. Regenerate CSS
-  await wpRegenerateElementorCss(page.id);
+  // 10. Publish page
+  const published = await wpPublishPage(pageId);
+  step('publish', true, `#${pageId}`);
+  result.page = { id: pageId, slug, url: published.link || `${getWpBase()}/${slug}/` };
+
+  // 11. Regenerate CSS
+  await wpRegenerateElementorCss(pageId);
   step('regenerate-css', true);
 
   // 10. Verify
