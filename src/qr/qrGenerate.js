@@ -210,10 +210,10 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   }
 
   // 5. Tạo CF7 form (bỏ qua nếu skipCf7 — vd PHP cũ chưa chạy CF7 mới)
+  const shopEmail = wpmData.email || '';
   let cf7Form = null;
   if (!inputs.skipCf7) {
     const cf7Title = title;
-    const shopEmail = wpmData.email || '';
     cf7Form = await wpCreateCF7Form({
       title: cf7Title,
       form: `[text* your-name placeholder "Your name*"]\n[tel* your-phone placeholder "Phone*"]\n[email your-email placeholder "Email"]\n[textarea your-message placeholder "Your message (optional)"]\n[submit "Submit"]`,
