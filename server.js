@@ -362,6 +362,21 @@ export function createApp() {
         wpmData.shopName = req.body.qrProjectName;
       }
 
+      // Validate required fields
+      const required = {
+        'Tên tiệm': wpmData.shopName,
+        'ZIP': wpmData.zip,
+        'Email': wpmData.email,
+        'Phone': wpmData.phone,
+        'Địa chỉ': wpmData.address,
+        'Homepage link': req.body.qrHomeLink,
+        'Menu link': req.body.qrMenuLink,
+      };
+      const missing = Object.entries(required).filter(([_, v]) => !String(v || '').trim()).map(([k]) => k);
+      if (missing.length) {
+        return res.status(400).json({ error: `Thiếu field bắt buộc: ${missing.join(', ')}` });
+      }
+
       const inputs = {
         primary: req.body.qrPrimary,
         secondary: req.body.qrSecondary || '',

@@ -352,19 +352,25 @@
               <label class="field"><span>Tên project</span><input id="qrProjectName" type="text" readonly placeholder="Fill data sẽ tự lấy" /></label>
               <div id="qrDataEdit" hidden>
                 <div class="grid">
-                  <label class="field"><span>Tên tiệm</span><input id="qrEditName" type="text" /></label>
-                  <label class="field"><span>ZIP</span><input id="qrEditZip" type="text" /></label>
-                  <label class="field"><span>Email</span><input id="qrEditEmail" type="email" /></label>
-                  <label class="field"><span>Phone</span><input id="qrEditPhone" type="text" /></label>
-                  <label class="field"><span>Địa chỉ</span><input id="qrEditAddress" type="text" /></label>
+                  <label class="field"><span>Tên tiệm <b class="req">*</b></span><input id="qrEditName" type="text" required /></label>
+                  <label class="field"><span>ZIP <b class="req">*</b></span><input id="qrEditZip" type="text" required /></label>
+                  <label class="field"><span>Email <b class="req">*</b></span><input id="qrEditEmail" type="email" required /></label>
+                  <label class="field"><span>Phone <b class="req">*</b></span><input id="qrEditPhone" type="text" required /></label>
+                  <label class="field"><span>Địa chỉ <b class="req">*</b></span><input id="qrEditAddress" type="text" required /></label>
+                </div>
+                <div class="grid">
                   <label class="field"><span>Facebook</span><input id="qrEditFb" type="url" /></label>
                   <label class="field"><span>Instagram</span><input id="qrEditIg" type="url" /></label>
                   <label class="field"><span>Yelp</span><input id="qrEditYelp" type="url" /></label>
                   <label class="field"><span>Google</span><input id="qrEditGg" type="url" /></label>
-                  <label class="field"><span>Homepage link</span><input id="qrHomeLink" type="url" placeholder="https://" /></label>
-                  <label class="field"><span>Menu link</span><input id="qrMenuLink" type="url" placeholder="https://" /></label>
+                </div>
+                <div class="grid">
                   <label class="field"><span>Google review link <em class="muted">(xóa trống = bỏ nút; #link_ = giữ nút)</em></span><input id="qrReviewGg" type="text" value="#link_gg_rv" placeholder="https://" /></label>
                   <label class="field"><span>Yelp review link <em class="muted">(xóa trống = bỏ nút; #link_ = giữ nút)</em></span><input id="qrReviewYelp" type="text" value="#link_yelp_rv" placeholder="https://" /></label>
+                </div>
+                <div class="grid">
+                  <label class="field"><span>Homepage link <b class="req">*</b></span><input id="qrHomeLink" type="url" placeholder="https://" required /></label>
+                  <label class="field"><span>Menu link <b class="req">*</b></span><input id="qrMenuLink" type="url" placeholder="https://" required /></label>
                 </div>
                 <p class="muted small">Sửa trực tiếp nếu data WPM chưa đúng.</p>
               </div>

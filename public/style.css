@@ -2114,3 +2114,4 @@ td.empty {
 
 .uipick-saved-dot:hover { transform: scale(1.1); }
 
+.field .req { color: var(--danger); font-weight: 700; }
