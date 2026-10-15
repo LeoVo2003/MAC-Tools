@@ -1977,24 +1977,10 @@ td.empty {
 .dash-alert--warn { background: var(--warning-soft); color: var(--warning-text); }
 .dash-alert--error { background: var(--danger-soft); color: var(--danger-text); }
 
-/* QR image field: upload hoặc URL */
-.field { display: flex; flex-direction: column; gap: var(--space-2); margin-bottom: var(--space-4); }
-.field > span { font-size: var(--text-sm); font-weight: 500; }
-.mt-2 { margin-top: var(--space-2); }
-
-/* QR form sections */
-.qr-section {
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  padding: var(--space-4);
-  margin: 0 0 var(--space-4);
-}
-.qr-section > legend {
-  font-size: var(--text-sm);
-  font-weight: 600;
-  padding: 0 var(--space-2);
-  color: var(--text-primary);
-}
-.qr-section .field:last-child { margin-bottom: 0; }
-.field--btn { flex-shrink: 0; }
-.field--btn > span { visibility: hidden; }
+/* QR form */
+.qr-fill-btn { flex-shrink: 0; align-self: flex-end; }
+.qr-url-input { margin-top: var(--space-2); }
+#qrForm { display: flex; flex-direction: column; gap: var(--space-4); }
+#qrForm .block { margin-bottom: 0; }
+#qrForm .block h3 { margin: 0 0 var(--space-1); font-size: var(--text-lg); }
+#qrForm .block > .muted { margin: 0 0 var(--space-4); }
