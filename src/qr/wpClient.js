@@ -21,6 +21,7 @@ export function clearWpCredentials() { overrideUser = ''; overridePass = ''; }
 function authHeader() {
   const user = overrideUser || getWpUser();
   const pass = overridePass || getWpAppPassword();
+  console.log(`[wp-auth] user="${user}" pass_len=${pass.length} override=${Boolean(overrideUser)}`);
   if (!user || !pass) {
     throw new Error('Thiếu QR_WP_USER hoặc QR_WP_APP_PASSWORD (nhập trên form hoặc .env)');
   }
