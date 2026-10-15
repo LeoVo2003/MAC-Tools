@@ -74,7 +74,11 @@ export async function wpUploadMedia(fileBuffer, filename, mimeType) {
       body: fileBuffer,
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(`Upload ${filename}: ${data?.message || `HTTP ${res.status}`}`);
+    if (!res.ok) {
+      console.log(`[upload-debug] url=${url} status=${res.status} buf_len=${fileBuffer?.length} mime=${mimeType}`);
+      console.log(`[upload-debug] response:`, JSON.stringify(data).slice(0, 500));
+      throw new Error(`Upload ${filename}: ${data?.message || `HTTP ${res.status}`}`);
+    }
     return { id: data.id, url: data.source_url };
   } finally {
     clearTimeout(timeout);
