@@ -115,22 +115,33 @@ export async function wpFindPageBySlug(slug) {
   return Array.isArray(pages) && pages.length ? pages[0] : null;
 }
 
-/** Tạo page mới */
+/** Tạo page mới (2 bước: tạo trống trước, rồi ghi Elementor data) */
 export async function wpCreatePage({ title, slug, elementorData }) {
-  return wpFetch('/wp/v2/pages', {
+  // Bước 1: tạo page trống
+  const page = await wpFetch('/wp/v2/pages', {
     method: 'POST',
-    body: {
-      title,
-      slug,
-      status: 'publish',
-      template: 'elementor_canvas',
-      meta: {
-        _elementor_data: JSON.stringify(elementorData),
-        _elementor_edit_mode: 'builder',
-        _elementor_template_type: 'wp-page',
-      },
-    },
+    body: { title, slug, status: 'draft', template: 'elementor_canvas' },
   });
+  if (!page?.id) throw new Error('Tạo page thất bại: không có ID');
+  // Bước 2: ghi Elementor data
+  const edJson = JSON.stringify(elementorData);
+  try {
+    await wpFetch(`/wp/v2/pages/${page.id}`, {
+      method: 'POST',
+      body: {
+        status: 'publish',
+        meta: {
+          _elementor_data: edJson,
+          _elementor_edit_mode: 'builder',
+          _elementor_template_type: 'wp-page',
+        },
+      },
+    });
+  } catch (e) {
+    // Nếu meta không expose, thử qua custom endpoint (nếu có mu-plugin)
+    throw new Error(`Ghi Elementor data thất bại (page #${page.id} đã tạo ở draft): ${e.message}`);
+  }
+  return { ...page, status: 'publish' };
 }
 
 /** Update page có sẵn (ghi đè) */
