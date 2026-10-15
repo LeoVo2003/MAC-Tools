@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import express from 'express';
+import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { exec } from 'child_process';
@@ -42,6 +43,17 @@ import { mountChromeLiveRoutes, attachChromeLiveWs, chromeLiveEnabled } from './
 import { dispatchLiveInput, listLiveSessions, getLiveSession, isFrameLiveMode } from './src/liveSession.js';
 import { clearLiveBrowsersForUser, takeLiveBrowser } from './src/liveBrowser.js';
 import { attachRealtime } from './src/realtime.js';
+import { generateQRPage } from './src/qr/qrGenerate.js';
+
+// Multer cho QR upload (memory storage, max 10MB/file)
+const qrUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 3 },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) cb(null, true);
+    else cb(new Error('Chỉ chấp nhận file ảnh'));
+  },
+});
 
 dotenv.config({ path: getEnvPath() });
 
@@ -305,6 +317,85 @@ export function createApp() {
   });
 
   /** Review Link: GET /api/review-link?url= — bọc tracking. */
+
+  /** QR Tool: POST /api/qr/generate (multipart: 3 ảnh + fields) */
+  app.post('/api/qr/generate', requireAuth, qrUpload.fields([
+    { name: 'qrLogo', maxCount: 1 },
+    { name: 'qrBg1', maxCount: 1 },
+    { name: 'qrBg2', maxCount: 1 },
+  ]), async (req, res) => {
+    const runId = startRun({
+      tool: 'qr',
+      userId: req.user.id,
+      toolUser: req.user.username,
+      wpmProjectUrl: req.body.qrWpmUrl || '',
+      jobId: `qr-${req.user.id}-${Date.now()}`,
+    });
+    const logs = [];
+    const onLog = (line) => {
+      logs.push(line);
+      broadcast('log', { line, jobId: `qr-${req.user.id}` }, { userId: req.user.id });
+    };
+    try {
+      const f = req.files || {};
+      const fileOf = (name) => {
+        const arr = f[name];
+        if (arr && arr[0]) return { buffer: arr[0].buffer, filename: arr[0].originalname, mimetype: arr[0].mimetype };
+        return null;
+      };
+      const files = {
+        logo: fileOf('qrLogo') || (req.body.qrLogoUrl?.trim() ? { url: req.body.qrLogoUrl.trim() } : null),
+        bg1: fileOf('qrBg1') || (req.body.qrBg1Url?.trim() ? { url: req.body.qrBg1Url.trim() } : null),
+        bg2: fileOf('qrBg2') || (req.body.qrBg2Url?.trim() ? { url: req.body.qrBg2Url.trim() } : null),
+      };
+      // Validate: mỗi ảnh cần file hoặc URL
+      for (const [k, v] of Object.entries(files)) {
+        if (!v) throw new Error(`Thiếu ảnh ${k}: upload file hoặc paste link`);
+      }
+
+      // WPM data: lấy từ fill-data trước (frontend đã gọi) hoặc từ body
+      // Tạm: nhận wpmData từ body (frontend gửi kèm sau khi fill)
+      let wpmData = {};
+      try { wpmData = JSON.parse(req.body.wpmData || '{}'); } catch {}
+      if (!wpmData.shopName && req.body.qrProjectName) {
+        wpmData.shopName = req.body.qrProjectName;
+      }
+
+      const inputs = {
+        primary: req.body.qrPrimary,
+        secondary: req.body.qrSecondary || '',
+        homeLink: req.body.qrHomeLink || '',
+        menuLink: req.body.qrMenuLink || '',
+        reviewGg: req.body.qrReviewGg || '',
+        reviewYelp: req.body.qrReviewYelp || '',
+        logoFilter: req.body.qrLogoFilter === 'on' || req.body.qrLogoFilter === 'true',
+      };
+
+      const result = await generateQRPage({
+        wpmData,
+        inputs,
+        files,
+        onLog,
+        force: req.body.force === '1' || req.body.force === 'true',
+      });
+
+      finishRun(runId, {
+        status: 'success',
+        result: { project: result.page?.slug || '', loginUrl: result.page?.url || '' },
+      });
+      res.json({ ok: true, ...result, logs });
+    } catch (err) {
+      const isSlugExists = err.code === 'SLUG_EXISTS';
+      finishRun(runId, { status: 'error', error: err.message });
+      res.status(isSlugExists ? 409 : 500).json({
+        ok: false,
+        error: err.message,
+        code: err.code || null,
+        existingPageId: err.existingPageId || null,
+        logs,
+      });
+    }
+  });
 
   app.post('/api/chrome-live/input', requireAuth, async (req, res) => {
     if (process.env.CHROME_LIVE !== 'true') {

@@ -364,9 +364,18 @@
               </label>
             </div>
             <div class="grid grid-3">
-              <label class="field"><span>Logo</span><input id="qrLogo" type="file" accept="image/*" required /></label>
-              <label class="field"><span>Background 3 section</span><input id="qrBg1" type="file" accept="image/*" required /></label>
-              <label class="field"><span>Hình bên trái form</span><input id="qrBg2" type="file" accept="image/*" required /></label>
+              <div class="field"><span>Logo <em class="muted">(upload hoặc paste link)</em></span>
+                <input id="qrLogo" type="file" accept="image/*" />
+                <input id="qrLogoUrl" type="url" placeholder="https://... (hoặc để trống nếu đã upload)" class="mt-2" />
+              </div>
+              <div class="field"><span>Background 3 section <em class="muted">(upload hoặc paste link)</em></span>
+                <input id="qrBg1" type="file" accept="image/*" />
+                <input id="qrBg1Url" type="url" placeholder="https://... (hoặc để trống nếu đã upload)" class="mt-2" />
+              </div>
+              <div class="field"><span>Hình bên trái form <em class="muted">(upload hoặc paste link)</em></span>
+                <input id="qrBg2" type="file" accept="image/*" />
+                <input id="qrBg2Url" type="url" placeholder="https://... (hoặc để trống nếu đã upload)" class="mt-2" />
+              </div>
             </div>
             <div class="grid">
               <label class="field"><span>Homepage link</span><input id="qrHomeLink" type="url" placeholder="https://" /></label>

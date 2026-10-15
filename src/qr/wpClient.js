@@ -1,0 +1,144 @@
+/**
+ * WordPress REST API client cho QR Tool → qr.macmarketing.us
+ * Auth: Application Password qua Basic Auth (từ env QR_WP_*).
+ */
+
+const WP_BASE = (process.env.QR_WP_BASE || 'https://qr.macmarketing.us').replace(/\/$/, '');
+const WP_USER = process.env.QR_WP_USER || '';
+const WP_APP_PASSWORD = process.env.QR_WP_APP_PASSWORD || '';
+
+function authHeader() {
+  if (!WP_USER || !WP_APP_PASSWORD) {
+    throw new Error('Thiếu QR_WP_USER hoặc QR_WP_APP_PASSWORD trong .env');
+  }
+  const token = Buffer.from(`${WP_USER}:${WP_APP_PASSWORD}`).toString('base64');
+  return `Basic ${token}`;
+}
+
+async function wpFetch(path, { method = 'GET', body = null, headers = {} } = {}) {
+  const url = `${WP_BASE}/wp-json${path}`;
+  const ctrl = new AbortController();
+  const timeout = setTimeout(() => ctrl.abort(), 30000);
+  try {
+    const res = await fetch(url, {
+      method,
+      signal: ctrl.signal,
+      headers: {
+        Authorization: authHeader(),
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: body ? JSON.stringify(body) : null,
+    });
+    const text = await res.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch { data = { _raw: text }; }
+    if (!res.ok) {
+      const msg = data?.message || data?.code || `HTTP ${res.status}`;
+      throw new Error(`WP API ${method} ${path}: ${msg}`);
+    }
+    return data;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/** Upload 1 file lên WP Media → { id, url } */
+export async function wpUploadMedia(fileBuffer, filename, mimeType) {
+  const url = `${WP_BASE}/wp-json/wp/v2/media`;
+  const ctrl = new AbortController();
+  const timeout = setTimeout(() => ctrl.abort(), 60000);
+  try {
+    // Dùng FormData của Node 18+
+    const form = new FormData();
+    const blob = new Blob([fileBuffer], { type: mimeType });
+    form.append('file', blob, filename);
+    const res = await fetch(url, {
+      method: 'POST',
+      signal: ctrl.signal,
+      headers: { Authorization: authHeader() },
+      body: form,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(`Upload ${filename}: ${data?.message || `HTTP ${res.status}`}`);
+    return { id: data.id, url: data.source_url };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/** Lấy _elementor_data của template (cần mu-plugin hoặc meta expose) */
+export async function wpGetElementorData(postId) {
+  // Thử qua custom endpoint của mu-plugin trước
+  try {
+    const data = await wpFetch(`/qr/v1/template/${postId}`);
+    if (data?.elementor_data) return data.elementor_data;
+  } catch { /* fallback */ }
+  // Fallback: REST pages với context=edit (cần meta được expose)
+  const page = await wpFetch(`/wp/v2/pages/${postId}?context=edit`);
+  const ed = page?.meta?._elementor_data;
+  if (ed) return typeof ed === 'string' ? JSON.parse(ed) : ed;
+  throw new Error(`Không lấy được _elementor_data của post ${postId}. Cần mu-plugin qr-template.`);
+}
+
+/** Tạo CF7 form → { id, title } */
+export async function wpCreateCF7Form({ title, form, mail }) {
+  const data = await wpFetch('/contact-form-7/v1/contact-forms', {
+    method: 'POST',
+    body: { title, form, mail },
+  });
+  if (!data?.id) throw new Error('Tạo CF7 form thất bại: không có ID trả về');
+  return { id: data.id, title: data.title || title };
+}
+
+/** Tìm page theo slug → page object hoặc null */
+export async function wpFindPageBySlug(slug) {
+  const pages = await wpFetch(`/wp/v2/pages?slug=${encodeURIComponent(slug)}`);
+  return Array.isArray(pages) && pages.length ? pages[0] : null;
+}
+
+/** Tạo page mới */
+export async function wpCreatePage({ title, slug, elementorData }) {
+  return wpFetch('/wp/v2/pages', {
+    method: 'POST',
+    body: {
+      title,
+      slug,
+      status: 'publish',
+      template: 'elementor_canvas',
+      meta: {
+        _elementor_data: JSON.stringify(elementorData),
+        _elementor_edit_mode: 'builder',
+        _elementor_template_type: 'wp-page',
+      },
+    },
+  });
+}
+
+/** Update page có sẵn (ghi đè) */
+export async function wpUpdatePage(pageId, { title, elementorData }) {
+  return wpFetch(`/wp/v2/pages/${pageId}`, {
+    method: 'POST',
+    body: {
+      title,
+      meta: {
+        _elementor_data: JSON.stringify(elementorData),
+        _elementor_edit_mode: 'builder',
+      },
+    },
+  });
+}
+
+/** Xóa cache Elementor CSS của page (force regenerate) */
+export async function wpRegenerateElementorCss(pageId) {
+  try {
+    // Xóa postmeta _elementor_css để Elementor regenerate lần view sau
+    await wpFetch(`/qr/v1/regenerate-css/${pageId}`, { method: 'POST' });
+  } catch {
+    // mu-plugin chưa có endpoint này thì bỏ qua, Elementor tự regenerate khi edit
+  }
+}
+
+export function wpConfigOk() {
+  return Boolean(WP_BASE && WP_USER && WP_APP_PASSWORD);
+}

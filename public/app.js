@@ -1619,8 +1619,87 @@ refreshSecondaryPreview();
 
 qrForm?.addEventListener('submit', async (e) => {
   e.preventDefault();
-  qrLog('QR backend chưa code — form UI xong, job chạy sẽ làm tiếp.');
-  setBadge(qrStatusBadge, 'warn', 'Chưa có backend');
+  const getVal = (id) => document.getElementById(id)?.value?.trim() || '';
+  const getFile = (id) => document.getElementById(id)?.files?.[0] || null;
+
+  // Validate: mỗi ảnh cần file hoặc URL
+  const images = [
+    ['logo', 'qrLogo', 'qrLogoUrl', 'Logo'],
+    ['bg1', 'qrBg1', 'qrBg1Url', 'Background'],
+    ['bg2', 'qrBg2', 'qrBg2Url', 'Hình form'],
+  ];
+  for (const [, fileId, urlId, label] of images) {
+    if (!getFile(fileId) && !getVal(urlId)) {
+      qrLog(`Thiếu ${label}: upload file hoặc paste link.`);
+      setBadge(qrStatusBadge, 'error', 'Thiếu ảnh');
+      return;
+    }
+  }
+
+  const fd = new FormData();
+  fd.append('qrWpmUrl', getVal('qrWpmUrl'));
+  fd.append('qrProjectName', getVal('qrProjectName'));
+  fd.append('qrPrimary', getVal('qrPrimary'));
+  fd.append('qrSecondary', getVal('qrSecondary'));
+  fd.append('qrHomeLink', getVal('qrHomeLink'));
+  fd.append('qrMenuLink', getVal('qrMenuLink'));
+  fd.append('qrReviewGg', getVal('qrReviewGg'));
+  fd.append('qrReviewYelp', getVal('qrReviewYelp'));
+  fd.append('qrLogoFilter', document.getElementById('qrLogoFilter')?.checked ? 'true' : 'false');
+  fd.append('qrLogoUrl', getVal('qrLogoUrl'));
+  fd.append('qrBg1Url', getVal('qrBg1Url'));
+  fd.append('qrBg2Url', getVal('qrBg2Url'));
+  // wpmData: lấy từ lần fill gần nhất (lưu ở window)
+  fd.append('wpmData', JSON.stringify(window.__qrWpmData || {}));
+  const logoFile = getFile('qrLogo'); if (logoFile) fd.append('qrLogo', logoFile);
+  const bg1File = getFile('qrBg1'); if (bg1File) fd.append('qrBg1', bg1File);
+  const bg2File = getFile('qrBg2'); if (bg2File) fd.append('qrBg2', bg2File);
+
+  qrLogBox.innerHTML = '';
+  setBadge(qrStatusBadge, 'running', 'Đang tạo...');
+  qrLog('Bắt đầu tạo QR page...');
+
+  try {
+    const res = await fetch('/api/qr/generate', { method: 'POST', body: fd, credentials: 'same-origin' });
+    const data = await res.json();
+    (data.logs || []).forEach((l) => qrLog(l));
+    if (!res.ok || !data.ok) {
+      if (data.code === 'SLUG_EXISTS') {
+        qrLog(`Slug đã tồn tại. Bấm "Ghi đè" để update page cũ.`);
+        setBadge(qrStatusBadge, 'warn', 'Slug trùng');
+        // Hiện nút ghi đè
+        if (!document.getElementById('qrForceBtn')) {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.id = 'qrForceBtn';
+          btn.className = 'btn btn-danger';
+          btn.textContent = 'Ghi đè page cũ';
+          btn.onclick = async () => {
+            fd.append('force', 'true');
+            btn.remove();
+            qrForm.dispatchEvent(new Event('submit', { cancelable: true }));
+          };
+          qrForm.querySelector('.actions').appendChild(btn);
+        }
+      } else {
+        throw new Error(data.error || 'Lỗi không xác định');
+      }
+      return;
+    }
+    setBadge(qrStatusBadge, 'done', 'Xong');
+    qrLog(`Hoàn tất: ${data.page?.url}`);
+    // Hiện kết quả
+    const panel = document.getElementById('qrResultPanel');
+    const outUrl = document.getElementById('qrOutUrl');
+    if (panel && outUrl && data.page?.url) {
+      outUrl.textContent = data.page.url;
+      outUrl.href = data.page.url;
+      panel.hidden = false;
+    }
+  } catch (err) {
+    qrLog('Lỗi: ' + err.message);
+    setBadge(qrStatusBadge, 'error', 'Lỗi');
+  }
 });
 
 /* ============ DASHBOARD ============ */
@@ -1933,4 +2012,56 @@ document.getElementById('dashPurge')?.addEventListener('click', async () => {
   const data = await res.json();
   alert(data.ok ? `Đã dọn ${data.deleted} dòng.` : (data.error || 'Lỗi'));
   loadDashboard();
+});
+
+/* QR Fill data */
+document.getElementById('qrFillBtn')?.addEventListener('click', async () => {
+  const urlInput = document.getElementById('qrWpmUrl');
+  const hint = document.getElementById('qrFillHint');
+  const btn = document.getElementById('qrFillBtn');
+  const wpmProjectUrl = (urlInput?.value || '').trim();
+  if (!wpmProjectUrl) {
+    if (hint) { hint.textContent = 'Nhập WPM Project URL trước.'; hint.className = 'hint hint--error'; }
+    return;
+  }
+  btn.disabled = true;
+  if (hint) { hint.textContent = 'Đang lấy data từ WPM...'; hint.className = 'hint hint--muted'; }
+  qrLog('Fill data từ WPM...');
+  try {
+    const res = await fetch('/api/fill-data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ wpmProjectUrl, webTargetMode: 'main' }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Fill thất bại');
+    // Lưu để dùng khi generate
+    window.__qrWpmData = {
+      shopName: data.shopName || '',
+      projectName: data.shopName || '',
+      address: data.address || '',
+      zip: data.zip || '',
+      phone: data.phone || '',
+      email: data.email || '',
+      websiteUrl: data.websiteUrl || '',
+      social: {
+        facebook: data.social?.facebook || data.fields?.facebook || '',
+        instagram: data.social?.instagram || data.fields?.instagram || '',
+        yelp: data.social?.yelp || data.fields?.yelp || '',
+        google: data.social?.google || data.fields?.google || '',
+      },
+    };
+    // Điền tên project
+    const nameInput = document.getElementById('qrProjectName');
+    if (nameInput && data.shopName) nameInput.value = data.zip ? `${data.zip} ${data.shopName}` : data.shopName;
+    (data.logs || []).forEach((l) => qrLog(l));
+    if (hint) { hint.textContent = `Đã lấy: ${data.shopName || 'OK'}`; hint.className = 'hint hint--ok'; }
+    qrLog('Fill xong.');
+  } catch (err) {
+    if (hint) { hint.textContent = err.message; hint.className = 'hint hint--error'; }
+    qrLog('Lỗi fill: ' + err.message);
+  } finally {
+    btn.disabled = false;
+  }
 });
