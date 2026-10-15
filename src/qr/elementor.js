@@ -184,7 +184,8 @@ export function replaceLogoInHeader(elements, logoMedia) {
   // Tìm element có css_id = 'custom-header'
   const findHeader = (arr) => {
     for (const el of arr) {
-      if (el.settings?.css_id === 'custom-header' || el.id === 'custom-header') return el;
+      const _cid = el.settings?.css_id || el.settings?._element_id || el.settings?._css_id;
+      if (_cid === 'custom-header' || el.id === 'custom-header') return el;
       if (Array.isArray(el.elements)) {
         const found = findHeader(el.elements);
         if (found) return found;
@@ -197,7 +198,7 @@ export function replaceLogoInHeader(elements, logoMedia) {
   walkElements([header], (el) => {
     if (replaced) return;
     const s = el.settings || {};
-    const cssId = String(s.css_id || s._css_id || '');
+    const cssId = String(s.css_id || s._element_id || s._css_id || '');
     const wt = String(el.widgetType || '').toLowerCase();
     // 1. Image widget có css_id = 'img-logo' → thay image id/url
     if (cssId === 'img-logo' && wt.includes('image')) {
