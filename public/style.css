@@ -1977,15 +1977,5 @@ td.empty {
 .dash-alert--warn { background: var(--warning-soft); color: var(--warning-text); }
 .dash-alert--error { background: var(--danger-soft); color: var(--danger-text); }
 
-/* QR form: 1 card, sections phân cách nhẹ */
-.qr-fill-btn { flex-shrink: 0; align-self: flex-end; }
+/* QR form */
 .qr-url-input { margin-top: var(--space-2); }
-.qr-h3 {
-  font-size: var(--text-md);
-  font-weight: 600;
-  margin: var(--space-6) 0 var(--space-3);
-  padding-top: var(--space-4);
-  border-top: 1px solid var(--border-subtle);
-}
-.qr-h3:first-of-type { margin-top: var(--space-4); }
-.qr-check { margin-top: var(--space-4); }

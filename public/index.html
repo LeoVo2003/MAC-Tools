@@ -338,64 +338,74 @@
 
         <!-- QR Tool -->
         <section id="tab-qr" hidden>
-          <form id="qrForm" class="block">
-            <h2>Tạo QR landing page</h2>
-            <p class="muted">Điền WPM URL → Fill data → upload 3 hình → bấm tạo.</p>
-
-            <div class="field-row">
-              <label class="field grow">
-                <span>WPM Project URL</span>
-                <input id="qrWpmUrl" name="qrWpmUrl" type="url" required placeholder="https://wpm.macusaone.com/projects/627/edit" />
-              </label>
-              <button type="button" id="qrFillBtn" class="btn btn-primary qr-fill-btn">Fill data</button>
+          <form class="block" id="qrForm">
+            <div class="section">
+              <h2>Tạo QR landing page</h2>
+              <div class="field-row">
+                <label class="field grow">
+                  <span>WPM Project URL</span>
+                  <input id="qrWpmUrl" name="qrWpmUrl" type="url" required placeholder="https://wpm.macusaone.com/projects/627/edit" />
+                </label>
+                <button type="button" id="qrFillBtn" class="btn btn-primary self-end">Fill data</button>
+              </div>
+              <p id="qrFillHint" class="hint hint--muted"></p>
+              <label class="field"><span>Tên project</span><input id="qrProjectName" type="text" readonly placeholder="Fill data sẽ tự lấy" /></label>
             </div>
-            <p id="qrFillHint" class="hint hint--muted"></p>
-            <label class="field"><span>Tên project</span><input id="qrProjectName" type="text" readonly placeholder="Fill data sẽ tự lấy" /></label>
 
-            <h3 class="qr-h3">Màu sắc</h3>
-            <div class="grid">
-              <label class="field"><span>Màu chính</span>
-                <div class="color-field">
-                  <input id="qrPrimary" type="text" value="#E31E24" placeholder="#E31E24" pattern="#[0-9a-fA-F]{6}" maxlength="7" required />
-                  <input id="qrPrimaryPicker" type="color" value="#E31E24" aria-label="Chọn màu chính" />
+            <div class="section">
+              <h2>Màu sắc</h2>
+              <div class="grid">
+                <label class="field"><span>Màu chính</span>
+                  <div class="color-field">
+                    <input id="qrPrimary" type="text" value="#E31E24" placeholder="#E31E24" pattern="#[0-9a-fA-F]{6}" maxlength="7" required />
+                    <input id="qrPrimaryPicker" type="color" value="#E31E24" aria-label="Chọn màu chính" />
+                  </div>
+                </label>
+                <label class="field"><span>Màu phụ <em class="muted">(trống = tự động darken 50%)</em></span>
+                  <div class="color-field">
+                    <input id="qrSecondary" type="text" value="" placeholder="Để trống = tự động" pattern="#[0-9a-fA-F]{6}" maxlength="7" />
+                    <input id="qrSecondaryPicker" type="color" value="#E31E24" aria-label="Chọn màu phụ" />
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <div class="section">
+              <h2>Hình ảnh</h2>
+              <p class="muted small">Mỗi hình: upload file hoặc paste link.</p>
+              <div class="grid grid-3">
+                <div class="field"><span>Logo</span>
+                  <input id="qrLogo" type="file" accept="image/*" />
+                  <input id="qrLogoUrl" type="url" placeholder="https://..." class="qr-url-input" />
                 </div>
-              </label>
-              <label class="field"><span>Màu phụ <em class="muted">(trống = tự động darken 50%)</em></span>
-                <div class="color-field">
-                  <input id="qrSecondary" type="text" value="" placeholder="Để trống = tự động" pattern="#[0-9a-fA-F]{6}" maxlength="7" />
-                  <input id="qrSecondaryPicker" type="color" value="#E31E24" aria-label="Chọn màu phụ" />
+                <div class="field"><span>Background 3 section</span>
+                  <input id="qrBg1" type="file" accept="image/*" />
+                  <input id="qrBg1Url" type="url" placeholder="https://..." class="qr-url-input" />
                 </div>
-              </label>
-            </div>
-
-            <h3 class="qr-h3">Hình ảnh <em class="muted">(mỗi hình: upload file hoặc paste link)</em></h3>
-            <div class="grid grid-3">
-              <div class="field"><span>Logo</span>
-                <input id="qrLogo" type="file" accept="image/*" />
-                <input id="qrLogoUrl" type="url" placeholder="https://..." class="qr-url-input" />
-              </div>
-              <div class="field"><span>Background 3 section</span>
-                <input id="qrBg1" type="file" accept="image/*" />
-                <input id="qrBg1Url" type="url" placeholder="https://..." class="qr-url-input" />
-              </div>
-              <div class="field"><span>Hình bên trái form</span>
-                <input id="qrBg2" type="file" accept="image/*" />
-                <input id="qrBg2Url" type="url" placeholder="https://..." class="qr-url-input" />
+                <div class="field"><span>Hình bên trái form</span>
+                  <input id="qrBg2" type="file" accept="image/*" />
+                  <input id="qrBg2Url" type="url" placeholder="https://..." class="qr-url-input" />
+                </div>
               </div>
             </div>
 
-            <h3 class="qr-h3">Links</h3>
-            <div class="grid">
-              <label class="field"><span>Homepage link</span><input id="qrHomeLink" type="url" placeholder="https://" /></label>
-              <label class="field"><span>Menu link</span><input id="qrMenuLink" type="url" placeholder="https://" /></label>
-              <label class="field"><span>Google review link <em class="muted">(trống = tự suy)</em></span><input id="qrReviewGg" type="text" value="#link_gg_rv" placeholder="https://" /></label>
-              <label class="field"><span>Yelp review link <em class="muted">(trống = tự suy)</em></span><input id="qrReviewYelp" type="text" value="#link_yelp_rv" placeholder="https://" /></label>
+            <div class="section">
+              <h2>Links</h2>
+              <div class="grid">
+                <label class="field"><span>Homepage link</span><input id="qrHomeLink" type="url" placeholder="https://" /></label>
+                <label class="field"><span>Menu link</span><input id="qrMenuLink" type="url" placeholder="https://" /></label>
+                <label class="field"><span>Google review link <em class="muted">(trống = tự suy)</em></span><input id="qrReviewGg" type="text" value="#link_gg_rv" placeholder="https://" /></label>
+                <label class="field"><span>Yelp review link <em class="muted">(trống = tự suy)</em></span><input id="qrReviewYelp" type="text" value="#link_yelp_rv" placeholder="https://" /></label>
+              </div>
             </div>
 
-            <label class="inline qr-check"><input type="checkbox" id="qrLogoFilter" checked /> Đảo màu logo (trắng)</label>
-            <div class="actions">
-              <button type="submit" id="qrRunBtn" class="btn btn-primary btn-lg">Tạo QR Page</button>
-              <span id="qrStatusBadge" class="badge" role="status" aria-live="polite">Idle</span>
+            <div class="section">
+              <h2>Tùy chọn</h2>
+              <label class="inline"><input type="checkbox" id="qrLogoFilter" checked /> Đảo màu logo (trắng)</label>
+              <div class="actions">
+                <button type="submit" id="qrRunBtn" class="btn btn-primary btn-lg">Tạo QR Page</button>
+                <span id="qrStatusBadge" class="badge" role="status" aria-live="polite">Idle</span>
+              </div>
             </div>
           </form>
           <section class="block">
