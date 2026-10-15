@@ -317,6 +317,12 @@ export function createApp() {
     }
   });
 
+  /** QR: check WP credentials đã cấu hình chưa (không lộ giá trị). */
+  app.get('/api/qr/wp-configured', requireAuth, (req, res) => {
+    const ok = Boolean(process.env.QR_WP_USER && process.env.QR_WP_APP_PASSWORD);
+    res.json({ configured: ok });
+  });
+
   /** Review Link: GET /api/review-link?url= — bọc tracking. */
 
   /** QR Tool: POST /api/qr/generate (multipart: 3 ảnh + fields) */
@@ -377,6 +383,12 @@ export function createApp() {
         return res.status(400).json({ error: `Thiếu field bắt buộc: ${missing.join(', ')}` });
       }
 
+      // Credentials từ form (nếu .env chưa có)
+      const { setWpCredentials, clearWpCredentials } = await import('./src/qr/wpClient.js');
+      if (req.body.qrWpUser && req.body.qrWpPass) {
+        setWpCredentials(req.body.qrWpUser, req.body.qrWpPass);
+      }
+      try {
       const inputs = {
         primary: req.body.qrPrimary,
         secondary: req.body.qrSecondary || '',
@@ -402,6 +414,9 @@ export function createApp() {
         result: { project: result.page?.slug || '', loginUrl: result.page?.url || '' },
       });
       res.json({ ok: true, ...result, logs });
+    } finally {
+      clearWpCredentials();
+    }
     } catch (err) {
       const isSlugExists = err.code === 'SLUG_EXISTS';
       finishRun(runId, { status: 'error', error: err.message });

@@ -3,20 +3,33 @@
  * Auth: Application Password qua Basic Auth (từ env QR_WP_*).
  */
 
-const WP_BASE = (process.env.QR_WP_BASE || 'https://qr.macmarketing.us').replace(/\/$/, '');
-const WP_USER = process.env.QR_WP_USER || '';
-const WP_APP_PASSWORD = process.env.QR_WP_APP_PASSWORD || '';
+// Đọc env lazy (dotenv.config chạy sau khi modules load)
+function getWpBase() {
+  return (process.env.QR_WP_BASE || 'https://qr.macmarketing.us').replace(/\/$/, '');
+}
+function getWpUser() { return process.env.QR_WP_USER || ''; }
+function getWpAppPassword() { return process.env.QR_WP_APP_PASSWORD || ''; }
+
+// Override từ form (nếu user nhập tay)
+let overrideUser = '', overridePass = '';
+export function setWpCredentials(user, pass) {
+  overrideUser = String(user || '').trim();
+  overridePass = String(pass || '').trim();
+}
+export function clearWpCredentials() { overrideUser = ''; overridePass = ''; }
 
 function authHeader() {
-  if (!WP_USER || !WP_APP_PASSWORD) {
-    throw new Error('Thiếu QR_WP_USER hoặc QR_WP_APP_PASSWORD trong .env');
+  const user = overrideUser || getWpUser();
+  const pass = overridePass || getWpAppPassword();
+  if (!user || !pass) {
+    throw new Error('Thiếu QR_WP_USER hoặc QR_WP_APP_PASSWORD (nhập trên form hoặc .env)');
   }
-  const token = Buffer.from(`${WP_USER}:${WP_APP_PASSWORD}`).toString('base64');
+  const token = Buffer.from(`${user}:${pass}`).toString('base64');
   return `Basic ${token}`;
 }
 
 async function wpFetch(path, { method = 'GET', body = null, headers = {} } = {}) {
-  const url = `${WP_BASE}/wp-json${path}`;
+  const url = `${getWpBase()}/wp-json${path}`;
   const ctrl = new AbortController();
   const timeout = setTimeout(() => ctrl.abort(), 30000);
   try {
@@ -140,5 +153,7 @@ export async function wpRegenerateElementorCss(pageId) {
 }
 
 export function wpConfigOk() {
-  return Boolean(WP_BASE && WP_USER && WP_APP_PASSWORD);
+  const user = overrideUser || getWpUser();
+  const pass = overridePass || getWpAppPassword();
+  return Boolean(getWpBase() && user && pass);
 }
