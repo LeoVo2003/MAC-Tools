@@ -1717,6 +1717,8 @@ export async function readProjectLocationData(page) {
     result.facebook = getSocial('Facebook');
     result.instagram = getSocial('Instagram');
     result.yelp = getSocial('Yelp');
+    // Google = Maps field (link Google Maps trong Project Information)
+    result.google = getSocial('Maps') || getValue(findField('Maps'));
 
     // Business Hours
     result.businessHours = getValue(findField('Business Hours'));

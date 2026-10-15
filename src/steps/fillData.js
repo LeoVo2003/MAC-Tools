@@ -313,8 +313,9 @@ export async function fillCustomerDataFromUrls(
         facebook: loc.facebook || '',
         instagram: loc.instagram || '',
         yelp: loc.yelp || '',
-        google: '',
+        google: loc.google || '',
       };
+      if (loc.google) log(`Google (Maps): ${loc.google}`);
       log('✓ Đủ data WPM cho QR — kiểm tra rồi Run.');
       return {
         ok: true,
