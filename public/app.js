@@ -2055,7 +2055,11 @@ document.getElementById('qrFillBtn')?.addEventListener('click', async () => {
     // Điền tên project
     const nameInput = document.getElementById('qrProjectName');
     if (nameInput && data.shopName) nameInput.value = data.zip ? `${data.zip} ${data.shopName}` : data.shopName;
-    (data.logs || []).forEach((l) => qrLog(l));
+    // QR chỉ hiện log liên quan, bỏ mấy dòng F Package (username/password/website)
+    const skipPatterns = [/username/i, /password/i, /main web/i, /website information/i, /mở website khách/i, /live/i];
+    (data.logs || []).forEach((l) => {
+      if (!skipPatterns.some((p) => p.test(l))) qrLog(l);
+    });
     if (hint) { hint.textContent = `Đã lấy: ${data.shopName || 'OK'}`; hint.className = 'hint hint--ok'; }
     qrLog('Fill xong.');
   } catch (err) {
