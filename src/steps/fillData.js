@@ -194,6 +194,7 @@ export async function fillCustomerDataFromUrls(
     liveSessionId,
     onScreencast,
     liveUserId,
+    qrOnly = false,
   },
   onLog = () => {}
 ) {
@@ -302,6 +303,33 @@ export async function fillCustomerDataFromUrls(
       }
     } catch (e) {
       log(`⚠ Không đọc được location panel: ${e.message}`);
+    }
+
+    // QR mode: chỉ cần data WPM, bỏ qua Website Information + quicklogin + scrape footer
+    if (qrOnly) {
+      const loc = locationData || {};
+      const finalPhone = loc.phones?.[0]?.number || '';
+      const social = {
+        facebook: loc.facebook || '',
+        instagram: loc.instagram || '',
+        yelp: loc.yelp || '',
+        google: '',
+      };
+      log('✓ Đủ data WPM cho QR — kiểm tra rồi Run.');
+      return {
+        ok: true,
+        shopName: loc.businessName || shopName,
+        zip: (wpmZip || '').replace(/\D/g, '').slice(0, 5),
+        email: loc.email || wpmEmail || '',
+        phone: finalPhone,
+        phones: loc.phones || [],
+        address: loc.address || '',
+        social,
+        businessHours: loc.businessHours || '',
+        website: loc.website || '',
+        warnings: [],
+        logs,
+      };
     }
 
     log(

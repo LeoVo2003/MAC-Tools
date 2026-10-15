@@ -284,6 +284,7 @@ export function createApp() {
           taskUrl,
           websiteUrl,
           webTargetMode,
+          qrOnly: body.qrOnly === true,
           wpmCredentials: { username: stored.username, password: stored.password },
           liveUserId: req.user.id,
           liveSessionId:

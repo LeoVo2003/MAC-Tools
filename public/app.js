@@ -2057,7 +2057,7 @@ document.getElementById('qrFillBtn')?.addEventListener('click', async () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
-      body: JSON.stringify({ wpmProjectUrl, webTargetMode: 'main' }),
+      body: JSON.stringify({ wpmProjectUrl, webTargetMode: 'main', qrOnly: true }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Fill thất bại');
