@@ -369,24 +369,16 @@
             <div class="section">
               <h2>Màu sắc</h2>
               <div class="grid">
-                <label class="field"><span>Màu chính</span>
+                <label class="field"><span>Màu chính <em class="muted">(hex 6 hoặc 8 ký tự, VD #E31E24CC)</em></span>
                   <div class="color-field">
-                    <input id="qrPrimary" type="text" value="#E31E24" placeholder="#E31E24" pattern="#[0-9a-fA-F]{6}" maxlength="7" required />
+                    <input id="qrPrimary" type="text" value="#E31E24" placeholder="#E31E24" pattern="#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?" maxlength="9" required />
                     <input id="qrPrimaryPicker" type="color" value="#E31E24" aria-label="Chọn màu chính" />
-                  </div>
-                  <div class="opacity-field">
-                    <span class="muted small">Opacity <b id="qrPrimaryOpVal">100%</b></span>
-                    <input id="qrPrimaryOp" type="range" min="10" max="100" value="100" aria-label="Opacity màu chính" />
                   </div>
                 </label>
                 <label class="field"><span>Màu phụ <em class="muted">(trống = tự động darken 50%)</em></span>
                   <div class="color-field">
-                    <input id="qrSecondary" type="text" value="" placeholder="Để trống = tự động" pattern="#[0-9a-fA-F]{6}" maxlength="7" />
+                    <input id="qrSecondary" type="text" value="" placeholder="Để trống = tự động" pattern="#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?" maxlength="9" />
                     <input id="qrSecondaryPicker" type="color" value="#E31E24" aria-label="Chọn màu phụ" />
-                  </div>
-                  <div class="opacity-field">
-                    <span class="muted small">Opacity <b id="qrSecondaryOpVal">100%</b></span>
-                    <input id="qrSecondaryOp" type="range" min="10" max="100" value="100" aria-label="Opacity màu phụ" />
                   </div>
                 </label>
               </div>

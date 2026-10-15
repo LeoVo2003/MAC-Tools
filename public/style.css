@@ -1979,7 +1979,3 @@ td.empty {
 
 /* QR form */
 .qr-url-input { margin-top: var(--space-2); }
-
-/* QR opacity slider */
-.opacity-field { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-2); }
-.opacity-field input[type="range"] { flex: 1; accent-color: var(--primary); }

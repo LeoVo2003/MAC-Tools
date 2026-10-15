@@ -363,9 +363,7 @@ export function createApp() {
 
       const inputs = {
         primary: req.body.qrPrimary,
-        primaryOp: Math.min(100, Math.max(10, Number(req.body.qrPrimaryOp) || 100)),
         secondary: req.body.qrSecondary || '',
-        secondaryOp: Math.min(100, Math.max(10, Number(req.body.qrSecondaryOp) || 100)),
         homeLink: req.body.qrHomeLink || '',
         menuLink: req.body.qrMenuLink || '',
         reviewGg: req.body.qrReviewGg || '',

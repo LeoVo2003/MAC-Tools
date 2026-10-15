@@ -35,15 +35,6 @@ const OLD_ATTACHMENTS = {
 };
 
 /** Darken hex 50% */
-/** Thêm opacity vào hex: #E31E24 + 80 → #E31E24CC */
-function hexWithOpacity(hex, opacityPct = 100) {
-  const m = /^#([0-9a-fA-F]{6})$/.exec(String(hex || '').trim());
-  if (!m) return hex;
-  if (opacityPct >= 100) return m[0].toUpperCase();
-  const alpha = Math.round((opacityPct / 100) * 255).toString(16).padStart(2, '0').toUpperCase();
-  return `#${m[1].toUpperCase()}${alpha}`;
-}
-
 function darkenHex(hex, pct = 50) {  const m = /^#([0-9a-fA-F]{6})$/.exec(String(hex || '').trim());
   if (!m) return '#000000';
   const n = parseInt(m[1], 16);
@@ -126,12 +117,11 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   if (!zip || !businessName) throw new Error('Thiếu ZIP hoặc tên tiệm từ WPM');
   const title = `${zip} ${businessName}`;
   const slug = `${zip}-${slugify(businessName)}`;
-  const primary = String(inputs.primary || '').trim();
-  if (!/^#[0-9a-fA-F]{6}$/.test(primary)) throw new Error('Màu chính không hợp lệ');
-  const secondaryRaw = inputs.secondary?.trim() || darkenHex(primary, 50);
-  // Áp opacity: hex 6 → hex 8
-  const primaryWithOp = hexWithOpacity(primary, inputs.primaryOp || 100);
-  const secondary = hexWithOpacity(secondaryRaw, inputs.secondaryOp || 100);
+  const primary = String(inputs.primary || '').trim().toUpperCase();
+  if (!/^#[0-9A-F]{6}([0-9A-F]{2})?$/.test(primary)) throw new Error('Màu chính không hợp lệ (hex 6 hoặc 8 ký tự)');
+  const secondaryRaw = inputs.secondary?.trim().toUpperCase() || darkenHex(primary.slice(0, 7), 50);
+  if (!/^#[0-9A-F]{6}([0-9A-F]{2})?$/.test(secondaryRaw)) throw new Error('Màu phụ không hợp lệ (hex 6 hoặc 8 ký tự)');
+  const secondary = secondaryRaw;
   step('validate', true, `${title} / ${slug}`);
 
   // 2. Check slug trùng
@@ -273,7 +263,7 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   ]);
   // Build CSS variables block để inject vào page
   const cssVars = {
-    '--qr-primary': primaryWithOp,
+    '--qr-primary': primary,
     '--qr-secondary': secondary,
     '--qr-logo-filter': inputs.logoFilter ? 'brightness(0) invert(1)' : 'none',
   };
