@@ -20,6 +20,7 @@ import {
   slugify,
   countElements,
 } from './elementor.js';
+import { installBridge, removeBridge } from './sftpBridge.js';
 
 const TEMPLATE_ID = Number(process.env.QR_TEMPLATE_ID) || 2806;
 
@@ -78,6 +79,18 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
     result.steps.push({ name, ok, detail });
     log(`${ok ? '✓' : '✗'} ${name}${detail ? ` — ${detail}` : ''}`);
   };
+
+  // 0. Cài mu-plugin tạm (tự xóa sau job)
+  let bridgeInstalled = false;
+  try {
+    bridgeInstalled = await installBridge(log);
+    // Đợi 1s để WP nhận plugin mới
+    if (bridgeInstalled) await new Promise((r) => setTimeout(r, 1000));
+  } catch (err) {
+    log(`[qr-bridge] Lỗi cài plugin: ${err.message} — tiếp tục với template cache.`);
+  }
+
+  try {
 
   // 1. Validate + chuẩn bị data
   const zip = String(wpmData.zip || '').trim();
@@ -247,4 +260,14 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   };
 
   return result;
+  } finally {
+    // Luôn xóa mu-plugin tạm sau job (dù thành công hay thất bại)
+    if (bridgeInstalled) {
+      try {
+        await removeBridge(log);
+      } catch (err) {
+        log(`[qr-bridge] Lỗi xóa plugin: ${err.message} — cần xóa tay: qr-bridge-temp.php`);
+      }
+    }
+  }
 }
