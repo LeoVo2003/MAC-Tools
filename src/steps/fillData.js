@@ -329,7 +329,6 @@ export async function fillCustomerDataFromUrls(
         businessHours: loc.businessHours || '',
         website: loc.website || '',
         warnings: [],
-        logs,
       };
     }
 
