@@ -383,9 +383,9 @@ export function createApp() {
         return res.status(400).json({ error: `Thiếu field bắt buộc: ${missing.join(', ')}` });
       }
 
-      // Credentials từ form (nếu .env chưa có)
-      const { setWpCredentials, clearWpCredentials } = await import('./src/qr/wpClient.js');
-      if (req.body.qrWpUser && req.body.qrWpPass) {
+      // Credentials từ form chỉ dùng khi .env chưa có
+      const { setWpCredentials, clearWpCredentials, wpConfigOk } = await import('./src/qr/wpClient.js');
+      if (!wpConfigOk() && req.body.qrWpUser && req.body.qrWpPass) {
         setWpCredentials(req.body.qrWpUser, req.body.qrWpPass);
       }
       try {
