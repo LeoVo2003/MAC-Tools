@@ -2183,6 +2183,10 @@ function UIPicker(swatchEl, textInput, opts = {}) {
         <div class="uipick-gstops"></div>
       </div>
       <div class="uipick-row"><input class="uipick-hex" spellcheck="false" /></div>
+      <div class="uipick-saved">
+        <div class="uipick-saved-head"><span>Saved</span><button type="button" class="uipick-saved-add">+ Add</button></div>
+        <div class="uipick-saved-row"></div>
+      </div>
     </div>
   `;
   const swatch = wrap.querySelector('.uipick-swatch');
@@ -2433,6 +2437,45 @@ function UIPicker(swatchEl, textInput, opts = {}) {
   pop.addEventListener('mousedown', (e) => e.stopPropagation());
   pop.addEventListener('click', (e) => e.stopPropagation());
   document.addEventListener('mousedown', (e) => { if (!wrap.contains(e.target)) pop.hidden = true; });
+
+  // Saved colors (localStorage)
+  const SAVED_KEY = 'uipick-saved-colors';
+  function getSaved() {
+    try { return JSON.parse(localStorage.getItem(SAVED_KEY) || '[]'); } catch { return []; }
+  }
+  function renderSaved() {
+    const row = pop.querySelector('.uipick-saved-row');
+    row.innerHTML = '';
+    // Default swatches
+    const defaults = ['#E31E24', '#FF6A2C', '#7F56D9', '#12B76A', '#2E90FA', '#F79009'];
+    const saved = getSaved();
+    [...defaults, ...saved].slice(0, 12).forEach((c) => {
+      const dot = document.createElement('button');
+      dot.type = 'button';
+      dot.className = 'uipick-saved-dot';
+      dot.style.background = c;
+      dot.title = c;
+      dot.addEventListener('click', (e) => { e.stopPropagation(); pickerSet(c); });
+      row.appendChild(dot);
+    });
+  }
+  function pickerSet(val) {
+    if (val.startsWith('linear-gradient') || val.startsWith('radial-gradient')) {
+      mode = 'gradient'; parseGradient(val); syncSolidToStop();
+    } else { const p = parseHex8(val); if (p) { mode = 'solid'; h = p.h; s = p.s; v = p.v; a = p.a; } }
+    render();
+  }
+  pop.querySelector('.uipick-saved-add').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const saved = getSaved();
+    const val = currentValue();
+    if (!saved.includes(val)) {
+      saved.push(val);
+      try { localStorage.setItem(SAVED_KEY, JSON.stringify(saved.slice(-6))); } catch {}
+      renderSaved();
+    }
+  });
+  renderSaved();
 
   this.set = (val) => {
     if (val.startsWith('linear-gradient') || val.startsWith('radial-gradient')) {
