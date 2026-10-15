@@ -2029,3 +2029,38 @@ td.empty {
   border: 1px solid var(--border-input); border-radius: var(--radius-control);
   background: var(--surface); color: var(--text); font-size: var(--text-sm);
 }
+
+/* Color picker: tabs + gradient */
+.uipick-tabs { display: flex; gap: var(--space-1); margin-bottom: var(--space-3); border-bottom: 1px solid var(--border-subtle); }
+.uipick-tabs button {
+  flex: 1; padding: var(--space-2); border: 0; background: none;
+  font-size: var(--text-sm); font-weight: 500; color: var(--text-muted);
+  cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.uipick-tabs button.on { color: var(--primary); border-bottom-color: var(--primary); }
+.uipick-gpreview { height: 120px; border-radius: var(--radius-sm); margin-bottom: var(--space-3); border: 1px solid var(--border-subtle); }
+.uipick-grow { display: flex; gap: var(--space-2); margin-bottom: var(--space-3); align-items: center; }
+.uipick-gtype {
+  flex: 1; height: 32px; padding: 0 var(--space-2);
+  border: 1px solid var(--border-input); border-radius: var(--radius-sm);
+  background: var(--surface); font-size: var(--text-sm);
+}
+.uipick-gbar { position: relative; height: 18px; border-radius: 9px; margin-bottom: var(--space-2); cursor: pointer; border: 1px solid var(--border-subtle); }
+.uipick-gbar-fill { position: absolute; inset: 0; border-radius: 9px; }
+.uipick-gstop {
+  position: absolute; top: 50%; width: 16px; height: 16px; border-radius: 50%;
+  border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.3);
+  transform: translate(-50%, -50%); cursor: ew-resize; z-index: 2;
+}
+.uipick-gstop.on { box-shadow: 0 0 0 2px var(--primary); }
+.uipick-gstops { display: flex; flex-direction: column; gap: 4px; margin-bottom: var(--space-3); max-height: 120px; overflow-y: auto; }
+.uipick-gstop-row {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: 4px var(--space-2); border-radius: var(--radius-sm);
+  font-size: var(--text-sm); cursor: pointer;
+}
+.uipick-gstop-row.on { background: var(--bg-subtle); }
+.uipick-gstop-dot { width: 16px; height: 16px; border-radius: 50%; border: 1px solid var(--border); flex: none; }
+.uipick-gstop-del { margin-left: auto; border: 0; background: none; font-size: 18px; cursor: pointer; color: var(--text-muted); line-height: 1; }
+.uipick-gstop-del:hover { color: var(--danger); }
+.uipick-pop { width: 264px; }

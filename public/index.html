@@ -369,15 +369,15 @@
             <div class="section">
               <h2>Màu sắc</h2>
               <div class="grid">
-                <label class="field"><span>Màu chính <em class="muted">(hex 6 hoặc 8 ký tự, VD #E31E24CC)</em></span>
+                <label class="field"><span>Màu chính <em class="muted">(hex hoặc gradient)</em></span>
                   <div class="color-field">
-                    <input id="qrPrimary" type="text" value="#E31E24" placeholder="#E31E24" pattern="#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?" maxlength="9" required />
+                    <input id="qrPrimary" type="text" value="#E31E24" placeholder="#E31E24" required />
                     <span id="qrPrimarySwatch"></span>
                   </div>
                 </label>
-                <label class="field"><span>Màu phụ <em class="muted">(trống = tự động darken 50%)</em></span>
+                <label class="field"><span>Màu phụ <em class="muted">(trống = tự động)</em></span>
                   <div class="color-field">
-                    <input id="qrSecondary" type="text" value="" placeholder="Để trống = tự động" pattern="#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?" maxlength="9" />
+                    <input id="qrSecondary" type="text" value="" placeholder="Để trống = tự động" />
                     <span id="qrSecondarySwatch"></span>
                   </div>
                 </label>

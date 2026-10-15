@@ -117,10 +117,17 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   if (!zip || !businessName) throw new Error('Thiếu ZIP hoặc tên tiệm từ WPM');
   const title = `${zip} ${businessName}`;
   const slug = `${zip}-${slugify(businessName)}`;
-  const primary = String(inputs.primary || '').trim().toUpperCase();
-  if (!/^#[0-9A-F]{6}([0-9A-F]{2})?$/.test(primary)) throw new Error('Màu chính không hợp lệ (hex 6 hoặc 8 ký tự)');
-  const secondaryRaw = inputs.secondary?.trim().toUpperCase() || darkenHex(primary.slice(0, 7), 50);
-  if (!/^#[0-9A-F]{6}([0-9A-F]{2})?$/.test(secondaryRaw)) throw new Error('Màu phụ không hợp lệ (hex 6 hoặc 8 ký tự)');
+  const primary = String(inputs.primary || '').trim();
+  const isHex = (v) => /^#[0-9A-F]{6}([0-9A-F]{2})?$/i.test(v);
+  const isGradient = (v) => /^(linear|radial)-gradient\(/i.test(v);
+  if (!isHex(primary) && !isGradient(primary)) throw new Error('Màu chính không hợp lệ (hex hoặc gradient)');
+  let secondaryRaw = inputs.secondary?.trim() || '';
+  if (!secondaryRaw) {
+    // Darken chỉ áp dụng cho hex; gradient thì dùng stop cuối
+    secondaryRaw = isHex(primary) ? darkenHex(primary.slice(0, 7), 50) : primary;
+  }
+  secondaryRaw = secondaryRaw.toUpperCase();
+  if (!isHex(secondaryRaw) && !isGradient(secondaryRaw)) throw new Error('Màu phụ không hợp lệ (hex hoặc gradient)');
   const secondary = secondaryRaw;
   step('validate', true, `${title} / ${slug}`);
 

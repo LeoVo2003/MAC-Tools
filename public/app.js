@@ -2132,46 +2132,74 @@ document.getElementById('qrFillBtn')?.addEventListener('click', async () => {
 });
 
 /* ============ Untitled UI-style Color Picker (vanilla) ============ */
+
+/* ============ Untitled UI-style Color Picker v2: Solid + Gradient ============ */
 function UIPicker(swatchEl, textInput, opts = {}) {
   const { onChange } = opts;
-  let h = 0, s = 100, v = 100, a = 1; // HSV + alpha
+  let mode = 'solid'; // 'solid' | 'gradient'
+  let h = 0, s = 100, v = 100, a = 1;
+  let gradType = 'linear';
+  let gradAngle = 110;
+  let stops = [ // { pos: 0-100, h, s, v, a }
+    { pos: 0, h: 0, s: 100, v: 100, a: 1 },
+    { pos: 100, h: 0, s: 100, v: 60, a: 1 },
+  ];
+  let activeStop = 0;
 
-  // Parse hex ban đầu
-  const initHex = (textInput?.value || '#E31E24').trim();
-  const parsed = parseHex8(initHex);
-  if (parsed) { h = parsed.h; s = parsed.s; v = parsed.v; a = parsed.a; }
+  const initVal = (textInput?.value || '#E31E24').trim();
+  if (initVal.startsWith('linear-gradient') || initVal.startsWith('radial-gradient')) {
+    mode = 'gradient';
+    parseGradient(initVal);
+  } else {
+    const p = parseHex8(initVal);
+    if (p) { h = p.h; s = p.s; v = p.v; a = p.a; }
+  }
 
-  // Tạo DOM
+  // DOM
   const wrap = document.createElement('div');
   wrap.className = 'uipick';
-  const swatch = document.createElement('button');
-  swatch.type = 'button';
-  swatch.className = 'uipick-swatch';
-  swatch.setAttribute('aria-label', 'Chọn màu');
-  const swatchFill = document.createElement('span');
-  swatch.appendChild(swatchFill);
-  const pop = document.createElement('div');
-  pop.className = 'uipick-pop';
-  pop.hidden = true;
-  pop.innerHTML = `
-    <div class="uipick-area"><div class="uipick-area-thumb"></div></div>
-    <div class="uipick-slider uipick-hue"><div class="uipick-slider-thumb"></div></div>
-    <div class="uipick-slider uipick-alpha"><div class="uipick-alpha-fill"></div><div class="uipick-slider-thumb"></div></div>
-    <div class="uipick-row"><input class="uipick-hex" spellcheck="false" maxlength="9" /></div>
+  wrap.innerHTML = `
+    <button type="button" class="uipick-swatch" aria-label="Chọn màu"><span></span></button>
+    <div class="uipick-pop" hidden>
+      <div class="uipick-tabs">
+        <button type="button" data-tab="solid" class="on">Solid</button>
+        <button type="button" data-tab="gradient">Gradient</button>
+      </div>
+      <div class="uipick-solid">
+        <div class="uipick-area"><div class="uipick-area-thumb"></div></div>
+        <div class="uipick-slider uipick-hue"><div class="uipick-slider-thumb"></div></div>
+        <div class="uipick-slider uipick-alpha"><div class="uipick-alpha-fill"></div><div class="uipick-slider-thumb"></div></div>
+      </div>
+      <div class="uipick-gradient" hidden>
+        <div class="uipick-gpreview"></div>
+        <div class="uipick-grow">
+          <select class="uipick-gtype">
+            <option value="linear">Linear</option>
+            <option value="radial">Radial</option>
+          </select>
+          <button type="button" class="uipick-gadd btn btn-sm">+ Add stop</button>
+        </div>
+        <div class="uipick-gbar"><div class="uipick-gbar-fill"></div></div>
+        <div class="uipick-gstops"></div>
+      </div>
+      <div class="uipick-row"><input class="uipick-hex" spellcheck="false" /></div>
+    </div>
   `;
-  wrap.appendChild(swatch);
-  wrap.appendChild(pop);
+  const swatch = wrap.querySelector('.uipick-swatch');
+  const swatchFill = swatch.querySelector('span');
+  const pop = wrap.querySelector('.uipick-pop');
   swatchEl.replaceWith(wrap);
 
-  const area = pop.querySelector('.uipick-area');
-  const areaThumb = pop.querySelector('.uipick-area-thumb');
-  const hueSlider = pop.querySelector('.uipick-hue');
-  const hueThumb = hueSlider.querySelector('.uipick-slider-thumb');
-  const alphaSlider = pop.querySelector('.uipick-alpha');
-  const alphaFill = pop.querySelector('.uipick-alpha-fill');
-  const alphaThumb = alphaSlider.querySelector('.uipick-slider-thumb');
-  const hexInput = pop.querySelector('.uipick-hex');
+  const $ = (s) => pop.querySelector(s);
+  const solidPane = $('.uipick-solid'), gradPane = $('.uipick-gradient');
+  const area = $('.uipick-area'), areaThumb = $('.uipick-area-thumb');
+  const hueSlider = $('.uipick-hue'), hueThumb = hueSlider.querySelector('.uipick-slider-thumb');
+  const alphaSlider = $('.uipick-alpha'), alphaFill = $('.uipick-alpha-fill'), alphaThumb = alphaSlider.querySelector('.uipick-slider-thumb');
+  const hexInput = $('.uipick-hex');
+  const gpreview = $('.uipick-gpreview'), gbar = $('.uipick-gbar'), gbarFill = $('.uipick-gbar-fill');
+  const gstopsEl = $('.uipick-gstops'), gtypeSel = $('.uipick-gtype');
 
+  // --- Color utils ---
   function hsvToRgb(h, s, v) {
     s /= 100; v /= 100;
     const c = v * s, x = c * (1 - Math.abs(((h / 60) % 2) - 1)), m = v - c;
@@ -2195,85 +2223,224 @@ function UIPicker(swatchEl, textInput, opts = {}) {
     }
     return { h: hh, s: max ? (d / max) * 100 : 0, v: max * 100 };
   }
-  function toHex8() {
+  function hsvaToCss(h, s, v, a) {
     const [r, g, b] = hsvToRgb(h, s, v);
-    const hex = '#' + [r, g, b].map((x) => x.toString(16).padStart(2, '0')).join('').toUpperCase();
-    if (a >= 1) return hex;
-    return hex + Math.round(a * 255).toString(16).padStart(2, '0').toUpperCase();
+    return a >= 1 ? `rgb(${r},${g},${b})` : `rgba(${r},${g},${b},${a.toFixed(2)})`;
+  }
+  function hsvaToHex(h, s, v, a) {
+    const [r, g, b] = hsvToRgb(h, s, v);
+    let hex = '#' + [r, g, b].map((x) => x.toString(16).padStart(2, '0')).join('').toUpperCase();
+    if (a < 1) hex += Math.round(a * 255).toString(16).padStart(2, '0').toUpperCase();
+    return hex;
   }
   function parseHex8(hex) {
     const m = /^#([0-9a-fA-F]{6})([0-9a-fA-F]{2})?$/.exec(hex.trim());
     if (!m) return null;
     const r = parseInt(m[1].slice(0, 2), 16), g = parseInt(m[1].slice(2, 4), 16), b = parseInt(m[1].slice(4, 6), 16);
-    const alpha = m[2] ? parseInt(m[2], 16) / 255 : 1;
-    const hsv = rgbToHsv(r, g, b);
-    return { ...hsv, a: alpha };
+    return { ...rgbToHsv(r, g, b), a: m[2] ? parseInt(m[2], 16) / 255 : 1 };
+  }
+  function parseGradient(str) {
+    // Đơn giản: linear-gradient(110deg, rgb(...) 0%, rgb(...) 100%)
+    const m = str.match(/(linear|radial)-gradient\(([^)]+)\)/);
+    if (!m) return;
+    gradType = m[1];
+    const parts = m[2].split(/,(?![^(]*\))/);
+    let startIdx = 0;
+    const degM = parts[0].match(/(\d+)deg/);
+    if (degM) { gradAngle = Number(degM[1]); startIdx = 1; }
+    stops = [];
+    for (let i = startIdx; i < parts.length; i++) {
+      const pm = parts[i].trim().match(/(rgba?\([^)]+\)|#[0-9a-fA-F]{6,8})\s*(\d+)?%/);
+      if (!pm) continue;
+      const color = pm[1], pos = pm[2] ? Number(pm[2]) : (i === startIdx ? 0 : 100);
+      let hsv = { h: 0, s: 0, v: 0 }, alpha = 1;
+      if (color.startsWith('#')) { const p = parseHex8(color); if (p) { hsv = p; alpha = p.a; } }
+      else {
+        const cm = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
+        if (cm) { hsv = rgbToHsv(+cm[1], +cm[2], +cm[3]); alpha = cm[4] ? Number(cm[4]) : 1; }
+      }
+      stops.push({ pos, h: hsv.h, s: hsv.s, v: hsv.v, a: alpha });
+    }
+    if (!stops.length) stops = [{ pos: 0, h: 0, s: 100, v: 100, a: 1 }, { pos: 100, h: 0, s: 100, v: 60, a: 1 }];
+    stops.sort((a, b) => a.pos - b.pos);
+  }
+  function gradientCss() {
+    const sorted = [...stops].sort((a, b) => a.pos - b.pos);
+    const parts = sorted.map((st) => `${hsvaToCss(st.h, st.s, st.v, st.a)} ${Math.round(st.pos)}%`);
+    return gradType === 'linear'
+      ? `linear-gradient(${gradAngle}deg, ${parts.join(', ')})`
+      : `radial-gradient(circle, ${parts.join(', ')})`;
+  }
+
+  function currentValue() {
+    return mode === 'solid' ? hsvaToHex(h, s, v, a) : gradientCss();
   }
 
   function render() {
-    const [r, g, b] = hsvToRgb(h, s, v);
-    const rgb = `rgb(${r},${g},${b})`;
-    const hex8 = toHex8();
+    // Tabs
+    pop.querySelectorAll('.uipick-tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === mode));
+    solidPane.hidden = mode !== 'solid';
+    gradPane.hidden = mode !== 'gradient';
+
+    const val = currentValue();
     // Swatch
-    swatchFill.style.background = a < 1 ? `rgba(${r},${g},${b},${a})` : rgb;
-    // Area background: hue + white/black gradients
-    area.style.background = `linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, hsl(${h},100%,50%))`;
-    areaThumb.style.left = s + '%';
-    areaThumb.style.top = (100 - v) + '%';
-    areaThumb.style.background = rgb;
-    // Hue thumb
-    hueThumb.style.left = (h / 360 * 100) + '%';
-    // Alpha
-    alphaFill.style.background = `linear-gradient(to right, rgba(${r},${g},${b},0), rgba(${r},${g},${b},1))`;
-    alphaThumb.style.left = (a * 100) + '%';
-    // Hex input
-    hexInput.value = hex8;
-    // Sync text input ngoài
-    if (textInput && textInput.value.toUpperCase() !== hex8) {
-      textInput.value = hex8;
+    swatchFill.style.background = mode === 'solid' ? hsvaToCss(h, s, v, a) : gradientCss();
+
+    if (mode === 'solid') {
+      const [r, g, b] = hsvToRgb(h, s, v);
+      const rgb = `rgb(${r},${g},${b})`;
+      area.style.background = `linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, hsl(${h},100%,50%))`;
+      areaThumb.style.left = s + '%'; areaThumb.style.top = (100 - v) + '%'; areaThumb.style.background = rgb;
+      hueThumb.style.left = (h / 360 * 100) + '%';
+      alphaFill.style.background = `linear-gradient(to right, rgba(${r},${g},${b},0), rgba(${r},${g},${b},1))`;
+      alphaThumb.style.left = (a * 100) + '%';
+    } else {
+      const css = gradientCss();
+      gpreview.style.background = css;
+      gbarFill.style.background = css;
+      renderStops();
+    }
+
+    hexInput.value = val;
+    if (textInput && textInput.value !== val) {
+      textInput.value = val;
       textInput.dispatchEvent(new Event('input', { bubbles: true }));
     }
-    onChange?.(hex8);
+    onChange?.(val);
   }
 
+  function renderStops() {
+    // Vẽ thumbs trên bar
+    gbar.querySelectorAll('.uipick-gstop').forEach((e) => e.remove());
+    const sorted = [...stops].sort((a, b) => a.pos - b.pos);
+    sorted.forEach((st) => {
+      const idx = stops.indexOf(st);
+      const thumb = document.createElement('div');
+      thumb.className = 'uipick-gstop' + (idx === activeStop ? ' on' : '');
+      thumb.style.left = st.pos + '%';
+      thumb.style.background = hsvaToCss(st.h, st.s, st.v, st.a);
+      thumb.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        activeStop = idx;
+        syncSolidToStop();
+        render();
+        // Drag stop
+        const move = (ev) => {
+          const rect = gbar.getBoundingClientRect();
+          st.pos = Math.min(100, Math.max(0, ((ev.clientX - rect.left) / rect.width) * 100));
+          render();
+        };
+        const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
+        document.addEventListener('mousemove', move);
+        document.addEventListener('mouseup', up);
+      });
+      gbar.appendChild(thumb);
+    });
+    // List stops để xóa
+    gstopsEl.innerHTML = '';
+    sorted.forEach((st) => {
+      const idx = stops.indexOf(st);
+      const row = document.createElement('div');
+      row.className = 'uipick-gstop-row' + (idx === activeStop ? ' on' : '');
+      row.innerHTML = `<span class="uipick-gstop-dot" style="background:${hsvaToCss(st.h, st.s, st.v, st.a)}"></span>
+        <span>${Math.round(st.pos)}%</span>
+        ${stops.length > 2 ? '<button type="button" class="uipick-gstop-del" aria-label="Xóa">×</button>' : ''}`;
+      row.querySelector('.uipick-gstop-dot')?.addEventListener('click', () => { activeStop = idx; syncSolidToStop(); render(); });
+      row.querySelector('.uipick-gstop-del')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        stops.splice(idx, 1);
+        activeStop = Math.min(activeStop, stops.length - 1);
+        syncSolidToStop(); render();
+      });
+      gstopsEl.appendChild(row);
+    });
+  }
+
+  function syncSolidToStop() {
+    const st = stops[activeStop];
+    if (st) { h = st.h; s = st.s; v = st.v; a = st.a; }
+  }
+  function syncStopToSolid() {
+    const st = stops[activeStop];
+    if (st) { st.h = h; st.s = s; st.v = v; st.a = a; }
+  }
+
+  // Drag helper — KHÔNG đóng popup khi kéo
   function drag(el, fn) {
-    const move = (e) => {
-      const rect = el.getBoundingClientRect();
-      const x = Math.min(1, Math.max(0, ((e.clientX ?? e.touches?.[0]?.clientX) - rect.left) / rect.width));
-      const y = Math.min(1, Math.max(0, ((e.clientY ?? e.touches?.[0]?.clientY) - rect.top) / rect.height));
-      fn(x, y);
-      render();
-    };
-    const down = (e) => {
-      e.preventDefault();
+    el.addEventListener('mousedown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const move = (ev) => {
+        const rect = el.getBoundingClientRect();
+        const x = Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width));
+        const y = Math.min(1, Math.max(0, (ev.clientY - rect.top) / rect.height));
+        fn(x, y);
+        if (mode === 'gradient') syncStopToSolid();
+        render();
+      };
       move(e);
       const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
       document.addEventListener('mousemove', move);
       document.addEventListener('mouseup', up);
-    };
-    el.addEventListener('mousedown', down);
+    });
   }
 
   drag(area, (x, y) => { s = x * 100; v = (1 - y) * 100; });
   drag(hueSlider, (x) => { h = x * 360; });
   drag(alphaSlider, (x) => { a = x; });
+
   hexInput.addEventListener('input', () => {
-    const p = parseHex8(hexInput.value);
-    if (p) { h = p.h; s = p.s; v = p.v; a = p.a; render(); }
+    const v = hexInput.value.trim();
+    if (v.startsWith('linear-gradient') || v.startsWith('radial-gradient')) {
+      mode = 'gradient'; parseGradient(v); syncSolidToStop(); render();
+    } else {
+      const p = parseHex8(v);
+      if (p) { mode = 'solid'; h = p.h; s = p.s; v = p.v; a = p.a; render(); }
+    }
   });
 
-  // Toggle popup
-  swatch.addEventListener('click', (e) => {
+  // Tabs
+  pop.querySelectorAll('.uipick-tabs button').forEach((b) => {
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      mode = b.dataset.tab;
+      if (mode === 'gradient') syncStopToSolid();
+      render();
+    });
+  });
+  gtypeSel.addEventListener('change', () => { gradType = gtypeSel.value; render(); });
+  pop.querySelector('.uipick-gadd').addEventListener('click', (e) => {
     e.stopPropagation();
-    pop.hidden = !pop.hidden;
+    if (stops.length >= 5) return;
+    const st = stops[activeStop] || stops[0];
+    stops.push({ pos: 50, h: st.h, s: st.s, v: st.v, a: st.a });
+    activeStop = stops.length - 1;
+    render();
   });
-  document.addEventListener('click', (e) => {
-    if (!wrap.contains(e.target)) pop.hidden = true;
+  // Click vào bar để thêm stop
+  gbar.addEventListener('dblclick', (e) => {
+    if (e.target.closest('.uipick-gstop')) return;
+    if (stops.length >= 5) return;
+    const rect = gbar.getBoundingClientRect();
+    const pos = ((e.clientX - rect.left) / rect.width) * 100;
+    const st = stops[activeStop] || stops[0];
+    stops.push({ pos, h: st.h, s: st.s, v: st.v, a: st.a });
+    activeStop = stops.length - 1;
+    render();
   });
 
-  // API
-  this.set = (hex) => { const p = parseHex8(hex); if (p) { h = p.h; s = p.s; v = p.v; a = p.a; render(); } };
-  this.get = () => toHex8();
+  // Toggle popup — giữ mở khi tương tác bên trong
+  swatch.addEventListener('click', (e) => { e.stopPropagation(); pop.hidden = !pop.hidden; });
+  pop.addEventListener('mousedown', (e) => e.stopPropagation());
+  pop.addEventListener('click', (e) => e.stopPropagation());
+  document.addEventListener('mousedown', (e) => { if (!wrap.contains(e.target)) pop.hidden = true; });
+
+  this.set = (val) => {
+    if (val.startsWith('linear-gradient') || val.startsWith('radial-gradient')) {
+      mode = 'gradient'; parseGradient(val); syncSolidToStop();
+    } else { const p = parseHex8(val); if (p) { mode = 'solid'; h = p.h; s = p.s; v = p.v; a = p.a; } }
+    render();
+  };
+  this.get = () => currentValue();
 
   render();
   return this;
