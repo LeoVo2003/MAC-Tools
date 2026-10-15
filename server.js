@@ -399,6 +399,7 @@ export function createApp() {
         tiktok: req.body.qrTiktok || '',
         youtube: req.body.qrYoutube || '',
         logoFilter: req.body.qrLogoFilter === 'on' || req.body.qrLogoFilter === 'true',
+        skipCf7: req.body.qrSkipCf7 === '1' || req.body.qrSkipCf7 === 'true',
       };
 
       const result = await generateQRPage({

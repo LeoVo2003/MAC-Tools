@@ -1666,6 +1666,7 @@ qrForm?.addEventListener('submit', async (e) => {
   }
   fd.append('qrTiktok', getVal('qrEditTiktok'));
   fd.append('qrYoutube', getVal('qrEditYoutube'));
+  if (document.getElementById('qrSkipCf7')?.checked) fd.append('qrSkipCf7', '1');
 
   fd.append('qrLogoFilter', document.getElementById('qrLogoFilter')?.checked ? 'true' : 'false');
   fd.append('qrLogoUrl', getVal('qrLogoUrl'));

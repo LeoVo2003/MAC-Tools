@@ -209,21 +209,26 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
     socialLinks[key] = (url && url.startsWith('http')) ? url : `#link_${tag}`;
   }
 
-  // 5. Tạo CF7 form
-  const cf7Title = title;
-  const shopEmail = wpmData.email || '';
-  const cf7Form = await wpCreateCF7Form({
-    title: cf7Title,
-    form: `[text* your-name placeholder "Your name*"]\n[tel* your-phone placeholder "Phone*"]\n[email your-email placeholder "Email"]\n[textarea your-message placeholder "Your message (optional)"]\n[submit "Submit"]`,
-    mail: {
-      to: shopEmail,
-      subject: 'Customer Service Review ([your-name])',
-      body: `From: [your-name]\nEmail: [your-email]\nPhone: [your-phone]\n\nMessage: [your-message]\n\n-----------------------------------------------------------\nThis e-mail was sent from a contact form on [_site_title] ([_url])`,
-      exclude_blank: 'on',
-    },
-  });
-  step('cf7', true, `form #${cf7Form.id}`);
-  result.cf7 = cf7Form;
+  // 5. Tạo CF7 form (bỏ qua nếu skipCf7 — vd PHP cũ chưa chạy CF7 mới)
+  let cf7Form = null;
+  if (!inputs.skipCf7) {
+    const cf7Title = title;
+    const shopEmail = wpmData.email || '';
+    cf7Form = await wpCreateCF7Form({
+      title: cf7Title,
+      form: `[text* your-name placeholder "Your name*"]\n[tel* your-phone placeholder "Phone*"]\n[email your-email placeholder "Email"]\n[textarea your-message placeholder "Your message (optional)"]\n[submit "Submit"]`,
+      mail: {
+        to: shopEmail,
+        subject: 'Customer Service Review ([your-name])',
+        body: `From: [your-name]\nEmail: [your-email]\nPhone: [your-phone]\n\nMessage: [your-message]\n\n-----------------------------------------------------------\nThis e-mail was sent from a contact form on [_site_title] ([_url])`,
+        exclude_blank: 'on',
+      },
+    });
+    step('cf7', true, `form #${cf7Form.id}`);
+    result.cf7 = cf7Form;
+  } else {
+    step('cf7', true, 'bỏ qua (skipCf7)');
+  }
 
   // 6. Lấy template Elementor
   const templateData = await wpGetElementorData(TEMPLATE_ID);
@@ -281,9 +286,11 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   step('replace-colors', true, `${colorCount} chỗ, primary=${primary}, secondary=${secondary}`);
   step('css-variables', cssOk, cssOk ? 'đã thay trong widget' : 'không tìm thấy widget CSS');
 
-  // 7d. Rebind CF7
-  const cf7Count = rebindCF7(elements, cf7Form.id);
-  step('rebind-cf7', true, `${cf7Count} widget`);
+  // 7d. Rebind CF7 (nếu có form)
+  if (cf7Form) {
+    const cf7Count = rebindCF7(elements, cf7Form.id);
+    step('rebind-cf7', true, `${cf7Count} widget`);
+  }
 
   // 7e. Xóa nút review nếu user xóa trống ô input
   let removedGg = 0, removedYelp = 0;
