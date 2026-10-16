@@ -280,8 +280,8 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   ]);
   step('replace-media', true, `${mediaCount} chỗ`);
 
-  // 7a2. Logo: img duy nhất trong #custom-header
-  const logoOk = replaceLogoInHeader(elements, { id: logoMedia.id, url: logoMedia.url });
+  // 7a2. Logo: img trong #custom-header + link về homepage
+  const logoOk = replaceLogoInHeader(elements, { id: logoMedia.id, url: logoMedia.url }, inputs.homeLink || '');
   step('replace-logo', logoOk, logoOk ? `logo #${logoMedia.id}` : 'không tìm thấy #custom-header');
 
   // 7b. Tokens text (hiển thị đầy đủ: tên, zip, mail, phone, địa chỉ, social)

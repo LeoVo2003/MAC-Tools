@@ -210,13 +210,15 @@ export function removeReviewCta(elements, platform) {
 }
 
 /**
- * Tìm và thay logo: HTML widget duy nhất bên trong #custom-header (template 2806).
- * Thay src của <img> trong HTML code.
+ * Tìm và thay logo: Image widget #img-logo trong #custom-header (template mới),
+ * hoặc <img> trong HTML widget (template cũ).
+ * Thay image id/url + set link logo về homepage.
  * @param {Array} elements
  * @param {{id:number, url:string}} logoMedia
+ * @param {string} homeLink - link homepage, có thì set cho logo
  * @returns {boolean} có thay được không
  */
-export function replaceLogoInHeader(elements, logoMedia) {
+export function replaceLogoInHeader(elements, logoMedia, homeLink = '') {
   let replaced = false;
   // Tìm element có css_id = 'custom-header'
   const findHeader = (arr) => {
@@ -232,18 +234,25 @@ export function replaceLogoInHeader(elements, logoMedia) {
   };
   const header = findHeader(elements);
   if (!header) return false;
+  // Set link cho image widget: s.link = { url }
+  const setImageLink = (s) => {
+    if (!homeLink) return;
+    const cur = (s.link && typeof s.link === 'object' && !Array.isArray(s.link)) ? s.link : {};
+    s.link = { ...cur, url: homeLink };
+  };
   walkElements([header], (el) => {
     if (replaced) return;
     const s = el.settings || {};
     const cssId = String(s.css_id || s._element_id || s._css_id || '');
     const wt = String(el.widgetType || '').toLowerCase();
-    // 1. Image widget có css_id = 'img-logo' → thay image id/url
+    // 1. Image widget có css_id = 'img-logo' → thay image id/url + link home
     if (cssId === 'img-logo' && wt.includes('image')) {
       if (s.image) {
         s.image.id = logoMedia.id;
         s.image.url = logoMedia.url;
-        replaced = true;
       }
+      setImageLink(s);
+      replaced = true;
       return;
     }
     // 2. HTML widget → thay src của <img>
