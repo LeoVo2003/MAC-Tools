@@ -430,9 +430,16 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
     const body = await res.text();
     const hasCritical = /critical error/i.test(body);
     const hasNewForm = cf7Form ? body.includes(`wpcf7-f${cf7Form.id}`) : true;
-    const hasPlaceholder = /\{\{/.test(body);
-    const hasPrimaryVar = body.includes(`--qr-primary: ${primary}`) || body.includes(`--qr-primary:${primary}`);
-    const verifyOk = res.ok && !hasCritical && hasNewForm && !hasPlaceholder && hasPrimaryVar;
+    // (3.3 fix) Chỉ check các token CỦA TOOL, không quét {{} chung cả page
+    // (script/plugin khác có thể chứa {{} gây false-negative)
+    const ourTokens = Object.keys(tokens);
+    const leftoverToken = ourTokens.find((tk) => body.includes(tk));
+    // (3.3 fix) So sánh màu không phân biệt hoa/thường, chịu được minify
+    // (bỏ space, rút gọn #RRGGBBAA → vẫn match phần đầu)
+    const primaryHex = String(primary).slice(0, 7).toLowerCase();
+    const primaryVarRe = new RegExp(`--qr-primary\\s*:\\s*${primaryHex.replace('#', '#?')}`, 'i');
+    const hasPrimaryVar = primaryVarRe.test(body);
+    const verifyOk = res.ok && !hasCritical && hasNewForm && !leftoverToken && hasPrimaryVar;
     if (verifyOk) {
       step('verify', true, `HTTP ${res.status}, form #${cf7Form?.id || 'n/a'} OK`);
       result.verified = true;  // (2.4)
@@ -456,10 +463,12 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
       if (!res.ok) reasons.push(`HTTP ${res.status}`);
       if (hasCritical) reasons.push('critical error');
       if (!hasNewForm) reasons.push(`thiếu form wpcf7-f${cf7Form?.id}`);
-      if (hasPlaceholder) reasons.push('còn placeholder {{}}');
+      if (leftoverToken) reasons.push(`còn token ${leftoverToken}`);
       if (!hasPrimaryVar) reasons.push('thiếu --qr-primary');
       step('verify', false, reasons.join(', ') + ' (xem [php] log)');
       result.verified = false;  // (2.4)
+      // (3.3 fix) Verify fail → ném lỗi để trigger rollback (không để page lỗi live)
+      throw new Error(`Verify thất bại: ${reasons.join(', ')}`);
     }
   } catch (err) {
     step('verify', false, err.message);
