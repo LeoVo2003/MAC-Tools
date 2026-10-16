@@ -159,15 +159,16 @@ function deriveThemeColors(primary, secondary) {
     '--qr-text-on-soft': yiqSoft > 128 ? '#141414' : '#FFFFFF',
   };
   // Màu chữ trên nút primary/secondary (tính theo YIQ của từng màu)
+  // Ngưỡng 150 thay vì 128: xám vừa (#989898) nhìn tối nên dùng chữ trắng cho dễ đọc
   const yiqOf = (hex) => {
     const mm = /^#([0-9a-fA-F]{6})/.exec(String(hex || '').trim());
     if (!mm) return 255;
     const nn = parseInt(mm[1], 16);
     return (((nn >> 16) & 255) * 299 + (((nn >> 8) & 255) * 587) + ((nn & 255) * 114)) / 1000;
   };
-  result['--qr-text-on-primary'] = yiqOf(primary) > 128 ? '#141414' : '#FFFFFF';
+  result['--qr-text-on-primary'] = yiqOf(primary) > 150 ? '#141414' : '#FFFFFF';
   if (secondary) {
-    result['--qr-text-on-secondary'] = yiqOf(secondary) > 128 ? '#141414' : '#FFFFFF';
+    result['--qr-text-on-secondary'] = yiqOf(secondary) > 150 ? '#141414' : '#FFFFFF';
   }
   return result;
 }
