@@ -17,7 +17,7 @@ import {
   getWpBase,
 } from './wpClient.js';
 import {
-  replaceMedia,
+  replaceBackgroundsByRole,
   replaceTokens,
   replaceColors,
   replaceLogoInHeader,
@@ -32,12 +32,10 @@ import { installBridge, removeBridge } from './sftpBridge.js';
 
 function getTemplateId() { return Number(process.env.QR_TEMPLATE_ID) || 2806; }
 
-// Mapping attachment cũ trong template (đã chốt với user 2026-10-15)
-const OLD_ATTACHMENTS = {
-  bgSections: { id: 9508, url: 'https://quan.macmarketing.us/wp-content/uploads/2026/10/324-nprod-1-1-hori-cc-beige-brown.jpg' },
-  formLeft: { id: 9509, url: 'https://quan.macmarketing.us/wp-content/uploads/2026/10/595-nhm-1-1-hori-cc-white-pink.jpg' },
-  // 9507 (placeholder) và 9510 (dưới form): giữ nguyên
-};
+// Background giữ nguyên (theo css_id) — bổ sung khi user báo.
+// (Trước đây keep theo attachment ID 9507/9510 của template cũ;
+//  template rebuild đổi ID nên chuyển sang map theo vai trò.)
+const KEEP_BACKGROUND_CSS_IDS = [];
 
 /** Darken hex 50% (giữ nguyên alpha nếu là #RRGGBBAA) */
 function darkenHex(hex, pct = 50) {  const m = /^#([0-9a-fA-F]{6})([0-9a-fA-F]{2})?$/.exec(String(hex || '').trim());
@@ -297,15 +295,16 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
 
   // 8. Replace trên data của page
 
-  // 7a. Media (bg sections + hình form)
-  // Mapping dùng oldId/oldUrl (khớp với signature của replaceMedia).
-  // LƯU Ý: không spread trực tiếp OLD_ATTACHMENTS vì key của nó là id/url,
-  // sẽ làm m.oldId/m.oldUrl thành undefined → match nhầm mọi array/object.
-  const mediaCount = replaceMedia(elements, [
-    { oldId: OLD_ATTACHMENTS.bgSections.id, oldUrl: OLD_ATTACHMENTS.bgSections.url, newId: bg1Media.id, newUrl: bg1Media.url },
-    { oldId: OLD_ATTACHMENTS.formLeft.id, oldUrl: OLD_ATTACHMENTS.formLeft.url, newId: bg2Media.id, newUrl: bg2Media.url },
-  ]);
-  step('replace-media', true, `${mediaCount} chỗ`);
+  // 7a. Background images theo vai trò (không hardcode attachment ID):
+  // left-form → bg2 (hình form), các background còn lại → bg1.
+  const bgRes = replaceBackgroundsByRole(
+    elements,
+    { id: bg1Media.id, url: bg1Media.url },
+    { id: bg2Media.id, url: bg2Media.url },
+    KEEP_BACKGROUND_CSS_IDS,
+  );
+  step('replace-media', true, `${bgRes.count} chỗ`);
+  for (const d of bgRes.details) log(`[qr] bg: ${d}`);
 
   // 7a2. Logo: img trong #custom-header + link về homepage
   const logoOk = replaceLogoInHeader(elements, { id: logoMedia.id, url: logoMedia.url }, inputs.homeLink || '');

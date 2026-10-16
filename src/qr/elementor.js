@@ -62,6 +62,43 @@ export function replaceMedia(elements, mappings) {
 }
 
 /**
+ * Replace background images theo VAI TRÒ (không hardcode attachment ID,
+ * vì template rebuild là ID đổi).
+ * - Element có css_id 'left-form' → bg2 (hình form).
+ * - Các background_image còn lại → bg1 (background chung).
+ * - Bỏ qua css_id trong keepCssIds.
+ * @param {Array} elements
+ * @param {{id:number, url:string}} bg1Media
+ * @param {{id:number, url:string}} bg2Media
+ * @param {string[]} keepCssIds - css_id của element giữ nguyên background
+ * @returns {{count:number, details:string[]}}
+ */
+export function replaceBackgroundsByRole(elements, bg1Media, bg2Media, keepCssIds = []) {
+  let count = 0;
+  const details = [];
+  const keep = new Set(keepCssIds);
+  walkElements(elements, (el) => {
+    const s = el.settings || {};
+    if (!s || typeof s !== 'object' || Array.isArray(s)) return;
+    const bg = s.background_image;
+    if (!isImageObject(bg)) return;
+    const cssId = String(s.css_id || s._element_id || s._css_id || el.id || '');
+    if (keep.has(cssId)) {
+      details.push(`giữ ${cssId || el.id} (#${bg.id})`);
+      return;
+    }
+    const isForm = cssId === 'left-form';
+    const target = isForm ? bg2Media : bg1Media;
+    // Bỏ qua nếu đã đúng ảnh mới (tránh replace vòng)
+    if (bg.id === target.id || bg.url === target.url) return;
+    s.background_image = { ...bg, id: target.id, url: target.url };
+    count++;
+    details.push(`${cssId || el.id}: #${bg.id} → #${target.id}${isForm ? ' (bg2/form)' : ' (bg1)'}`);
+  });
+  return { count, details };
+}
+
+/**
  * Replace text tokens: {{ten}}, {{dia_chi}}, v.v.
  * Đệ quy vào mọi string trong settings (kể cả repeater rows như
  * social_icon_list, icon_list) — bản cũ chỉ check cấp đầu nên miss.
