@@ -236,8 +236,9 @@ export function replaceThemeCssImages(elements, bg2Media) {
 export function patchButtonWeight(elements, weight = 700) {
   let patched = false;
   // Patch font-weight + màu chữ trên nút (dùng biến --qr-text-on-primary/secondary
-  // do tool tính, đảm bảo contrast với màu nền nút)
-  const override = `\n/* TOOL PATCH: nút có font-weight + màu chữ đúng contrast */\n.btn-m a, .btn-s a, .btn-s .wpcf7-submit { font-weight: ${weight} !important; }\n.btn-m a { color: var(--qr-text-on-primary, #141414) !important; }\n.btn-s a, .btn-s .wpcf7-submit { color: var(--qr-text-on-secondary, #141414) !important; }\n`;
+  // do tool tính, đảm bảo contrast với màu nền nút).
+  // Cover cả HTML .btn-m/.btn-s lẫn Elementor Button widget.
+  const override = `\n/* TOOL PATCH: nút có font-weight + màu chữ đúng contrast */\n.btn-m a, .btn-s a, .btn-s .wpcf7-submit { font-weight: ${weight} !important; }\n.btn-m a { color: var(--qr-text-on-primary, #141414) !important; }\n.btn-s a, .btn-s .wpcf7-submit { color: var(--qr-text-on-secondary, #141414) !important; }\n.elementor-button-link { color: var(--qr-text-on-primary, #141414) !important; }\n.back-btn a, .btn-back a, a.back-btn, [class*=\"back\"] a { color: var(--qr-text-on-secondary, #FFFFFF) !important; }\n`;
   walkElements(elements, (el) => {
     if (patched) return;
     const wt = String(el.widgetType || '').toLowerCase();
@@ -246,10 +247,14 @@ export function patchButtonWeight(elements, weight = 700) {
       for (const key of ['html', 'custom_html']) {
         const val = s[key];
         if (typeof val === 'string' && val.includes('.btn-m a') && val.includes('</style>')) {
-          if (val.includes('TOOL PATCH: nút có font-weight')) {
-            patched = true; // đã patch rồi
+          // Nếu đã có patch màu chữ mới thì thôi
+          if (val.includes('--qr-text-on-primary')) {
+            patched = true;
           } else {
-            s[key] = val.replace('</style>', `${override}</style>`);
+            // Xóa patch cũ (nếu có) rồi thêm patch mới
+            let newVal = val.replace(/\/\* TOOL PATCH: nút có font-weight \*\/[\s\S]*?\.btn-s \.wpcf7-submit \{[^}]+\}\n/, '');
+            newVal = newVal.replace('</style>', `${override}</style>`);
+            s[key] = newVal;
             patched = true;
           }
           break;
