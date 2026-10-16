@@ -1716,6 +1716,8 @@ qrForm?.addEventListener('submit', async (e) => {
   fd.append('qrLogoUrl', getVal('qrLogoUrl'));
   fd.append('qrBg1Url', getVal('qrBg1Url'));
   fd.append('qrBg2Url', getVal('qrBg2Url'));
+  // Flag ghi đè (được set bởi nút "Ghi đè page cũ")
+  if (window._qrForceOverwrite) fd.append('force', 'true');
   // wpmData: lấy từ lần fill gần nhất (lưu ở window)
   // Đọc data từ ô edit (user có thể sửa sau fill)
   const getEdit = (id) => document.getElementById(id)?.value?.trim() || '';
@@ -1758,8 +1760,9 @@ qrForm?.addEventListener('submit', async (e) => {
           btn.className = 'btn btn-danger';
           btn.textContent = 'Ghi đè page cũ';
           btn.onclick = async () => {
-            fd.append('force', 'true');
+            window._qrForceOverwrite = true;
             btn.remove();
+            setBadge(qrStatusBadge, 'running', 'Đang ghi đè...');
             qrForm.dispatchEvent(new Event('submit', { cancelable: true }));
           };
           qrForm.querySelector('.actions').appendChild(btn);
@@ -1770,6 +1773,7 @@ qrForm?.addEventListener('submit', async (e) => {
       return;
     }
     setBadge(qrStatusBadge, 'done', 'Xong');
+    window._qrForceOverwrite = false; // reset flag ghi đè
     qrLog(`Hoàn tất: ${data.page?.url}`);
     // Hiện kết quả
     const panel = document.getElementById('qrResultPanel');
