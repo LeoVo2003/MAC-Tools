@@ -697,13 +697,16 @@
   }
 
   function open(target) {
+    console.log('[QR-CP] open() called, input:', target.input.id);
     S.target = target;
     loadFromValue(target.input.value);
     render();
     // Popup absolute trong .color-field bọc quanh input+swatch (không fullscreen)
     const wrap = target.input.closest('.color-field');
+    console.log('[QR-CP] wrap found:', !!wrap);
     if (wrap && pop.parentElement !== wrap) wrap.appendChild(pop);
     pop.hidden = false;
+    console.log('[QR-CP] popup shown, hidden =', pop.hidden);
   }
   function close() {
     pop.hidden = true;
@@ -754,8 +757,10 @@
   /* ================= Public API ================= */
   window.QrColorPicker = {
     attach(inputId, swatchId, opts = {}) {
+      console.log('[QR-CP] attach called:', inputId, swatchId);
       const input = document.getElementById(inputId);
       const swatch = document.getElementById(swatchId);
+      console.log('[QR-CP] input found:', !!input, 'swatch found:', !!swatch);
       if (!input || !swatch) return null;
       const target = { input, swatch, onChange: opts.onChange };
       // Vẽ swatch theo giá trị hiện tại (trống → checkerboard)
@@ -764,14 +769,14 @@
       swatch.setAttribute('role', 'button');
       swatch.setAttribute('tabindex', '0');
       swatch.setAttribute('aria-label', 'Mở bảng chọn màu');
-      const doOpen = (e) => { e.preventDefault(); open(target); };
+      const doOpen = (e) => { e.preventDefault(); console.log('[QR-CP] swatch clicked:', swatch.id); open(target); };
       swatch.addEventListener('click', doOpen);
       swatch.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') doOpen(e);
       });
       // Click vào input cũng mở picker (thay vì gõ tay); vẫn cho phép gõ tay bằng cách focus rồi gõ?
       // → Mở picker khi click, user vẫn gõ được khi picker đóng vì input không readonly.
-      input.addEventListener('click', () => open(target));
+      input.addEventListener('click', () => { console.log('[QR-CP] input clicked:', input.id); open(target); });
       // Gõ tay → cập nhật swatch
       input.addEventListener('input', () => paintSwatch(swatch, input.value.trim()));
       return {
