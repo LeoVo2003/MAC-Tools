@@ -1649,12 +1649,6 @@ document.getElementById('qrPrimary')?.addEventListener('input', fetchPalettePrev
 document.getElementById('qrSecondary')?.addEventListener('input', fetchPalettePreview);
 fetchPalettePreview();
 
-// Ẩn/hiện ô WP credentials theo .env
-fetch('/api/qr/wp-configured', { credentials: 'same-origin' })
-  .then((r) => r.json())
-  .then((d) => { document.getElementById('qrWpCreds').hidden = !!d.configured; })
-  .catch(() => {});
-
 qrForm?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const getVal = (id) => document.getElementById(id)?.value?.trim() || '';
@@ -1727,10 +1721,6 @@ qrForm?.addEventListener('submit', async (e) => {
   fd.append('qrMenuLink', getVal('qrMenuLink'));
   fd.append('qrReviewGg', getVal('qrReviewGg'));
   fd.append('qrReviewYelp', getVal('qrReviewYelp'));
-  if (!document.getElementById('qrWpCreds').hidden) {
-    fd.append('qrWpUser', getVal('qrWpUser'));
-    fd.append('qrWpPass', getVal('qrWpPass'));
-  }
   fd.append('qrTiktok', getVal('qrEditTiktok'));
   fd.append('qrYoutube', getVal('qrEditYoutube'));
   if (document.getElementById('qrSkipCf7')?.checked) fd.append('qrSkipCf7', '1');
