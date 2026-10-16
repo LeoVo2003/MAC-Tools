@@ -1575,16 +1575,30 @@ function qrLog(line) {
 }
 
 /* Sync text hex <-> color picker */
-function darkenHex(hex, pct) {
-  const m = /^#([0-9a-fA-F]{6})$/.exec(hex.trim());
+// Tự sinh màu phụ: tối → lighten 50%, sáng → darken 50% (khớp backend)
+function contrastShadeHex(hex, pct) {
+  const m = /^#([0-9a-fA-F]{6})([0-9a-fA-F]{2})?$/i.exec(hex.trim());
   if (!m) return null;
   const n = parseInt(m[1], 16);
-  const f = (1 - pct / 100);
-  const r = Math.round(((n >> 16) & 255) * f);
-  const g = Math.round(((n >> 8) & 255) * f);
-  const b = Math.round((n & 255) * f);
-  return '#' + [r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('').toUpperCase();
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  const alpha = m[2] ? m[2].toUpperCase() : '';
+  const yiq = (r * 299 + g * 587 + b * 114) / 1000;
+  const f = pct / 100;
+  let nr, ng, nb;
+  if (yiq < 128) {
+    nr = Math.round(r + (255 - r) * f);
+    ng = Math.round(g + (255 - g) * f);
+    nb = Math.round(b + (255 - b) * f);
+  } else {
+    nr = Math.round(r * (1 - f));
+    ng = Math.round(g * (1 - f));
+    nb = Math.round(b * (1 - f));
+  }
+  const hx = (v) => Math.max(0, Math.min(255, v)).toString(16).padStart(2, '0');
+  return ('#' + hx(nr) + hx(ng) + hx(nb)).toUpperCase() + alpha;
 }
+// Giữ tên cũ để không vỡ chỗ gọi khác (nếu có)
+function darkenHex(hex, pct) { return contrastShadeHex(hex, pct); }
 function syncColorPair(textId, pickerId, onPrimaryChange) {
   const text = document.getElementById(textId);
   const picker = document.getElementById(pickerId);
@@ -1602,14 +1616,14 @@ function syncColorPair(textId, pickerId, onPrimaryChange) {
     }
   });
 }
-// Màu phụ trống → preview = darken 50% từ màu chính
+// Màu phụ trống → preview = lighten/darken 50% từ màu chính (khớp backend)
 let qrPrimaryPicker, qrSecondaryPicker;
 function refreshSecondaryPreview() {
   const primary = document.getElementById('qrPrimary')?.value.trim() || '';
   const secText = document.getElementById('qrSecondary');
   if (!secText) return;
   if (!secText.value.trim()) {
-    const derived = darkenHex(primary.slice(0, 7), 50);
+    const derived = contrastShadeHex(primary, 50);
     if (derived && qrSecondaryPicker) qrSecondaryPicker.set(derived);
   }
 }
