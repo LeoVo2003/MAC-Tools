@@ -538,6 +538,7 @@ export function replaceCssVariables(elements, variables) {
 }
 export function slugify(text) {
   return String(text || '')
+    .replace(/đ/g, 'd').replace(/Đ/g, 'd')  // đ/Đ không có dạng tổ hợp NFD (2.17)
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()

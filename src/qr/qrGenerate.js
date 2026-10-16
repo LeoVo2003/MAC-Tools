@@ -513,7 +513,9 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   const cssVarsBlock = buildCssVariablesBlock(cssVars);
   const cssOk = replaceCssVariables(elements, cssVars);
   step('replace-colors', true, `${colorCount} chỗ, primary=${primary}, secondary=${secondary}`);
-  step('css-variables', cssOk, cssOk ? 'đã thay trong widget' : 'không tìm thấy widget CSS');
+  // (2.12) Nếu không thay được biến CSS, DỪNG để tránh publish page mất màu
+  if (!cssOk) throw new Error('Không tìm thấy khối :root có --qr-primary trong template — dừng để tránh publish page mất màu');
+  step('css-variables', cssOk, 'đã thay trong widget');
 
   // 7d. Rebind CF7 (nếu có form)
   if (cf7Form) {

@@ -49,7 +49,10 @@ async function wpFetch(path, { method = 'GET', body = null, headers = {} } = {})
     try { data = text ? JSON.parse(text) : null; } catch { data = { _raw: text }; }
     if (!res.ok) {
       const msg = data?.message || data?.code || `HTTP ${res.status}`;
-      throw new Error(`WP API ${method} ${path}: ${msg}`);
+      const err = new Error(`WP API ${method} ${path}: ${msg}`);
+      err.status = res.status;  // (2.5) để check status code thay vì regex message
+      err.data = data;
+      throw err;
     }
     return data;
   } finally {
@@ -164,7 +167,8 @@ export async function wpDeleteCF7Form(id) {
 
 /** Tìm page theo slug → page object hoặc null */
 export async function wpFindPageBySlug(slug) {
-  const pages = await wpFetch(`/wp/v2/pages?slug=${encodeURIComponent(slug)}`);
+  // Bao gồm draft/pending/private để phát hiện page dở dang từ lần chạy lỗi (2.1)
+  const pages = await wpFetch(`/wp/v2/pages?slug=${encodeURIComponent(slug)}&status=publish,draft,pending,private`);
   return Array.isArray(pages) && pages.length ? pages[0] : null;
 }
 
@@ -209,15 +213,18 @@ export async function wpPublishPage(pageId) {
     if (res?.ok) return { id: pageId, link: res.link };
     throw new Error(res?.error || 'Publish thất bại');
   } catch (err) {
-    // Snippet chưa update (404) → fallback publish qua REST
-    if (/HTTP 404/.test(err.message)) {
+    // Snippet chưa update (404) → fallback publish qua REST (2.5: check err.status)
+    if (err.status === 404) {
       return wpFetch(`/wp/v2/pages/${pageId}`, { method: 'POST', body: { status: 'publish' } });
     }
-    // Đọc fatal message thật từ server (nếu có)
+    // Đọc fatal log thật từ server (2.5: thay last-fatal bằng error-log)
     try {
-      const f = await wpFetch('/qr/v1/last-fatal');
-      if (f?.fatal) throw new Error(`Publish critical error: ${f.fatal}`);
-    } catch { /* bỏ qua */ }
+      const log = await wpGetErrorLog();
+      if (log) throw new Error(`Publish critical error. PHP log:\n${log}`);
+    } catch (e) {
+      if (e.message.startsWith('Publish critical error')) throw e;
+      // bỏ qua lỗi đọc log
+    }
     throw err;
   }
 }
