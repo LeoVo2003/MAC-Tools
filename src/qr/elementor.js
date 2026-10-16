@@ -84,7 +84,7 @@ function containsFormWidget(el) {
  * @param {string[]} keepCssIds - css_id của element giữ nguyên background
  * @returns {{count:number, details:string[]}}
  */
-export function replaceBackgroundsByRole(elements, bg1Media, bg2Media, keepCssIds = []) {
+export function replaceBackgroundsByRole(elements, bg1Media, bg2Media, keepCssIds = [], keepUrls = []) {
   let count = 0;
   const details = [];
   const keep = new Set(keepCssIds);
@@ -101,8 +101,15 @@ export function replaceBackgroundsByRole(elements, bg1Media, bg2Media, keepCssId
     }
     const bg = s.background_image;
     if (!isImageObject(bg)) return;
+    // Giữ nguyên nếu URL nằm trong keep-list
+    if (keepUrls.some((u) => bg.url.includes(u))) {
+      details.push(`giữ ${cssId || el.id} (${bg.url.split('/').pop()})`);
+      if (isForm) formBgSet = true; // đã có ảnh form (dù là giữ nguyên) → không set mới
+      return;
+    }
     if (keep.has(cssId)) {
       details.push(`giữ ${cssId || el.id} (#${bg.id})`);
+      if (isForm) formBgSet = true;
       return;
     }
     const target = isForm ? bg2Media : bg1Media;

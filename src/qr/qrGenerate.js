@@ -39,6 +39,11 @@ function getTemplateId() { return Number(process.env.QR_TEMPLATE_ID) || 2806; }
 //  template rebuild đổi ID nên chuyển sang map theo vai trò.)
 const KEEP_BACKGROUND_CSS_IDS = [];
 
+// URL ảnh giữ nguyên (không replace dù ở element nào)
+const KEEP_BACKGROUND_URLS = [
+  '303-bg-1-1-hori-cc-beige-brown.jpg', // user chốt 2026-10-16: giữ nguyên
+];
+
 /** Darken hex 50% (giữ nguyên alpha nếu là #RRGGBBAA) */
 function darkenHex(hex, pct = 50) {  const m = /^#([0-9a-fA-F]{6})([0-9a-fA-F]{2})?$/.exec(String(hex || '').trim());
   if (!m) return '#000000';
@@ -304,6 +309,7 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
     { id: bg1Media.id, url: bg1Media.url },
     { id: bg2Media.id, url: bg2Media.url },
     KEEP_BACKGROUND_CSS_IDS,
+    KEEP_BACKGROUND_URLS,
   );
   step('replace-media', true, `${bgRes.count} chỗ`);
   for (const d of bgRes.details) log(`[qr] bg: ${d}`);
