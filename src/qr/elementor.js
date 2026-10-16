@@ -185,6 +185,43 @@ export function replaceCustomCssImages(elements, bg1Media, bg2Media, keepCssIds 
 }
 
 /**
+ * Replace ảnh placeholder trong <style> của theme HTML widget.
+ * Xử lý trường hợp #left-form::before { background-image: url(...) } hardcode
+ * trong CSS theme (không nằm trong custom_css của element).
+ * @param {Array} elements
+ * @param {{id:number, url:string}} bg2Media - ảnh form
+ * @returns {{count:number, details:string[]}}
+ */
+export function replaceThemeCssImages(elements, bg2Media) {
+  let count = 0;
+  const details = [];
+  walkElements(elements, (el) => {
+    const wt = String(el.widgetType || '').toLowerCase();
+    if (wt !== 'html' && !wt.includes('html')) return;
+    const s = el.settings || {};
+    for (const key of ['html', 'custom_html']) {
+      const val = s[key];
+      if (typeof val !== 'string' || !val.includes('</style>')) continue;
+      // #left-form::before hoặc #left_form::before { ... background-image: url(...) ... }
+      const newVal = val.replace(
+        /(#left[-_]form::before\s*\{[^}]*?background-image\s*:\s*url\(\s*['"]?)([^'")\s]+)(['"]?\s*\))/gi,
+        (m, pre, oldUrl, post) => {
+          if (!oldUrl || oldUrl === bg2Media.url || oldUrl.startsWith('data:')) return m;
+          count++;
+          details.push(`theme #left-form::before: ...${oldUrl.slice(-40)} → #${bg2Media.id} (bg2)`);
+          return pre + bg2Media.url + post;
+        }
+      );
+      if (newVal !== val) {
+        s[key] = newVal;
+        break;
+      }
+    }
+  });
+  return { count, details };
+}
+
+/**
  * Patch CSS theme: nút .btn-m/.btn-s thiếu font-weight (theme gốc không set).
  * Append rule override vào cuối <style> của HTML widget theme.
  * @param {Array} elements

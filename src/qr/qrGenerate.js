@@ -19,6 +19,7 @@ import {
 import {
   replaceBackgroundsByRole,
   replaceCustomCssImages,
+  replaceThemeCssImages,
   patchButtonWeight,
   replaceTokens,
   replaceColors,
@@ -324,6 +325,13 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   if (cssImgRes.count) {
     step('replace-css-img', true, `${cssImgRes.count} chỗ`);
     for (const d of cssImgRes.details) log(`[qr] css-img: ${d}`);
+  }
+
+  // 7a1b. Ảnh hardcode trong <style> của theme (vd #left-form::before url(...))
+  const themeImgRes = replaceThemeCssImages(elements, { id: bg2Media.id, url: bg2Media.url });
+  if (themeImgRes.count) {
+    step('replace-theme-img', true, `${themeImgRes.count} chỗ`);
+    for (const d of themeImgRes.details) log(`[qr] theme-img: ${d}`);
   }
 
   // 7a2. Patch font-weight cho nút (theme gốc thiếu)
