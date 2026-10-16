@@ -102,6 +102,9 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
     result.steps.push({ name, ok, detail });
     log(`${ok ? '✓' : '✗'} ${name}${detail ? ` — ${detail}` : ''}`);
   };
+  // (2.3) Rollback stack — hoàn tác khi lỗi giữa chừng
+  const rollback = [];
+  const created = { cf7Id: null, pageId: null, pageIsNew: false };
 
   // 0. Cài mu-plugin tạm (tự xóa sau job)
   let bridgeInstalled = false;
@@ -272,6 +275,9 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
     });
     step('cf7', true, `form #${cf7Form.id} (to: ${cf7Form.mailToSaved || '?'})`);
     result.cf7 = cf7Form;
+    // (2.3) Rollback: xóa CF7 nếu lỗi sau này
+    created.cf7Id = cf7Form.id;
+    rollback.push(() => wpDeleteCF7Form(cf7Form.id));
   } else {
     step('cf7', true, 'bỏ qua (skipCf7)');
   }
@@ -290,9 +296,13 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
     pageId = existing.id;
     step('page', true, `dùng lại page #${pageId} (ghi đè)`);
   } else {
-    const created = await wpCreatePage({ title, slug });
-    pageId = created.id;
+    const createdPage = await wpCreatePage({ title, slug });
+    pageId = createdPage.id;
     step('page', true, `created #${pageId}`);
+    // (2.3) Rollback: xóa page draft nếu lỗi sau này
+    created.pageId = pageId;
+    created.pageIsNew = true;
+    rollback.push(() => wpDeletePage(pageId));
   }
   const imported = await wpImportTemplate(pageId, templateId);
   const importOk = imported.top_level === templateTopLevel && imported.top_level > 0;
@@ -387,11 +397,7 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   if (cf7Form) {
     const cf7Count = rebindCF7(elements, cf7Form.id);
     step('rebind-cf7', true, `${cf7Count} widget`);
-    // Xóa form cũ nếu ghi đè (tránh trùng form)
-    if (oldCf7Id && oldCf7Id !== cf7Form.id) {
-      const deleted = await wpDeleteCF7Form(oldCf7Id);
-      step('cf7-cleanup', deleted, deleted ? `đã xóa form cũ #${oldCf7Id}` : `không xóa được form cũ #${oldCf7Id}`);
-    }
+    // (2.2) KHÔNG xóa form cũ ở đây — dời xuống sau verify OK
   }
 
   // 7e. Xóa nút review nếu user xóa trống ô input
@@ -423,6 +429,12 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
     const hasCritical = /critical error/i.test(body);
     if (res.ok && !hasCritical) {
       step('verify', true, `HTTP ${res.status}`);
+      result.verified = true;  // (2.4)
+      // (2.2) Chỉ xóa form cũ SAU KHI verify OK — page mới đã live ổn định
+      if (oldCf7Id && cf7Form && oldCf7Id !== cf7Form.id) {
+        const deleted = await wpDeleteCF7Form(oldCf7Id);
+        step('cf7-cleanup', deleted, deleted ? `đã xóa form cũ #${oldCf7Id}` : `không xóa được form cũ #${oldCf7Id}`);
+      }
     } else {
       // Đọc PHP fatal log thật từ server
       const elog = await wpGetErrorLog();
@@ -431,9 +443,11 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
         for (const line of elog.split('\n')) log(`[php] ${line}`);
       }
       step('verify', false, `HTTP ${res.status}${hasCritical ? ' + critical error (xem [php] log)' : ''}`);
+      result.verified = false;  // (2.4)
     }
   } catch (err) {
     step('verify', false, err.message);
+    result.verified = false;  // (2.4)
   }
 
   // CSS variables để inject (trả về cho frontend log)

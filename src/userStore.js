@@ -15,7 +15,13 @@ function ensureDataDir() {
 }
 
 function appSecret() {
-  return process.env.APP_SECRET || process.env.SESSION_SECRET || 'dev-change-me-app-secret';
+  const s = process.env.APP_SECRET || process.env.SESSION_SECRET || 'dev-change-me-app-secret';
+  // (6.2) Chặn secret mặc định ở production (đồng bộ với auth.js)
+  if (process.env.NODE_ENV === 'production' && (/change-me/i.test(s) || s.length < 32)) {
+    console.error('FATAL: APP_SECRET quá yếu ở production. Từ chối khởi động.');
+    process.exit(1);
+  }
+  return s;
 }
 
 export function encryptSecret(plain) {
@@ -46,14 +52,20 @@ function readAll() {
   if (!fs.existsSync(USERS_FILE)) return { users: [] };
   try {
     return JSON.parse(fs.readFileSync(USERS_FILE, 'utf-8'));
-  } catch {
-    return { users: [] };
+  } catch (e) {
+    // (6.3) File hỏng → FAIL LOUD, không im lặng trả rỗng (tránh mất user + chiếm admin)
+    const bak = USERS_FILE + '.corrupt-' + Date.now() + '.bak';
+    try { fs.copyFileSync(USERS_FILE, bak); } catch {}
+    throw new Error(`users.json hỏng (đã backup tại ${bak}): ${e.message}`);
   }
 }
 
 function writeAll(data) {
   ensureDataDir();
-  fs.writeFileSync(USERS_FILE, JSON.stringify(data, null, 2), 'utf-8');
+  // (6.3) Ghi atomic: tmp → rename (tránh file cụt khi crash)
+  const tmp = USERS_FILE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
+  fs.renameSync(tmp, USERS_FILE);
 }
 
 export function adminEmails() {

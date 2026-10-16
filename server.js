@@ -152,6 +152,18 @@ export function createApp() {
    * Login = tài khoản WPM (email + password).
    * Lần đầu tự tạo user trong data/users.json; leo.vo@macusaone.com → admin.
    */
+  /** (6.1) Rate-limit login: 5 lần / 15 phút theo IP+email */
+  const loginAttempts = new Map();
+  const checkLoginRate = (req, email) => {
+    const key = `${req.ip}:${email.toLowerCase()}`;
+    const now = Date.now();
+    const arr = (loginAttempts.get(key) || []).filter((t) => now - t < 15 * 60 * 1000);
+    if (arr.length >= 5) return false;
+    arr.push(now);
+    loginAttempts.set(key, arr);
+    return true;
+  };
+
   app.post('/api/login', async (req, res) => {
     const username = String(req.body?.username || '').trim();
     const password = String(req.body?.password || '');
@@ -160,6 +172,17 @@ export function createApp() {
     }
     if (!password) {
       return res.status(400).json({ error: 'Nhập password WPM — lần đầu tool sẽ lưu lại cho Run.' });
+    }
+    // (6.1) Giới hạn domain email
+    const allowedDomains = String(process.env.ALLOWED_EMAIL_DOMAINS || 'macusaone.com')
+      .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+    const domain = username.split('@')[1]?.toLowerCase() || '';
+    if (allowedDomains.length && !allowedDomains.includes(domain)) {
+      return res.status(403).json({ error: `Email phải thuộc domain: ${allowedDomains.join(', ')}` });
+    }
+    // (6.1) Rate limit
+    if (!checkLoginRate(req, username)) {
+      return res.status(429).json({ error: 'Thử quá nhiều lần. Vui lòng đợi 15 phút.' });
     }
     try {
       const user = await loginWithWpm(username, password);
