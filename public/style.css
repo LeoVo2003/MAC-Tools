@@ -2116,24 +2116,28 @@ td.empty {
 
 .field .req { color: var(--danger); font-weight: 700; }
 
-/* ============ QR Tool: stepper + palette preview + sticky actions (Phase 3) ============ */
-.qr-stepper { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
-.qr-step {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 8px 14px; border-radius: 999px;
-  border: 1px solid var(--border-input, #d0d5dd); background: #fff;
-  font-size: 14px; font-weight: 600; color: var(--text-muted, #667085);
-  cursor: pointer;
+/* ============ QR Tool: sections + palette preview + sticky actions (Phase 3) ============ */
+/* Section dạng <details> — premium: Inter 14/16, spacing 12/16/24, radius 12 */
+.qr-section { margin: 0 0 16px; }
+.qr-section-head {
+  display: flex; align-items: center; gap: 8px;
+  cursor: pointer; list-style: none;
+  padding: 4px 0;
 }
-.qr-step-n {
+.qr-section-head::-webkit-details-marker { display: none; }
+.qr-section-head::before {
+  content: '›'; flex: 0 0 auto;
+  width: 24px; height: 24px; border-radius: 999px;
   display: inline-flex; align-items: center; justify-content: center;
-  width: 22px; height: 22px; border-radius: 999px;
-  background: #eaecf0; color: #344054; font-size: 12px; font-weight: 700;
+  background: #eaecf0; color: #344054;
+  font-size: 14px; font-weight: 700; line-height: 1;
+  transform: rotate(90deg); transition: transform .15s ease;
 }
-.qr-step.is-active { border-color: var(--primary, #1877f2); color: var(--primary, #1877f2); }
-.qr-step.is-active .qr-step-n { background: var(--primary, #1877f2); color: #fff; }
-.qr-step.is-done .qr-step-n { background: #12b76a; color: #fff; }
-.qr-stepnav { display: flex; justify-content: space-between; margin-top: 16px; }
+details.qr-section:not([open]) > .qr-section-head::before { transform: rotate(0deg); }
+.qr-section-head h2 { margin: 0; font-size: 16px; font-weight: 600; color: var(--text, #111827); }
+.qr-section[open] > .qr-section-head { margin-bottom: 12px; }
+.qr-h { font-size: 14px; font-weight: 600; color: var(--text, #111827); margin: 16px 0 8px; }
+.qr-h:first-of-type { margin-top: 0; }
 .qr-sticky-actions {
   position: sticky; bottom: 0; z-index: 50;
   display: flex; align-items: center; gap: 12px;
@@ -2169,6 +2173,5 @@ td.empty {
 .qr-palette-applied { display: flex; gap: 8px; margin-top: 12px; }
 .qr-palette-applied span { width: 32px; height: 32px; border-radius: 8px; border: 1px solid rgba(0,0,0,.1); display: inline-block; }
 @media (max-width: 768px) {
-  .qr-stepper { position: sticky; top: 0; z-index: 40; background: #fff; padding: 8px 0; margin: -8px -8px 12px; }
-  .qr-step { font-size: 12px; padding: 6px 10px; }
+  .qr-sticky-actions { margin: 12px -12px -12px; padding: 10px 12px; }
 }

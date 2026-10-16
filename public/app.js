@@ -1688,12 +1688,11 @@ qrForm?.addEventListener('submit', async (e) => {
     if (missingInline) missingInline.textContent = msg;
     qrLog('Thiếu: ' + missing.join(', '));
     setBadge(qrStatusBadge, 'error', 'Thiếu dữ liệu');
-    // Cuộn tới ô đầu tiên thiếu
+    // Cuộn tới ô đầu tiên thiếu (mở các <details> cha đang đóng trước)
     const firstBad = qrForm.querySelector('.field-warn');
     if (firstBad) {
-      // Chuyển về bước chứa ô đó
-      const pane = firstBad.closest('.qr-steppane');
-      if (pane) qrGotoStep(pane.dataset.pane);
+      let d = firstBad.closest('details');
+      while (d) { d.open = true; d = d.parentElement ? d.parentElement.closest('details') : null; }
       firstBad.scrollIntoView({ behavior: 'smooth', block: 'center' });
       firstBad.focus({ preventScroll: true });
     }
@@ -1712,8 +1711,9 @@ qrForm?.addEventListener('submit', async (e) => {
     if (!getFile(fileId) && !getVal(urlId)) {
       qrLog(`Thiếu ${label}: upload file hoặc paste link.`);
       setBadge(qrStatusBadge, 'error', 'Thiếu ảnh');
-      // Chuyển về bước 3 (Giao diện)
-      qrGotoStep('3');
+      // Mở section Màu sắc & Hình ảnh rồi cuộn tới
+      const sec = document.getElementById('qrSectionStyle');
+      if (sec) { sec.open = true; sec.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
       return;
     }
   }
@@ -1764,6 +1764,8 @@ qrForm?.addEventListener('submit', async (e) => {
 
   qrLogBox.innerHTML = '';
   setBadge(qrStatusBadge, 'running', 'Đang tạo...');
+  // Tự mở section Log để user thấy tiến trình
+  document.getElementById('qrLogSection')?.setAttribute('open', '');
   qrLog('Bắt đầu tạo QR page...');
   // (5.1#2) Khóa nút khi đang chạy — chống double-click
   if (runBtn) { runBtn.disabled = true; runBtn.textContent = 'Đang tạo...'; }
@@ -1810,29 +1812,6 @@ qrForm?.addEventListener('submit', async (e) => {
   }
 });
 
-/* ============ QR: Stepper (5.2) ============ */
-function qrGotoStep(n) {
-  const s = String(n);
-  document.querySelectorAll('.qr-step').forEach((el) => {
-    el.classList.toggle('is-active', el.dataset.step === s);
-  });
-  document.querySelectorAll('.qr-steppane').forEach((el) => {
-    const active = el.dataset.pane === s;
-    el.hidden = !active;
-    el.classList.toggle('is-active', active);
-  });
-  // Đánh dấu các bước đã qua
-  document.querySelectorAll('.qr-step').forEach((el) => {
-    el.classList.toggle('is-done', Number(el.dataset.step) < Number(s));
-  });
-}
-document.querySelectorAll('.qr-step').forEach((el) => {
-  el.addEventListener('click', () => qrGotoStep(el.dataset.step));
-});
-document.querySelectorAll('.qr-next, .qr-back').forEach((el) => {
-  el.addEventListener('click', () => qrGotoStep(el.dataset.goto));
-});
-
 /* ============ QR: Kết quả (5.6) ============ */
 function renderQrResult(data) {
   const panel = document.getElementById('qrResultPanel');
@@ -1870,12 +1849,12 @@ function renderQrResult(data) {
   });
   document.getElementById('qrNewPageBtn')?.addEventListener('click', () => {
     panel.hidden = true;
-    qrGotoStep('1');
     document.getElementById('qrWpmUrl').value = '';
     document.getElementById('qrWpmUrl').focus();
+    document.getElementById('qrWpmUrl').scrollIntoView({ behavior: 'smooth', block: 'center' });
   });
-  // Chuyển sang bước 4 để thấy kết quả
-  qrGotoStep('4');
+  // Cuộn tới panel kết quả
+  panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 /* ============ DASHBOARD ============ */

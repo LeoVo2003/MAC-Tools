@@ -338,16 +338,9 @@
 
         <!-- QR Tool -->
         <section id="tab-qr" hidden>
-          <!-- Stepper 4 bước (5.2) -->
-          <nav class="qr-stepper" aria-label="Các bước tạo QR page">
-            <button type="button" class="qr-step is-active" data-step="1"><span class="qr-step-n">1</span> Nguồn</button>
-            <button type="button" class="qr-step" data-step="2"><span class="qr-step-n">2</span> Thông tin</button>
-            <button type="button" class="qr-step" data-step="3"><span class="qr-step-n">3</span> Giao diện</button>
-            <button type="button" class="qr-step" data-step="4"><span class="qr-step-n">4</span> Tạo &amp; kết quả</button>
-          </nav>
           <form class="block" id="qrForm" novalidate>
-            <!-- Bước 1: Nguồn -->
-            <div class="section qr-steppane is-active" data-pane="1">
+            <!-- 1. Nguồn dữ liệu: luôn hiện, không collapse (entry point) -->
+            <div class="section">
               <h2>Nguồn dữ liệu</h2>
               <div class="field-row">
                 <label class="field grow">
@@ -363,15 +356,11 @@
                   <label class="field"><span>App Password <em class="muted">(.env chưa có)</em></span><input id="qrWpPass" type="password" autocomplete="off" /></label>
                 </div>
               </div>
-              <div class="row qr-stepnav">
-                <span></span>
-                <button type="button" class="btn btn-primary qr-next" data-goto="2">Tiếp: Thông tin →</button>
-              </div>
             </div>
 
-            <!-- Bước 2: Thông tin -->
-            <div class="section qr-steppane" data-pane="2" hidden>
-              <h2>Thông tin tiệm</h2>
+            <!-- 2. Thông tin tiệm -->
+            <details class="section qr-section" open>
+              <summary class="qr-section-head"><h2>Thông tin tiệm</h2></summary>
               <div id="qrDataEdit">
                 <div class="grid">
                   <label class="field"><span>Tên project</span><input id="qrProjectName" type="text" readonly placeholder="Fill data sẽ tự lấy" /></label>
@@ -406,15 +395,12 @@
                 </div>
                 <p class="muted small">Sửa trực tiếp nếu data WPM chưa đúng. Xóa trắng ô = xóa dữ liệu.</p>
               </div>
-              <div class="row qr-stepnav">
-                <button type="button" class="btn btn-ghost qr-back" data-goto="1">← Nguồn</button>
-                <button type="button" class="btn btn-primary qr-next" data-goto="3">Tiếp: Giao diện →</button>
-              </div>
-            </div>
+            </details>
 
-            <!-- Bước 3: Giao diện -->
-            <div class="section qr-steppane" data-pane="3" hidden>
-              <h2>Màu sắc</h2>
+            <!-- 3. Màu sắc & Hình ảnh -->
+            <details class="section qr-section" id="qrSectionStyle" open>
+              <summary class="qr-section-head"><h2>Màu sắc &amp; Hình ảnh</h2></summary>
+              <h3 class="qr-h">Màu sắc</h3>
               <div class="grid">
                 <label class="field"><span>Màu chính <em class="muted">(hex hoặc gradient)</em></span>
                   <div class="color-field">
@@ -444,7 +430,7 @@
                 <div class="palette-warn" id="ppWarnings" hidden></div>
               </div>
 
-              <h2>Hình ảnh</h2>
+              <h3 class="qr-h">Hình ảnh</h3>
               <p class="muted small">Mỗi hình: upload file hoặc paste link.</p>
               <div class="grid grid-3">
                 <div class="field"><span>Logo</span>
@@ -460,35 +446,30 @@
                   <input id="qrBg2Url" type="url" placeholder="https://..." class="qr-url-input" />
                 </div>
               </div>
+            </details>
 
-              <h2>Tùy chọn</h2>
+            <!-- 4. Tùy chọn: đóng mặc định -->
+            <details class="section qr-section">
+              <summary class="qr-section-head"><h2>Tùy chọn</h2></summary>
               <label class="inline"><input type="checkbox" id="qrLogoFilter" checked /> Đảo màu logo (trắng)</label>
-              <div class="row qr-stepnav">
-                <button type="button" class="btn btn-ghost qr-back" data-goto="2">← Thông tin</button>
-                <button type="button" class="btn btn-primary qr-next" data-goto="4">Tiếp: Tạo →</button>
-              </div>
-            </div>
+            </details>
 
-            <!-- Bước 4: Tạo & kết quả -->
-            <div class="section qr-steppane" data-pane="4" hidden>
-              <h2>Tạo QR Page</h2>
-              <p id="qrMissingList" class="hint hint--muted"></p>
-              <div class="row qr-stepnav">
-                <button type="button" class="btn btn-ghost qr-back" data-goto="3">← Giao diện</button>
-              </div>
-            </div>
+            <p id="qrMissingList" class="hint hint--muted"></p>
 
-            <!-- Thanh hành động sticky (5.2) -->
+            <!-- Thanh hành động sticky -->
             <div class="qr-sticky-actions">
               <span id="qrMissingInline" class="muted small"></span>
               <button type="submit" id="qrRunBtn" class="btn btn-primary btn-lg">Tạo QR Page</button>
               <span id="qrStatusBadge" class="badge" role="status" aria-live="polite">Idle</span>
             </div>
           </form>
-          <section class="block">
-            <h2>Log</h2>
+
+          <!-- Log: đóng mặc định -->
+          <details class="block qr-section" id="qrLogSection">
+            <summary class="qr-section-head"><h2>Log</h2></summary>
             <div id="qrLogBox" class="code" role="log" aria-live="polite" tabindex="0"></div>
-          </section>
+          </details>
+
           <section class="block" id="qrResultPanel" hidden>
             <h2>Kết quả</h2>
             <div id="qrResultCard"></div>
