@@ -285,9 +285,9 @@ export function buildCssVariablesBlock(variables) {
 
 /**
  * Thay giá trị CSS variables trong HTML widget theme engine.
- * CHỈ thay từng dòng "--var: ...;" đã có (hoặc chèn thêm nếu thiếu),
+ * CHỈ thay trong block `:root { ... }` (bỏ qua comment phía trên),
+ * thay từng dòng "--var: ...;" đã có (hoặc chèn thêm nếu thiếu),
  * GIỮ NGUYÊN toàn bộ :root còn lại (font, size, weight...).
- * Bản cũ replace cả block :root → mất font.
  * @param {Array} elements
  * @param {object} variables - { '--qr-primary': '#E31E24', ... }
  * @returns {boolean} có thay được không
@@ -304,19 +304,23 @@ export function replaceCssVariables(elements, variables) {
       for (const key of ['html', 'custom_html', 'custom_css']) {
         const val = s[key];
         if (typeof val === 'string' && val.includes('--qr-primary')) {
-          let newVal = val;
-          for (const name of names) {
-            const value = variables[name];
-            // escape cho regex
-            const escName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const re = new RegExp(`(${escName}\\s*:\\s*)[^;]+;`);
-            if (re.test(newVal)) {
-              newVal = newVal.replace(re, `$1${value};`);
-            } else if (/:root\s*\{/.test(newVal)) {
-              // chưa có biến này → chèn vào trong :root
-              newVal = newVal.replace(/(:root\s*\{)/, `$1\n  ${name}: ${value};`);
+          // Scope vào block :root { ... } đầu tiên — tránh match nhầm
+          // tên biến nằm trong comment (vd "TOOL CHỈ ĐIỀN 2 DÒNG ĐẦU").
+          const newVal = val.replace(/:root\s*\{[^}]*\}/s, (rootBlock) => {
+            let nb = rootBlock;
+            for (const name of names) {
+              const value = variables[name];
+              const escName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              const re = new RegExp(`(${escName}\\s*:\\s*)[^;]+;`);
+              if (re.test(nb)) {
+                nb = nb.replace(re, `$1${value};`);
+              } else {
+                // chưa có biến này → chèn vào đầu :root
+                nb = nb.replace('{', `{\n  ${name}: ${value};`);
+              }
             }
-          }
+            return nb;
+          });
           if (newVal !== val) {
             s[key] = newVal;
             replaced = true;
