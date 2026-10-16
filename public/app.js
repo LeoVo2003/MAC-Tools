@@ -1619,7 +1619,13 @@ function renderPalettePreview(palette) {
 function fetchPalettePreview() {
   const primary = document.getElementById('qrPrimary')?.value.trim() || '';
   const secondary = document.getElementById('qrSecondary')?.value.trim() || '';
-  if (!primary) return;
+  const previewEl = document.getElementById('qrPalettePreview');
+  // Chưa chọn màu chính → ẩn luôn bảng preview
+  if (!primary) {
+    if (previewEl) previewEl.hidden = true;
+    return;
+  }
+  if (previewEl) previewEl.hidden = false;
   clearTimeout(qrPaletteTimer);
   qrPaletteTimer = setTimeout(async () => {
     try {
