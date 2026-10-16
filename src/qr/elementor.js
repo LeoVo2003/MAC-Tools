@@ -88,25 +88,44 @@ export function replaceBackgroundsByRole(elements, bg1Media, bg2Media, keepCssId
   let count = 0;
   const details = [];
   const keep = new Set(keepCssIds);
+  let formBgSet = false;
+  let formContainer = null;
   walkElements(elements, (el) => {
     const s = el.settings || {};
     if (!s || typeof s !== 'object' || Array.isArray(s)) return;
+    const cssId = String(s.css_id || s._element_id || s._css_id || el.id || '');
+    // Hình form: element có css_id left-form HOẶC chứa CF7 widget
+    const isForm = cssId === 'left-form' || containsFormWidget(el);
+    if (isForm && !formContainer && (el.elType === 'container' || el.elType === 'section')) {
+      formContainer = el;
+    }
     const bg = s.background_image;
     if (!isImageObject(bg)) return;
-    const cssId = String(s.css_id || s._element_id || s._css_id || el.id || '');
     if (keep.has(cssId)) {
       details.push(`giữ ${cssId || el.id} (#${bg.id})`);
       return;
     }
-    // Hình form: element có css_id left-form HOẶC chứa CF7 widget
-    const isForm = cssId === 'left-form' || containsFormWidget(el);
     const target = isForm ? bg2Media : bg1Media;
     // Bỏ qua nếu đã đúng ảnh mới (tránh replace vòng)
-    if (bg.id === target.id || bg.url === target.url) return;
+    if (bg.id === target.id || bg.url === target.url) {
+      if (isForm) formBgSet = true;
+      return;
+    }
     s.background_image = { ...bg, id: target.id, url: target.url };
     count++;
+    if (isForm) formBgSet = true;
     details.push(`${cssId || el.id}: #${bg.id} → #${target.id}${isForm ? ' (bg2/form)' : ' (bg1)'}`);
   });
+  // Fallback: form container chưa có background → SET mới luôn
+  // (template xóa ảnh placeholder thì tool vẫn gán được)
+  if (!formBgSet && formContainer) {
+    const s = formContainer.settings;
+    s.background_background = 'classic';
+    s.background_image = { id: bg2Media.id, url: bg2Media.url };
+    count++;
+    const cssId = String(s.css_id || s._element_id || s._css_id || formContainer.id || '');
+    details.push(`${cssId || formContainer.id}: (trống) → #${bg2Media.id} (bg2/form, set mới)`);
+  }
   return { count, details };
 }
 
