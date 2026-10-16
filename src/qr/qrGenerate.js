@@ -35,12 +35,12 @@ import { installBridge, removeBridge } from './sftpBridge.js';
 
 function getTemplateId() { return Number(process.env.QR_TEMPLATE_ID) || 2806; }
 
-// Background giữ nguyên (theo css_id) — bổ sung khi user báo.
-// (Trước đây keep theo attachment ID 9507/9510 của template cũ;
-//  template rebuild đổi ID nên chuyển sang map theo vai trò.)
-const KEEP_BACKGROUND_CSS_IDS = [];
+// Background giữ nguyên (theo element id hoặc css_id).
+// 37e07fe4: container form giữ ảnh 303-bg-1-1-hori-cc-beige-brown.jpg
+// (user chốt 2026-10-16; keep theo element để đổi ảnh khác cũng không ảnh hưởng)
+const KEEP_BACKGROUND_CSS_IDS = ['37e07fe4'];
 
-// URL ảnh giữ nguyên (không replace dù ở element nào)
+// URL ảnh giữ nguyên (dự phòng, match theo tên file không phụ thuộc domain)
 const KEEP_BACKGROUND_URLS = [
   '303-bg-1-1-hori-cc-beige-brown.jpg', // user chốt 2026-10-16: giữ nguyên
 ];
