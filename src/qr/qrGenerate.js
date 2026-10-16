@@ -10,7 +10,6 @@ import {
   wpGetTemplateRaw,
   wpCreateCF7Form,
   wpDeleteCF7Form,
-  wpGetCf7Title,
   wpDeletePage,
   wpFindPageBySlug,
   wpCreatePage,
@@ -297,7 +296,7 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
     // (3.1) Lưu raw _elementor_data của page cũ trước khi ghi đè
     try {
       oldRaw = await wpGetTemplateRaw(pageId);
-      log(`[qr] Đã lưu raw data cũ của page #${pageId} (${oldRaw?.length || 0} bytes) để rollback`);
+      log(`[qr] Đã lưu raw data cũ của page #${pageId} (${oldRaw?.length || 0} top-level elements) để rollback`);
     } catch (e) {
       log(`[qr] ⚠ Không lưu được raw data cũ: ${e.message}`);
     }
@@ -438,18 +437,13 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
       step('verify', true, `HTTP ${res.status}, form #${cf7Form?.id || 'n/a'} OK`);
       result.verified = true;  // (2.4)
       // (2.2) Chỉ xóa form cũ SAU KHI verify OK — page mới đã live ổn định
-      // (3.2) Kiểm tra title form trước khi xóa để tránh xóa nhầm form dùng chung
+      // (3.2) Xóa form cũ: snippet tự check title server-side (chỉ xóa khi title
+      // bắt đầu bằng "{zip} ") — tránh xóa form dùng chung của template
       if (oldCf7Id && cf7Form && oldCf7Id !== cf7Form.id) {
-        const oldTitle = await wpGetCf7Title(oldCf7Id);
-        // Title form do tool tạo có dạng "{zip} {tên tiệm}" — chỉ xóa khi khớp
-        const expectedPattern = new RegExp(`^${zip}\\s+`, 'i');
-        if (oldTitle && expectedPattern.test(oldTitle)) {
-          const deleted = await wpDeleteCF7Form(oldCf7Id);
-          step('cf7-cleanup', deleted, deleted ? `đã xóa form cũ #${oldCf7Id} ("${oldTitle}")` : `không xóa được form cũ #${oldCf7Id}`);
-        } else {
-          log(`[qr] ⚠ Không xóa form cũ #${oldCf7Id} — title "${oldTitle}" không khớp pattern "{zip} {tên}" (có thể là form dùng chung)`);
-          step('cf7-cleanup', true, `giữ lại form #${oldCf7Id} (không phải do tool tạo)`);
-        }
+        const deleted = await wpDeleteCF7Form(oldCf7Id, zip + ' ');
+        step('cf7-cleanup', deleted, deleted
+          ? `đã xóa form cũ #${oldCf7Id}`
+          : `không xóa được form cũ #${oldCf7Id} (có thể là form dùng chung — giữ lại an toàn)`);
       }
     } else {
       // Đọc PHP fatal log thật từ server
@@ -483,9 +477,10 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
     // (2.3/3.1) Rollback: xóa CF7/page mới tạo, hoặc khôi phục page cũ khi ghi đè
     log(`[qr] Lỗi: ${err.message} — đang rollback...`);
     // (3.1) Nếu ghi đè (không phải page mới) và có oldRaw: khôi phục data cũ
+    // oldRaw là array đã parse từ wpGetTemplateRaw — KHÔNG JSON.parse lại
     if (!created.pageIsNew && oldRaw && pageId) {
       try {
-        await wpSetElementorData(pageId, JSON.parse(oldRaw));
+        await wpSetElementorData(pageId, oldRaw);
         log(`[qr] Đã khôi phục _elementor_data cũ cho page #${pageId}`);
       } catch (e) {
         log(`[qr] ⚠ Không khôi phục được page cũ: ${e.message}`);

@@ -162,22 +162,16 @@ export async function wpCreateCF7Form({ title, form, mail }) {
 }
 
 /** Xóa CF7 form cũ (khi ghi đè page). Cần snippet v14+. */
-export async function wpDeleteCF7Form(id) {
+export async function wpDeleteCF7Form(id, expectedPrefix = '') {
   try {
-    await wpFetch(`/qr/v1/delete-cf7/${id}`, { method: 'DELETE' });
+    // (3.2) Snippet tự check title server-side: chỉ xóa khi title bắt đầu bằng expectedPrefix
+    await wpFetch(`/qr/v1/delete-cf7/${id}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ expected_prefix: expectedPrefix }),
+    });
     return true;
   } catch {
     return false;
-  }
-}
-
-/** (3.2) Lấy title của CF7 form để kiểm tra trước khi xóa */
-export async function wpGetCf7Title(id) {
-  try {
-    const form = await wpFetch(`/wp/v2/wpcf7_contact_form/${id}`);
-    return form?.title || null;
-  } catch {
-    return null;
   }
 }
 
