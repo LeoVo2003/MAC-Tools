@@ -63,54 +63,74 @@ export function replaceMedia(elements, mappings) {
 
 /**
  * Replace text tokens: {{ten}}, {{dia_chi}}, v.v.
- * Walk mọi string value trong settings, replace token.
+ * Đệ quy vào mọi string trong settings (kể cả repeater rows như
+ * social_icon_list, icon_list) — bản cũ chỉ check cấp đầu nên miss.
  */
 export function replaceTokens(elements, tokens) {
   let count = 0;
   const tokenKeys = Object.keys(tokens);
   if (!tokenKeys.length) return 0;
-  walkElements(elements, (el) => {
-    const s = el.settings || {};
-    for (const key of Object.keys(s)) {
-      const v = s[key];
-      if (typeof v === 'string') {
-        let nv = v;
-        for (const tk of tokenKeys) {
-          if (nv.includes(tk)) {
-            nv = nv.split(tk).join(tokens[tk]);
-            count++;
-          }
+  const walkValue = (v) => {
+    if (typeof v === 'string') {
+      let nv = v;
+      for (const tk of tokenKeys) {
+        if (nv.includes(tk)) {
+          nv = nv.split(tk).join(tokens[tk]);
+          count++;
         }
-        if (nv !== v) s[key] = nv;
       }
+      return nv;
     }
+    if (Array.isArray(v)) {
+      for (let i = 0; i < v.length; i++) v[i] = walkValue(v[i]);
+      return v;
+    }
+    if (v && typeof v === 'object') {
+      for (const k of Object.keys(v)) v[k] = walkValue(v[k]);
+      return v;
+    }
+    return v;
+  };
+  walkElements(elements, (el) => {
+    const s = el.settings;
+    if (s && typeof s === 'object' && !Array.isArray(s)) walkValue(s);
   });
   return count;
 }
 
 /**
  * Replace màu hex trong widget settings → CSS variable.
+ * Đệ quy vào mọi string (kể cả nested) cho chắc.
  * @param {Array} elements
  * @param {Array<{hex:string, variable:string}>} mappings
  */
 export function replaceColors(elements, mappings) {
   let count = 0;
-  walkElements(elements, (el) => {
-    const s = el.settings || {};
-    for (const key of Object.keys(s)) {
-      const v = s[key];
-      if (typeof v === 'string') {
-        let nv = v;
-        for (const m of mappings) {
-          const re = new RegExp(m.hex.replace('#', '\\#'), 'gi');
-          if (re.test(nv)) {
-            nv = nv.replace(re, `var(${m.variable})`);
-            count++;
-          }
+  const walkValue = (v) => {
+    if (typeof v === 'string') {
+      let nv = v;
+      for (const m of mappings) {
+        const re = new RegExp(m.hex.replace('#', '\\#'), 'gi');
+        if (re.test(nv)) {
+          nv = nv.replace(re, `var(${m.variable})`);
+          count++;
         }
-        if (nv !== v) s[key] = nv;
       }
+      return nv;
     }
+    if (Array.isArray(v)) {
+      for (let i = 0; i < v.length; i++) v[i] = walkValue(v[i]);
+      return v;
+    }
+    if (v && typeof v === 'object') {
+      for (const k of Object.keys(v)) v[k] = walkValue(v[k]);
+      return v;
+    }
+    return v;
+  };
+  walkElements(elements, (el) => {
+    const s = el.settings;
+    if (s && typeof s === 'object' && !Array.isArray(s)) walkValue(s);
   });
   return count;
 }
@@ -255,14 +275,18 @@ export function buildCssVariablesBlock(variables) {
 }
 
 /**
- * Thay CSS variables trong HTML widget có sẵn (template 2806 đã có widget này).
- * Tìm widget chứa '--qr-primary' và thay toàn bộ block :root.
+ * Thay giá trị CSS variables trong HTML widget theme engine.
+ * CHỈ thay từng dòng "--var: ...;" đã có (hoặc chèn thêm nếu thiếu),
+ * GIỮ NGUYÊN toàn bộ :root còn lại (font, size, weight...).
+ * Bản cũ replace cả block :root → mất font.
  * @param {Array} elements
- * @param {string} cssVarsBlock - CSS từ buildCssVariablesBlock()
+ * @param {object} variables - { '--qr-primary': '#E31E24', ... }
  * @returns {boolean} có thay được không
  */
-export function replaceCssVariables(elements, cssVarsBlock) {
+export function replaceCssVariables(elements, variables) {
   let replaced = false;
+  // Key dài trước để tránh prefix nhầm (--qr-primary vs --qr-primary-soft)
+  const names = Object.keys(variables).sort((a, b) => b.length - a.length);
   walkElements(elements, (el) => {
     if (replaced) return;
     const wt = String(el.widgetType || '').toLowerCase();
@@ -271,14 +295,21 @@ export function replaceCssVariables(elements, cssVarsBlock) {
       for (const key of ['html', 'custom_html', 'custom_css']) {
         const val = s[key];
         if (typeof val === 'string' && val.includes('--qr-primary')) {
-          // Thay block :root { ... } cũ bằng block mới
-          const newVal = val.replace(/:root\s*\{[^}]*\}/s, cssVarsBlock.trim());
+          let newVal = val;
+          for (const name of names) {
+            const value = variables[name];
+            // escape cho regex
+            const escName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const re = new RegExp(`(${escName}\\s*:\\s*)[^;]+;`);
+            if (re.test(newVal)) {
+              newVal = newVal.replace(re, `$1${value};`);
+            } else if (/:root\s*\{/.test(newVal)) {
+              // chưa có biến này → chèn vào trong :root
+              newVal = newVal.replace(/(:root\s*\{)/, `$1\n  ${name}: ${value};`);
+            }
+          }
           if (newVal !== val) {
             s[key] = newVal;
-            replaced = true;
-          } else {
-            // Không match regex, append vào cuối
-            s[key] = val + '\n' + cssVarsBlock;
             replaced = true;
           }
           break;

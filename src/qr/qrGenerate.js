@@ -310,14 +310,14 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
     { hex: '#1D1BE0', variable: '--qr-primary' },
     { hex: '#567445', variable: '--qr-secondary' },
   ]);
-  // Build CSS variables block để inject vào page
+  // Build CSS variables block để inject vào page (chỉ thay từng biến, giữ :root)
   const cssVars = {
     '--qr-primary': primary,
     '--qr-secondary': secondary,
     '--qr-logo-filter': inputs.logoFilter ? 'brightness(0) invert(1)' : 'none',
   };
   const cssVarsBlock = buildCssVariablesBlock(cssVars);
-  const cssOk = replaceCssVariables(elements, cssVarsBlock);
+  const cssOk = replaceCssVariables(elements, cssVars);
   step('replace-colors', true, `${colorCount} chỗ, primary=${primary}, secondary=${secondary}`);
   step('css-variables', cssOk, cssOk ? 'đã thay trong widget' : 'không tìm thấy widget CSS');
 
