@@ -102,6 +102,8 @@ export function replaceBackgroundsByRole(elements, bg1Media, bg2Media, keepCssId
   const keep = new Set(keepCssIds);
   let formBgSet = false;
   let formContainer = null;
+  // Cả background_image và background_overlay_image (::before overlay của Elementor)
+  const BG_KEYS = ['background_image', 'background_overlay_image'];
   walkElements(elements, (el) => {
     const s = el.settings || {};
     if (!s || typeof s !== 'object' || Array.isArray(s)) return;
@@ -111,29 +113,32 @@ export function replaceBackgroundsByRole(elements, bg1Media, bg2Media, keepCssId
     if (isForm && !formContainer && (el.elType === 'container' || el.elType === 'section')) {
       formContainer = el;
     }
-    const bg = s.background_image;
-    if (!isBackgroundObject(bg)) return;
-    // Giữ nguyên nếu URL nằm trong keep-list
-    if (keepUrls.some((u) => bg.url.includes(u))) {
-      details.push(`giữ ${cssId || el.id} (${bg.url.split('/').pop()})`);
-      if (isForm) formBgSet = true; // đã có ảnh form (dù là giữ nguyên) → không set mới
-      return;
-    }
-    if (keep.has(cssId)) {
-      details.push(`giữ ${cssId || el.id} (#${bg.id || '?'})`);
+    for (const bgKey of BG_KEYS) {
+      const bg = s[bgKey];
+      if (!isBackgroundObject(bg)) continue;
+      const isOverlay = bgKey === 'background_overlay_image';
+      const label = isOverlay ? 'overlay' : 'bg';
+      // Giữ nguyên nếu URL nằm trong keep-list
+      if (keepUrls.some((u) => bg.url.includes(u))) {
+        details.push(`giữ ${cssId || el.id} (${bg.url.split('/').pop()})`);
+        if (isForm) formBgSet = true;
+        continue;
+      }
+      if (keep.has(cssId)) {
+        details.push(`giữ ${cssId || el.id} (#${bg.id || '?'})`);
+        if (isForm) formBgSet = true;
+        continue;
+      }
+      const target = isForm ? bg2Media : bg1Media;
+      if (bg.id === target.id || bg.url === target.url) {
+        if (isForm) formBgSet = true;
+        continue;
+      }
+      s[bgKey] = { ...bg, id: target.id, url: target.url };
+      count++;
       if (isForm) formBgSet = true;
-      return;
+      details.push(`${cssId || el.id} [${label}]: ${bg.id || '?'} → #${target.id}${isForm ? ' (bg2/form)' : ' (bg1)'}`);
     }
-    const target = isForm ? bg2Media : bg1Media;
-    // Bỏ qua nếu đã đúng ảnh mới (tránh replace vòng)
-    if (bg.id === target.id || bg.url === target.url) {
-      if (isForm) formBgSet = true;
-      return;
-    }
-    s.background_image = { ...bg, id: target.id, url: target.url };
-    count++;
-    if (isForm) formBgSet = true;
-    details.push(`${cssId || el.id}: ${bg.id || '?'} → #${target.id}${isForm ? ' (bg2/form)' : ' (bg1)'}`);
   });
   // Fallback: form container chưa có background → SET mới luôn
   // (template xóa ảnh placeholder thì tool vẫn gán được)
