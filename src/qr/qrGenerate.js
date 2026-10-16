@@ -146,8 +146,8 @@ function deriveThemeColors(primary, secondary) {
   if (!m) return {};
   const n = parseInt(m[1], 16);
   const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
-  // soft: primary pha 90% trắng
-  const sr = r * 0.1 + 255 * 0.9, sg = g * 0.1 + 255 * 0.9, sb = b * 0.1 + 255 * 0.9;
+  // soft: primary pha 75% trắng (đủ tương phản để primary nổi bật)
+  const sr = r * 0.25 + 255 * 0.75, sg = g * 0.25 + 255 * 0.75, sb = b * 0.25 + 255 * 0.75;
   const hx = (v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0');
   const soft = `#${hx(sr)}${hx(sg)}${hx(sb)}`.toUpperCase();
   // chữ trên nền đậm/nhạt: đảo theo YIQ
