@@ -41,6 +41,20 @@ function isImageObject(v) {
   );
 }
 
+/**
+ * Check background_image: nới lỏng hơn isImageObject — chấp nhận cả trường
+ * hợp paste URL ngoài (id trống/không phải number), chỉ cần có url string.
+ */
+function isBackgroundObject(v) {
+  return (
+    v !== null &&
+    typeof v === 'object' &&
+    !Array.isArray(v) &&
+    typeof v.url === 'string' &&
+    v.url.length > 0
+  );
+}
+
 export function replaceMedia(elements, mappings) {
   let count = 0;
   walkElements(elements, (el) => {
@@ -62,14 +76,12 @@ export function replaceMedia(elements, mappings) {
 }
 
 /**
- * Kiểm tra element có chứa Contact Form 7 widget trong subtree không.
+ * Kiểm tra element có chứa TRỰC TIẾP Contact Form 7 widget (child cấp 1).
+ * Không tính container cha chứa gián tiếp (tránh match nhầm section bao ngoài).
  */
-function containsFormWidget(el) {
-  let found = false;
-  walkElements([el], (sub) => {
-    if (String(sub.widgetType || '').includes('contact-form-7')) found = true;
-  });
-  return found;
+function isDirectFormContainer(el) {
+  if (!Array.isArray(el.elements)) return false;
+  return el.elements.some((sub) => String(sub.widgetType || '').includes('contact-form-7'));
 }
 
 /**
@@ -95,12 +107,12 @@ export function replaceBackgroundsByRole(elements, bg1Media, bg2Media, keepCssId
     if (!s || typeof s !== 'object' || Array.isArray(s)) return;
     const cssId = String(s.css_id || s._element_id || s._css_id || el.id || '');
     // Hình form: element có css_id left-form HOẶC chứa CF7 widget
-    const isForm = cssId === 'left-form' || containsFormWidget(el);
+    const isForm = cssId === 'left-form' || isDirectFormContainer(el);
     if (isForm && !formContainer && (el.elType === 'container' || el.elType === 'section')) {
       formContainer = el;
     }
     const bg = s.background_image;
-    if (!isImageObject(bg)) return;
+    if (!isBackgroundObject(bg)) return;
     // Giữ nguyên nếu URL nằm trong keep-list
     if (keepUrls.some((u) => bg.url.includes(u))) {
       details.push(`giữ ${cssId || el.id} (${bg.url.split('/').pop()})`);
@@ -108,7 +120,7 @@ export function replaceBackgroundsByRole(elements, bg1Media, bg2Media, keepCssId
       return;
     }
     if (keep.has(cssId)) {
-      details.push(`giữ ${cssId || el.id} (#${bg.id})`);
+      details.push(`giữ ${cssId || el.id} (#${bg.id || '?'})`);
       if (isForm) formBgSet = true;
       return;
     }
@@ -121,7 +133,7 @@ export function replaceBackgroundsByRole(elements, bg1Media, bg2Media, keepCssId
     s.background_image = { ...bg, id: target.id, url: target.url };
     count++;
     if (isForm) formBgSet = true;
-    details.push(`${cssId || el.id}: #${bg.id} → #${target.id}${isForm ? ' (bg2/form)' : ' (bg1)'}`);
+    details.push(`${cssId || el.id}: ${bg.id || '?'} → #${target.id}${isForm ? ' (bg2/form)' : ' (bg1)'}`);
   });
   // Fallback: form container chưa có background → SET mới luôn
   // (template xóa ảnh placeholder thì tool vẫn gán được)
@@ -153,7 +165,7 @@ export function replaceCustomCssImages(elements, bg1Media, bg2Media, keepCssIds 
     if (typeof css !== 'string' || !css.includes('url(')) return;
     const cssId = String(s.css_id || s._element_id || s._css_id || el.id || '');
     if (keep.has(cssId)) return;
-    const isForm = cssId === 'left-form' || containsFormWidget(el);
+    const isForm = cssId === 'left-form' || isDirectFormContainer(el);
     const target = isForm ? bg2Media : bg1Media;
     const re = /url\(\s*(['"]?)(https?:\/\/[^'")]+?\.(?:jpg|jpeg|png|webp|gif|svg|avif))(\1)\s*\)/gi;
     let newCss = css;
