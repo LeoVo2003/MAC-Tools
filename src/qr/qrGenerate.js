@@ -48,32 +48,87 @@ const KEEP_BACKGROUND_URLS = [
   '303-bg-1-1-hori-cc-beige-brown.jpg', // user chốt 2026-10-16: giữ nguyên
 ];
 
+/** RGB (0-255) → HSL (h:0-360, s:0-1, l:0-1) */
+function rgbToHsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) return [0, 0, l];
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h;
+  if (max === r) h = ((g - b) / d + (g < b ? 6 : 0));
+  else if (max === g) h = ((b - r) / d + 2);
+  else h = ((r - g) / d + 4);
+  return [h * 60, s, l];
+}
+
+/** HSL → RGB (0-255) */
+function hslToRgb(h, s, l) {
+  h = ((h % 360) + 360) % 360 / 360;
+  const hue2rgb = (p, q, t) => {
+    if (t < 0) t += 1;
+    if (t > 1) t -= 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  };
+  let r, g, b;
+  if (s === 0) {
+    r = g = b = l;
+  } else {
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    r = hue2rgb(p, q, h + 1 / 3);
+    g = hue2rgb(p, q, h);
+    b = hue2rgb(p, q, h - 1 / 3);
+  }
+  return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+}
+
 /**
- * Tự sinh màu phụ từ màu chính (khi user để trống):
- * - Màu chính TỐI (YIQ < 128) → lighten 50% về phía trắng.
- * - Màu chính SÁNG → darken 50% về phía đen.
+ * Tự sinh màu phụ từ màu chính (khi user để trống).
+ * Logic nâng cao để màu đẹp, hài hòa:
+ * - Giữ nguyên hue → cùng tone với màu chính.
+ * - Điều chỉnh lightness về vùng "đẹp": tối thì sáng lên, sáng thì tối đi.
+ * - Tăng nhẹ saturation cho màu rất tối để không bị phớt xám.
  * Giữ nguyên alpha nếu là #RRGGBBAA.
  */
-function contrastShadeHex(hex, pct = 50) {
+function contrastShadeHex(hex) {
   const m = /^#([0-9a-fA-F]{6})([0-9a-fA-F]{2})?$/i.exec(String(hex || '').trim());
   if (!m) return '#000000';
   const n = parseInt(m[1], 16);
   const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
   const alpha = m[2] ? m[2].toUpperCase() : '';
-  const yiq = (r * 299 + g * 587 + b * 114) / 1000;
-  const f = pct / 100;
-  let nr, ng, nb;
-  if (yiq < 128) {
-    // Tối → lighten về trắng
-    nr = Math.round(r + (255 - r) * f);
-    ng = Math.round(g + (255 - g) * f);
-    nb = Math.round(b + (255 - b) * f);
+  let [h, s, l] = rgbToHsl(r, g, b);
+
+  let targetL, targetS = s;
+  // Chỉ boost saturation khi màu gốc đã có sắc (tránh xám bị ám màu)
+  const boost = (factor) => (s > 0.25 ? Math.min(1, s * factor) : s);
+  if (l < 0.12) {
+    // Rất tối (gần đen) → lên mid-tone
+    targetL = 0.52;
+    targetS = boost(1.12);
+  } else if (l < 0.3) {
+    // Tối → sáng lên vùng 55%
+    targetL = 0.55;
+    targetS = boost(1.06);
+  } else if (l < 0.45) {
+    // Hơi tối → lên 62%
+    targetL = 0.62;
+  } else if (l <= 0.6) {
+    // Trung bình → lệch đi cho có contrast (ưu tiên tối đi)
+    targetL = l < 0.52 ? 0.72 : 0.32;
+  } else if (l < 0.85) {
+    // Sáng → tối về 35%
+    targetL = 0.35;
   } else {
-    // Sáng → darken về đen
-    nr = Math.round(r * (1 - f));
-    ng = Math.round(g * (1 - f));
-    nb = Math.round(b * (1 - f));
+    // Rất sáng (gần trắng) → về 45%
+    targetL = 0.45;
   }
+
+  const [nr, ng, nb] = hslToRgb(h, targetS, targetL);
   const hx = (v) => Math.max(0, Math.min(255, v)).toString(16).padStart(2, '0');
   return `#${hx(nr)}${hx(ng)}${hx(nb)}`.toUpperCase() + alpha;
 }
@@ -181,9 +236,9 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   if (!isHex(primary) && !isGradient(primary)) throw new Error('Màu chính không hợp lệ (hex hoặc gradient)');
   let secondaryRaw = inputs.secondary?.trim() || '';
   if (!secondaryRaw) {
-    // Tự sinh: màu tối → lighten 50%, màu sáng → darken 50%.
+    // Tự sinh màu phụ hài hòa từ màu chính (HSL smart).
     // Gradient thì dùng nguyên primary.
-    secondaryRaw = isHex(primary) ? contrastShadeHex(primary, 50) : primary;
+    secondaryRaw = isHex(primary) ? contrastShadeHex(primary) : primary;
   }
   secondaryRaw = secondaryRaw.toUpperCase();
   if (!isHex(secondaryRaw) && !isGradient(secondaryRaw)) throw new Error('Màu phụ không hợp lệ (hex hoặc gradient)');
