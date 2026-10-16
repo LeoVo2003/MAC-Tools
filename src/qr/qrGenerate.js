@@ -39,15 +39,16 @@ const OLD_ATTACHMENTS = {
   // 9507 (placeholder) và 9510 (dưới form): giữ nguyên
 };
 
-/** Darken hex 50% */
-function darkenHex(hex, pct = 50) {  const m = /^#([0-9a-fA-F]{6})$/.exec(String(hex || '').trim());
+/** Darken hex 50% (giữ nguyên alpha nếu là #RRGGBBAA) */
+function darkenHex(hex, pct = 50) {  const m = /^#([0-9a-fA-F]{6})([0-9a-fA-F]{2})?$/.exec(String(hex || '').trim());
   if (!m) return '#000000';
   const n = parseInt(m[1], 16);
   const f = 1 - pct / 100;
   const r = Math.round(((n >> 16) & 255) * f);
   const g = Math.round(((n >> 8) & 255) * f);
   const b = Math.round((n & 255) * f);
-  return '#' + [r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('').toUpperCase();
+  const alpha = m[2] ? m[2].toUpperCase() : '';
+  return '#' + [r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('').toUpperCase() + alpha;
 }
 
 /** Convert social URL → review URL qua worker */
@@ -128,8 +129,9 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   if (!isHex(primary) && !isGradient(primary)) throw new Error('Màu chính không hợp lệ (hex hoặc gradient)');
   let secondaryRaw = inputs.secondary?.trim() || '';
   if (!secondaryRaw) {
-    // Darken chỉ áp dụng cho hex; gradient thì dùng stop cuối
-    secondaryRaw = isHex(primary) ? darkenHex(primary.slice(0, 7), 50) : primary;
+    // Darken chỉ áp dụng cho hex; gradient thì dùng stop cuối.
+    // Giữ nguyên alpha nếu primary là #RRGGBBAA.
+    secondaryRaw = isHex(primary) ? darkenHex(primary, 50) : primary;
   }
   secondaryRaw = secondaryRaw.toUpperCase();
   if (!isHex(secondaryRaw) && !isGradient(secondaryRaw)) throw new Error('Màu phụ không hợp lệ (hex hoặc gradient)');
