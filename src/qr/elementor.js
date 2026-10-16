@@ -235,10 +235,10 @@ export function replaceThemeCssImages(elements, bg2Media) {
  */
 export function patchButtonWeight(elements, weight = 700) {
   let patched = false;
-  // Patch font-weight + màu chữ trên nút (dùng biến --qr-text-on-primary/secondary
-  // do tool tính, đảm bảo contrast với màu nền nút).
-  // Cover cả HTML .btn-m/.btn-s lẫn Elementor Button widget.
-  const override = `\n/* TOOL PATCH: nút có font-weight + màu chữ đúng contrast */\n.btn-m a, .btn-s a, .btn-s .wpcf7-submit { font-weight: ${weight} !important; }\n.btn-m a { color: var(--qr-text-on-primary, #141414) !important; }\n.btn-s a, .btn-s .wpcf7-submit { color: var(--qr-text-on-secondary, #141414) !important; }\n.elementor-button-link { color: var(--qr-text-on-primary, #141414) !important; }\n.back-btn a, .btn-back a, a.back-btn, [class*=\"back\"] a { color: var(--qr-text-on-secondary, #FFFFFF) !important; }\n/* Icon trong nút và social icons đổi màu theo chữ */\n.btn-m a svg, .btn-s a svg { fill: currentColor !important; }\n.btn-m a i, .btn-s a i, .btn-m a .fa, .btn-s a .fa { color: inherit !important; }\n.social-icons a, .social-icon a, [class*=\"social\"] a { color: var(--qr-text-on-secondary, #FFFFFF) !important; }\n.social-icons a svg, [class*=\"social\"] a svg { fill: currentColor !important; }\n`;
+  // (Review 2 - 1.2) TẤT CẢ nút trong template đều có background = var(--qr-primary)
+  // (secondary chỉ là viền), nên chữ/icon LUÔN dùng --qr-text-on-primary.
+  // Patch cũ dùng on-secondary cho .btn-s/social → vàng/cam/nâu chỉ 1.4-3.1:1.
+  const override = `\n/* TOOL PATCH: nút có font-weight + màu chữ đúng contrast */\n.btn-m a, .btn-s a, .btn-l a, .btn-s .wpcf7-submit { font-weight: ${weight} !important; }\n.btn-m a, .btn-s a, .btn-l a, .btn-s .wpcf7-submit, .elementor-button-link { color: var(--qr-text-on-primary, #141414) !important; }\n/* Icon trong nút và social icons đổi màu theo chữ (dùng currentColor) */\n.btn-m a svg, .btn-s a svg, .btn-l a svg { fill: currentColor !important; }\n.btn-m a svg path, .btn-s a svg path, .btn-l a svg path { fill: currentColor !important; }\n.btn-m a i, .btn-s a i, .btn-l a i { color: inherit !important; }\n.social-icons a, .social-icon a, [class*=\"social\"] a { color: var(--qr-text-on-primary, #141414) !important; }\n.social-icons a svg, [class*=\"social\"] a svg { fill: currentColor !important; }\n.social-icons a svg path, [class*=\"social\"] a svg path { fill: currentColor !important; }\n`;
   walkElements(elements, (el) => {
     if (patched) return;
     const wt = String(el.widgetType || '').toLowerCase();

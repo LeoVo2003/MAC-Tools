@@ -23,11 +23,11 @@ test('secondary tự sinh luôn phân biệt được với primary (hex)', () =
   }
 });
 
-test('luôn trả đủ 9 biến, kể cả gradient / alpha', () => {
+test('luôn trả đủ 10 biến, kể cả gradient / alpha', () => {
   for (const p of SAMPLES) {
     const { vars } = buildPalette(p);
     for (const k of ['--qr-primary', '--qr-secondary', '--qr-primary-soft', '--qr-bg', '--qr-text',
-      '--qr-text-on-primary', '--qr-text-on-secondary', '--qr-text-on-soft']) {
+      '--qr-text-on-primary', '--qr-text-on-secondary', '--qr-text-on-soft', '--qr-accent-ink']) {
       assert.ok(vars[k], `${p} thiếu ${k}`);
     }
     assert.ok(parseHex(vars['--qr-secondary'].slice(0, 7)) || isGradient(vars['--qr-secondary']));

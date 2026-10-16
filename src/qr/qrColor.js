@@ -155,6 +155,13 @@ export function buildPalette(primaryRaw, secondaryRaw = '') {
   const bg   = tint(0.985, 0.06, 0.012);          // nền trang (gần trắng, ám nhẹ hue)
   const ink  = tint(0.24, 0.20, 0.035);           // chữ thân trang (gần đen, ám nhẹ hue)
 
+  // (Review 2 - 1.4) --qr-accent-ink: primary hạ lightness đến khi ≥4.5:1 trên soft
+  // Dùng cho heading-3, icon/link cần màu thương hiệu trên nền sáng
+  let accentInk = oklchToHex({ L: p.L, C: p.C, h: p.h });
+  for (let l = p.L; l > 0.15 && contrast(accentInk, soft) < 4.5; l -= 0.02) {
+    accentInk = oklchToHex({ L: l, C: p.C, h: p.h });
+  }
+
   const onPrimary = pickTextColor(primStops), onSecondary = pickTextColor(secStops), onSoft = pickTextColor(soft);
   const vars = {
     '--qr-primary': primary,
@@ -165,11 +172,13 @@ export function buildPalette(primaryRaw, secondaryRaw = '') {
     '--qr-text-on-primary': onPrimary.color,
     '--qr-text-on-secondary': onSecondary.color,
     '--qr-text-on-soft': onSoft.color,
+    '--qr-accent-ink': accentInk,
   };
   const report = {
     onPrimary: onPrimary.ratio, onSecondary: onSecondary.ratio, onSoft: onSoft.ratio,
     textOnBg: +contrast(bg, ink).toFixed(2), textOnSoft: +contrast(soft, ink).toFixed(2),
     primaryVsSecondary: +contrast(primStops[0], secStops[0]).toFixed(2),
+    accentInkOnSoft: +contrast(accentInk, soft).toFixed(2),
     warnings: [],
   };
   if (report.onPrimary < 4.5) report.warnings.push(`Chữ trên nút primary chỉ ${report.onPrimary}:1 (<4.5) — nên đổi màu chính.`);
@@ -177,5 +186,6 @@ export function buildPalette(primaryRaw, secondaryRaw = '') {
   if (report.primaryVsSecondary < 1.3) report.warnings.push('Primary và secondary quá giống nhau.');
   if (p.L > 0.93) report.warnings.push('Màu chính gần trắng — sẽ không nổi trên nền sáng.');
   if (primary.length === 9) report.warnings.push('Primary có alpha — contrast tính trên màu đặc, thực tế sẽ thấp hơn.');
+  if (report.accentInkOnSoft < 4.5) report.warnings.push(`Màu nhấn trên nền soft chỉ ${report.accentInkOnSoft}:1 (<4.5).`);
   return { vars, report };
 }
