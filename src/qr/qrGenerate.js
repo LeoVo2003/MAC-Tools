@@ -354,7 +354,7 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
         exclude_blank: 'on',
       },
     });
-    step('cf7', true, `form #${cf7Form.id}`);
+    step('cf7', true, `form #${cf7Form.id} (to: ${cf7Form.mailToSaved || '?'})`);
     result.cf7 = cf7Form;
   } else {
     step('cf7', true, 'bỏ qua (skipCf7)');

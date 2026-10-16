@@ -136,8 +136,8 @@ export async function wpGetElementorData(postId) {
 
 /** Tạo CF7 form → { id, title } */
 export async function wpCreateCF7Form({ title, form, mail }) {
-  // Dùng custom endpoint /qr/v1/create-cf7 (PHP API trực tiếp, ổn định hơn
-  // CF7 REST API bản 6.1). Cần snippet v10+.
+  // Dùng custom endpoint /qr/v1/create-cf7 (PHP API trực tiếp).
+  // Cần snippet v11+. Trả về lỗi chi tiết nếu thiếu mail_to.
   const data = await wpFetch('/qr/v1/create-cf7', {
     method: 'POST',
     body: {
@@ -149,7 +149,7 @@ export async function wpCreateCF7Form({ title, form, mail }) {
     },
   });
   if (!data?.id) throw new Error(`Tạo CF7 form thất bại: ${data?.message || data?.code || 'không có ID trả về'}`);
-  return { id: data.id, title: data.title || title };
+  return { id: data.id, title: data.title || title, mailToSaved: data.mail_to_saved };
 }
 
 /** Tìm page theo slug → page object hoặc null */
