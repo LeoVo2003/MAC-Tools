@@ -82,6 +82,40 @@ export async function wpUploadMedia(fileBuffer, filename, mimeType) {
   }
 }
 
+/**
+ * Tìm attachment theo MD5 hash nội dung file (dedup, không phụ thuộc tên file).
+ * Cần snippet v9+ (endpoint /qr/v1/find-media-by-hash + meta _qr_file_hash).
+ * @param {string} hash - MD5 hex 32 ký tự
+ * @returns {Promise<{id:number, url:string}|null>}
+ */
+export async function wpFindMediaByHash(hash) {
+  try {
+    const data = await wpFetch('/qr/v1/find-media-by-hash', {
+      method: 'POST',
+      body: { hash },
+    });
+    if (data?.found && data.id) return { id: data.id, url: data.url };
+  } catch {
+    // Endpoint chưa có (snippet cũ) → bỏ qua, upload như bình thường
+  }
+  return null;
+}
+
+/**
+ * Lưu hash lên attachment vừa upload (để lần sau tìm được).
+ * Dùng meta _qr_file_hash đã register show_in_rest ở snippet v9+.
+ */
+export async function wpSaveMediaHash(id, hash) {
+  try {
+    await wpFetch(`/wp/v2/media/${id}`, {
+      method: 'POST',
+      body: { meta: { _qr_file_hash: hash } },
+    });
+  } catch {
+    // Không lưu được cũng không sao — chỉ mất khả năng dedup
+  }
+}
+
 /** Lấy _elementor_data của template (cần mu-plugin hoặc meta expose) */
 export async function wpGetElementorData(postId) {
   // Thử qua custom endpoint của mu-plugin trước

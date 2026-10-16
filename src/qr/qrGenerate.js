@@ -1,8 +1,11 @@
 /**
  * QR Generate orchestration — điều phối toàn bộ flow tạo QR landing page.
  */
+import { createHash } from 'crypto';
 import {
   wpUploadMedia,
+  wpFindMediaByHash,
+  wpSaveMediaHash,
   wpGetElementorData,
   wpCreateCF7Form,
   wpFindPageBySlug,
@@ -198,10 +201,23 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
     prepareImage(files.bg2, 'hình form'),
   ]);
   log('Upload 3 ảnh lên WP...');
+  // Dedup: tính MD5 trước, nếu đã có trên web (kể cả khác tên) thì dùng lại
+  const md5 = (buf) => createHash('md5').update(buf).digest('hex');
+  const getOrUpload = async (file, label) => {
+    const hash = md5(file.buffer);
+    const existing = await wpFindMediaByHash(hash);
+    if (existing) {
+      log(`Dùng lại ảnh ${label} #${existing.id} (đã có trên web)`);
+      return { id: existing.id, url: existing.url };
+    }
+    const media = await wpUploadMedia(file.buffer, file.filename, file.mimetype);
+    await wpSaveMediaHash(media.id, hash);
+    return media;
+  };
   const [logoMedia, bg1Media, bg2Media] = await Promise.all([
-    wpUploadMedia(logoFile.buffer, logoFile.filename, logoFile.mimetype),
-    wpUploadMedia(bg1File.buffer, bg1File.filename, bg1File.mimetype),
-    wpUploadMedia(bg2File.buffer, bg2File.filename, bg2File.mimetype),
+    getOrUpload(logoFile, 'logo'),
+    getOrUpload(bg1File, 'background'),
+    getOrUpload(bg2File, 'hình form'),
   ]);
   step('upload', true, `logo=${logoMedia.id}, bg1=${bg1Media.id}, bg2=${bg2Media.id}`);
   result.media = { logo: logoMedia, bg1: bg1Media, bg2: bg2Media };
