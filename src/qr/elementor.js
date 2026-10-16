@@ -235,7 +235,9 @@ export function replaceThemeCssImages(elements, bg2Media) {
  */
 export function patchButtonWeight(elements, weight = 700) {
   let patched = false;
-  const override = `\n/* TOOL PATCH: nút có font-weight */\n.btn-m a, .btn-s a, .btn-s .wpcf7-submit { font-weight: ${weight} !important; }\n`;
+  // Patch font-weight + màu chữ trên nút (dùng biến --qr-text-on-primary/secondary
+  // do tool tính, đảm bảo contrast với màu nền nút)
+  const override = `\n/* TOOL PATCH: nút có font-weight + màu chữ đúng contrast */\n.btn-m a, .btn-s a, .btn-s .wpcf7-submit { font-weight: ${weight} !important; }\n.btn-m a { color: var(--qr-text-on-primary, #141414) !important; }\n.btn-s a, .btn-s .wpcf7-submit { color: var(--qr-text-on-secondary, #141414) !important; }\n`;
   walkElements(elements, (el) => {
     if (patched) return;
     const wt = String(el.widgetType || '').toLowerCase();

@@ -139,8 +139,9 @@ function contrastShadeHex(hex) {
  * (cùng công thức với JS qrThemeInit trong theme).
  * Tool fill trực tiếp để không phụ thuộc JS — JS của theme chỉ parse
  * được hex 6 ký tự, primary 8-digit sẽ làm nó fail.
+ * Thêm --qr-text-on-primary và --qr-text-on-secondary cho màu chữ trên nút.
  */
-function deriveThemeColors(primary) {
+function deriveThemeColors(primary, secondary) {
   const m = /^#([0-9a-fA-F]{6})([0-9a-fA-F]{2})?$/i.exec(String(primary || '').trim());
   if (!m) return {};
   const n = parseInt(m[1], 16);
@@ -152,11 +153,23 @@ function deriveThemeColors(primary) {
   // chữ trên nền đậm/nhạt: đảo theo YIQ
   const yiq = (r * 299 + g * 587 + b * 114) / 1000;
   const yiqSoft = (sr * 299 + sg * 587 + sb * 114) / 1000;
-  return {
+  const result = {
     '--qr-primary-soft': soft,
     '--qr-text': yiq > 128 ? '#141414' : '#FFFFFF',
     '--qr-text-on-soft': yiqSoft > 128 ? '#141414' : '#FFFFFF',
   };
+  // Màu chữ trên nút primary/secondary (tính theo YIQ của từng màu)
+  const yiqOf = (hex) => {
+    const mm = /^#([0-9a-fA-F]{6})/.exec(String(hex || '').trim());
+    if (!mm) return 255;
+    const nn = parseInt(mm[1], 16);
+    return (((nn >> 16) & 255) * 299 + (((nn >> 8) & 255) * 587) + ((nn & 255) * 114)) / 1000;
+  };
+  result['--qr-text-on-primary'] = yiqOf(primary) > 128 ? '#141414' : '#FFFFFF';
+  if (secondary) {
+    result['--qr-text-on-secondary'] = yiqOf(secondary) > 128 ? '#141414' : '#FFFFFF';
+  }
+  return result;
 }
 
 /** Convert social URL → review URL qua worker */
@@ -494,7 +507,7 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
     '--qr-primary': primary,
     '--qr-secondary': secondary,
     '--qr-logo-filter': inputs.logoFilter ? 'brightness(0) invert(1)' : 'none',
-    ...deriveThemeColors(primary),
+    ...deriveThemeColors(primary, secondary),
   };
   const cssVarsBlock = buildCssVariablesBlock(cssVars);
   const cssOk = replaceCssVariables(elements, cssVars);
