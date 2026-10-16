@@ -99,6 +99,74 @@ export function replaceBackgroundsByRole(elements, bg1Media, bg2Media, keepCssId
 }
 
 /**
+ * Replace ảnh hardcode trong custom_css của element
+ * (vd #left-form dùng selector::before { background-image: url('...') }).
+ * - left-form → bg2, còn lại → bg1.
+ * Chỉ đụng URL ảnh http(s) có đuôi file ảnh.
+ */
+export function replaceCustomCssImages(elements, bg1Media, bg2Media, keepCssIds = []) {
+  let count = 0;
+  const details = [];
+  const keep = new Set(keepCssIds);
+  walkElements(elements, (el) => {
+    const s = el.settings || {};
+    if (!s || typeof s !== 'object' || Array.isArray(s)) return;
+    const css = s.custom_css;
+    if (typeof css !== 'string' || !css.includes('url(')) return;
+    const cssId = String(s.css_id || s._element_id || s._css_id || el.id || '');
+    if (keep.has(cssId)) return;
+    const isForm = cssId === 'left-form';
+    const target = isForm ? bg2Media : bg1Media;
+    const re = /url\(\s*(['"]?)(https?:\/\/[^'")]+?\.(?:jpg|jpeg|png|webp|gif|svg|avif))(\1)\s*\)/gi;
+    let newCss = css;
+    let m;
+    const seen = new Set();
+    while ((m = re.exec(css)) !== null) {
+      const oldUrl = m[2];
+      if (oldUrl === target.url || seen.has(oldUrl)) continue;
+      seen.add(oldUrl);
+      newCss = newCss.split(oldUrl).join(target.url);
+      count++;
+      details.push(`${cssId || el.id} custom_css: ...${oldUrl.slice(-40)} → #${target.id}${isForm ? ' (bg2/form)' : ' (bg1)'}`);
+    }
+    if (newCss !== css) s.custom_css = newCss;
+  });
+  return { count, details };
+}
+
+/**
+ * Patch CSS theme: nút .btn-m/.btn-s thiếu font-weight (theme gốc không set).
+ * Append rule override vào cuối <style> của HTML widget theme.
+ * @param {Array} elements
+ * @param {number} weight - font-weight cho nút (mặc định 700)
+ * @returns {boolean} có patch được không
+ */
+export function patchButtonWeight(elements, weight = 700) {
+  let patched = false;
+  const override = `\n/* TOOL PATCH: nút có font-weight */\n.btn-m a, .btn-s a, .btn-s .wpcf7-submit { font-weight: ${weight} !important; }\n`;
+  walkElements(elements, (el) => {
+    if (patched) return;
+    const wt = String(el.widgetType || '').toLowerCase();
+    if (wt === 'html' || wt.includes('html')) {
+      const s = el.settings || {};
+      for (const key of ['html', 'custom_html']) {
+        const val = s[key];
+        if (typeof val === 'string' && val.includes('.btn-m a') && val.includes('</style>')) {
+          if (val.includes('TOOL PATCH: nút có font-weight')) {
+            patched = true; // đã patch rồi
+          } else {
+            s[key] = val.replace('</style>', `${override}</style>`);
+            patched = true;
+          }
+          break;
+        }
+      }
+    }
+  });
+  return patched;
+}
+
+/**
  * Replace text tokens: {{ten}}, {{dia_chi}}, v.v.
  * Đệ quy vào mọi string trong settings (kể cả repeater rows như
  * social_icon_list, icon_list) — bản cũ chỉ check cấp đầu nên miss.

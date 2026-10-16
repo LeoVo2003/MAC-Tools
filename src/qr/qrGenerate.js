@@ -18,6 +18,8 @@ import {
 } from './wpClient.js';
 import {
   replaceBackgroundsByRole,
+  replaceCustomCssImages,
+  patchButtonWeight,
   replaceTokens,
   replaceColors,
   replaceLogoInHeader,
@@ -305,6 +307,22 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   );
   step('replace-media', true, `${bgRes.count} chỗ`);
   for (const d of bgRes.details) log(`[qr] bg: ${d}`);
+
+  // 7a1. Ảnh hardcode trong custom_css (vd #left-form::before url(...))
+  const cssImgRes = replaceCustomCssImages(
+    elements,
+    { id: bg1Media.id, url: bg1Media.url },
+    { id: bg2Media.id, url: bg2Media.url },
+    KEEP_BACKGROUND_CSS_IDS,
+  );
+  if (cssImgRes.count) {
+    step('replace-css-img', true, `${cssImgRes.count} chỗ`);
+    for (const d of cssImgRes.details) log(`[qr] css-img: ${d}`);
+  }
+
+  // 7a2. Patch font-weight cho nút (theme gốc thiếu)
+  const btnWO = patchButtonWeight(elements);
+  if (btnWO) step('patch-btn-weight', true, 'font-weight: 700');
 
   // 7a2. Logo: img trong #custom-header + link về homepage
   const logoOk = replaceLogoInHeader(elements, { id: logoMedia.id, url: logoMedia.url }, inputs.homeLink || '');
