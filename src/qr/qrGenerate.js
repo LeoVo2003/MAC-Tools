@@ -9,12 +9,12 @@ import {
   wpGetElementorData,
   wpCreateCF7Form,
   wpDeleteCF7Form,
+  wpDeletePage,
   wpFindPageBySlug,
   wpCreatePage,
   wpImportTemplate,
   wpSetElementorData,
   wpPublishPage,
-  wpRegenerateElementorCss,
   wpConfigOk,
   wpClearErrorLog,
   wpGetErrorLog,
@@ -34,7 +34,6 @@ import {
   slugify,
   countElements,
 } from './elementor.js';
-import { installBridge, removeBridge } from './sftpBridge.js';
 import { buildPalette, logoFilterCss } from './qrColor.js';
 
 function getTemplateId() { return Number(process.env.QR_TEMPLATE_ID) || 2806; }
@@ -105,16 +104,6 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   // (2.3) Rollback stack — hoàn tác khi lỗi giữa chừng
   const rollback = [];
   const created = { cf7Id: null, pageId: null, pageIsNew: false };
-
-  // 0. Cài mu-plugin tạm (tự xóa sau job)
-  let bridgeInstalled = false;
-  try {
-    bridgeInstalled = await installBridge(log);
-    // Đợi 1s để WP nhận plugin mới
-    if (bridgeInstalled) await new Promise((r) => setTimeout(r, 1000));
-  } catch (err) {
-    log(`[qr-bridge] Lỗi cài plugin: ${err.message} — tiếp tục với template cache.`);
-  }
 
   try {
 
@@ -415,11 +404,7 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   step('publish', true, `#${pageId}`);
   result.page = { id: pageId, slug, url: published.link || `${getWpBase()}/${slug}/` };
 
-  // 11. Regenerate CSS
-  await wpRegenerateElementorCss(pageId);
-  step('regenerate-css', true);
-
-  // 12. Verify bằng GET (trigger render thật, không phải HEAD)
+  // 11. Verify bằng GET (trigger render thật, không phải HEAD)
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 25000);
@@ -457,14 +442,12 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   result.palette = { vars: palette.vars, report: palette.report };
 
   return result;
-  } finally {
-    // Luôn xóa mu-plugin tạm sau job (dù thành công hay thất bại)
-    if (bridgeInstalled) {
-      try {
-        await removeBridge(log);
-      } catch (err) {
-        log(`[qr-bridge] Lỗi xóa plugin: ${err.message} — cần xóa tay: qr-bridge-temp.php`);
-      }
+  } catch (err) {
+    // (2.3) Rollback: xóa CF7/page đã tạo khi lỗi giữa chừng
+    log(`[qr] Lỗi: ${err.message} — đang rollback...`);
+    for (const undo of rollback.reverse()) {
+      try { await undo(); } catch {}
     }
+    throw err;
   }
 }

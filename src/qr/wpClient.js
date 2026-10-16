@@ -119,22 +119,28 @@ export async function wpSaveMediaHash(id, hash) {
   }
 }
 
-/** Lấy _elementor_data của template (cần mu-plugin hoặc meta expose) */
-export async function wpGetElementorData(postId) {
-  // Thử qua custom endpoint của mu-plugin trước
-  try {
-    const data = await wpFetch(`/qr/v1/template/${postId}`);
-    if (data?.elementor_data) return data.elementor_data;
-  } catch { /* fallback */ }
-  // Fallback: thử các post type (pages, elementor_library)
-  for (const type of ['pages', 'elementor_library']) {
-    try {
-      const page = await wpFetch(`/wp/v2/${type}/${postId}?context=edit`);
-      const ed = page?.meta?._elementor_data;
-      if (ed) return typeof ed === 'string' ? JSON.parse(ed) : ed;
-    } catch { /* thử type tiếp theo */ }
+/**
+ * Đọc _elementor_data RAW của template/page qua snippet v16.
+ * GET /qr/v1/template/{id} → { id, raw } (chuỗi raw, không qua PHP json_decode
+ * để {} rỗng không bị biến thành [] — xem 2.14).
+ * Node JSON.parse trực tiếp → {} giữ nguyên là {}.
+ */
+export async function wpGetTemplateRaw(postId) {
+  const data = await wpFetch(`/qr/v1/template/${postId}`);
+  if (!data?.raw || typeof data.raw !== 'string') {
+    throw new Error(`Template/page ${postId}: endpoint /qr/v1/template không trả raw (cần snippet v16+)`);
   }
-  throw new Error(`Không lấy được _elementor_data của post ${postId}. Cần mu-plugin qr-template.`);
+  return JSON.parse(data.raw);
+}
+
+/**
+ * Lấy _elementor_data đã parse của template hoặc page.
+ * Dùng snippet endpoint (không còn SFTP bridge — xem 2.6).
+ */
+export async function wpGetElementorData(postId) {
+  const elements = await wpGetTemplateRaw(postId);
+  if (!Array.isArray(elements)) throw new Error(`Post ${postId}: _elementor_data không phải array`);
+  return elements;
 }
 
 /** Tạo CF7 form → { id, title } */
@@ -159,6 +165,16 @@ export async function wpCreateCF7Form({ title, form, mail }) {
 export async function wpDeleteCF7Form(id) {
   try {
     await wpFetch(`/qr/v1/delete-cf7/${id}`, { method: 'DELETE' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Xóa page (dùng cho rollback) — force delete */
+export async function wpDeletePage(id) {
+  try {
+    await wpFetch(`/wp/v2/pages/${id}?force=true`, { method: 'DELETE' });
     return true;
   } catch {
     return false;
@@ -226,16 +242,6 @@ export async function wpPublishPage(pageId) {
       // bỏ qua lỗi đọc log
     }
     throw err;
-  }
-}
-
-/** Xóa cache Elementor CSS của page (force regenerate) */
-export async function wpRegenerateElementorCss(pageId) {
-  try {
-    // Xóa postmeta _elementor_css để Elementor regenerate lần view sau
-    await wpFetch(`/qr/v1/regenerate-css/${pageId}`, { method: 'POST' });
-  } catch {
-    // mu-plugin chưa có endpoint này thì bỏ qua, Elementor tự regenerate khi edit
   }
 }
 

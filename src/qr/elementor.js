@@ -386,11 +386,20 @@ export function rebindCF7(elements, newFormId) {
  */
 export function removeReviewCta(elements, platform) {
   // platform: 'google' | 'yelp'
+  // (2.9) Ưu tiên marker class, fallback heuristic chuỗi cũ
+  const marker = platform === 'google' ? 'qr-cta-google-review' : 'qr-cta-yelp-review';
   let removed = 0;
+  const hasMarker = (el) => {
+    const s = el.settings || {};
+    const classes = String(s._css_classes || s.css_classes || '');
+    return classes.split(/\s+/).includes(marker);
+  };
   const shouldRemove = (el) => {
+    // Ưu tiên marker class chính xác
+    if (hasMarker(el)) return true;
+    // Fallback: heuristic chuỗi cũ (kém chính xác hơn)
     const s = el.settings || {};
     const text = JSON.stringify(s).toLowerCase();
-    // Tìm text "review" + platform
     return text.includes('review') && text.includes(platform);
   };
   const filterTree = (arr) => {
