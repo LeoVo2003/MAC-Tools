@@ -22,19 +22,36 @@ export function countElements(elements) {
 /**
  * Replace media: tìm widget có image settings trùng attachment ID hoặc URL cũ
  * → set id + url mới.
+ *
+ * CHỈ match plain image object {id: number, url: string}.
+ * KHÔNG match array (repeater/gallery) — từng gây fatal sanitize_settings
+ * vì biến repeater thành {id, url}.
+ *
  * @param {Array} elements
  * @param {Array<{oldId:number, oldUrl:string, newId:number, newUrl:string}>} mappings
  * @returns {number} số chỗ đã replace
  */
+function isImageObject(v) {
+  return (
+    v !== null &&
+    typeof v === 'object' &&
+    !Array.isArray(v) &&
+    typeof v.id === 'number' &&
+    typeof v.url === 'string'
+  );
+}
+
 export function replaceMedia(elements, mappings) {
   let count = 0;
   walkElements(elements, (el) => {
     const s = el.settings || {};
+    // settings phải là plain object (bỏ qua nếu là array/string/số)
+    if (!s || typeof s !== 'object' || Array.isArray(s)) return;
     for (const m of mappings) {
       // Check các key ảnh phổ biến: image, background_image, etc.
       for (const key of Object.keys(s)) {
         const v = s[key];
-        if (v && typeof v === 'object' && (v.id === m.oldId || v.url === m.oldUrl)) {
+        if (isImageObject(v) && (v.id === m.oldId || v.url === m.oldUrl)) {
           s[key] = { ...v, id: m.newId, url: m.newUrl };
           count++;
         }
