@@ -51,6 +51,31 @@ function darkenHex(hex, pct = 50) {  const m = /^#([0-9a-fA-F]{6})([0-9a-fA-F]{2
   return '#' + [r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('').toUpperCase() + alpha;
 }
 
+/**
+ * Sinh --qr-primary-soft / --qr-text / --qr-text-on-soft từ primary
+ * (cùng công thức với JS qrThemeInit trong theme).
+ * Tool fill trực tiếp để không phụ thuộc JS — JS của theme chỉ parse
+ * được hex 6 ký tự, primary 8-digit sẽ làm nó fail.
+ */
+function deriveThemeColors(primary) {
+  const m = /^#([0-9a-fA-F]{6})([0-9a-fA-F]{2})?$/i.exec(String(primary || '').trim());
+  if (!m) return {};
+  const n = parseInt(m[1], 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  // soft: primary pha 90% trắng
+  const sr = r * 0.1 + 255 * 0.9, sg = g * 0.1 + 255 * 0.9, sb = b * 0.1 + 255 * 0.9;
+  const hx = (v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0');
+  const soft = `#${hx(sr)}${hx(sg)}${hx(sb)}`.toUpperCase();
+  // chữ trên nền đậm/nhạt: đảo theo YIQ
+  const yiq = (r * 299 + g * 587 + b * 114) / 1000;
+  const yiqSoft = (sr * 299 + sg * 587 + sb * 114) / 1000;
+  return {
+    '--qr-primary-soft': soft,
+    '--qr-text': yiq > 128 ? '#141414' : '#FFFFFF',
+    '--qr-text-on-soft': yiqSoft > 128 ? '#141414' : '#FFFFFF',
+  };
+}
+
 /** Convert social URL → review URL qua worker */
 async function convertToReviewUrl(socialUrl) {
   if (!socialUrl || !socialUrl.startsWith('http')) return null;
@@ -314,11 +339,13 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
     { hex: '#1D1BE0', variable: '--qr-primary' },
     { hex: '#567445', variable: '--qr-secondary' },
   ]);
-  // Build CSS variables block để inject vào page (chỉ thay từng biến, giữ :root)
+  // Build CSS variables: primary/secondary/logo-filter + soft/text tự sinh từ primary
+  // (tool fill trực tiếp để không phụ thuộc JS của theme)
   const cssVars = {
     '--qr-primary': primary,
     '--qr-secondary': secondary,
     '--qr-logo-filter': inputs.logoFilter ? 'brightness(0) invert(1)' : 'none',
+    ...deriveThemeColors(primary),
   };
   const cssVarsBlock = buildCssVariablesBlock(cssVars);
   const cssOk = replaceCssVariables(elements, cssVars);
