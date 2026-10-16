@@ -271,9 +271,12 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   // 8. Replace trên data của page
 
   // 7a. Media (bg sections + hình form)
+  // Mapping dùng oldId/oldUrl (khớp với signature của replaceMedia).
+  // LƯU Ý: không spread trực tiếp OLD_ATTACHMENTS vì key của nó là id/url,
+  // sẽ làm m.oldId/m.oldUrl thành undefined → match nhầm mọi array/object.
   const mediaCount = replaceMedia(elements, [
-    { ...OLD_ATTACHMENTS.bgSections, newId: bg1Media.id, newUrl: bg1Media.url },
-    { ...OLD_ATTACHMENTS.formLeft, newId: bg2Media.id, newUrl: bg2Media.url },
+    { oldId: OLD_ATTACHMENTS.bgSections.id, oldUrl: OLD_ATTACHMENTS.bgSections.url, newId: bg1Media.id, newUrl: bg1Media.url },
+    { oldId: OLD_ATTACHMENTS.formLeft.id, oldUrl: OLD_ATTACHMENTS.formLeft.url, newId: bg2Media.id, newUrl: bg2Media.url },
   ]);
   step('replace-media', true, `${mediaCount} chỗ`);
 
