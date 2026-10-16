@@ -48,16 +48,34 @@ const KEEP_BACKGROUND_URLS = [
   '303-bg-1-1-hori-cc-beige-brown.jpg', // user chốt 2026-10-16: giữ nguyên
 ];
 
-/** Darken hex 50% (giữ nguyên alpha nếu là #RRGGBBAA) */
-function darkenHex(hex, pct = 50) {  const m = /^#([0-9a-fA-F]{6})([0-9a-fA-F]{2})?$/.exec(String(hex || '').trim());
+/**
+ * Tự sinh màu phụ từ màu chính (khi user để trống):
+ * - Màu chính TỐI (YIQ < 128) → lighten 50% về phía trắng.
+ * - Màu chính SÁNG → darken 50% về phía đen.
+ * Giữ nguyên alpha nếu là #RRGGBBAA.
+ */
+function contrastShadeHex(hex, pct = 50) {
+  const m = /^#([0-9a-fA-F]{6})([0-9a-fA-F]{2})?$/i.exec(String(hex || '').trim());
   if (!m) return '#000000';
   const n = parseInt(m[1], 16);
-  const f = 1 - pct / 100;
-  const r = Math.round(((n >> 16) & 255) * f);
-  const g = Math.round(((n >> 8) & 255) * f);
-  const b = Math.round((n & 255) * f);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
   const alpha = m[2] ? m[2].toUpperCase() : '';
-  return '#' + [r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('').toUpperCase() + alpha;
+  const yiq = (r * 299 + g * 587 + b * 114) / 1000;
+  const f = pct / 100;
+  let nr, ng, nb;
+  if (yiq < 128) {
+    // Tối → lighten về trắng
+    nr = Math.round(r + (255 - r) * f);
+    ng = Math.round(g + (255 - g) * f);
+    nb = Math.round(b + (255 - b) * f);
+  } else {
+    // Sáng → darken về đen
+    nr = Math.round(r * (1 - f));
+    ng = Math.round(g * (1 - f));
+    nb = Math.round(b * (1 - f));
+  }
+  const hx = (v) => Math.max(0, Math.min(255, v)).toString(16).padStart(2, '0');
+  return `#${hx(nr)}${hx(ng)}${hx(nb)}`.toUpperCase() + alpha;
 }
 
 /**
@@ -163,9 +181,9 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   if (!isHex(primary) && !isGradient(primary)) throw new Error('Màu chính không hợp lệ (hex hoặc gradient)');
   let secondaryRaw = inputs.secondary?.trim() || '';
   if (!secondaryRaw) {
-    // Darken chỉ áp dụng cho hex; gradient thì dùng stop cuối.
-    // Giữ nguyên alpha nếu primary là #RRGGBBAA.
-    secondaryRaw = isHex(primary) ? darkenHex(primary, 50) : primary;
+    // Tự sinh: màu tối → lighten 50%, màu sáng → darken 50%.
+    // Gradient thì dùng nguyên primary.
+    secondaryRaw = isHex(primary) ? contrastShadeHex(primary, 50) : primary;
   }
   secondaryRaw = secondaryRaw.toUpperCase();
   if (!isHex(secondaryRaw) && !isGradient(secondaryRaw)) throw new Error('Màu phụ không hợp lệ (hex hoặc gradient)');
