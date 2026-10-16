@@ -1,7 +1,11 @@
 /**
- * QR diagnose: quét _elementor_data của 1 page tìm settings hỏng.
+ * QR diagnose: quét _elementor_data của 1 page/template tìm settings hỏng.
  * Usage: node scripts/qr-diagnose.mjs <pageId>
  * (dùng .env: QR_WP_BASE, QR_WP_USER, QR_WP_APP_PASSWORD)
+ *
+ * - /diagnose  : heuristic (settings/list-item không phải array) + meta_rows + raw_len
+ * - /diagnose2 : dùng CHÍNH repeater controls của Elementor để tìm row hỏng
+ *                (replicate điều kiện gây TypeError sanitize_settings)
  */
 import dotenv from 'dotenv';
 import path from 'path';
@@ -25,20 +29,28 @@ if (!user || !pass) {
 }
 
 const auth = 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64');
-const res = await fetch(`${base}/wp-json/qr/v1/diagnose/${pageId}`, {
-  headers: { Authorization: auth },
-});
-const text = await res.text();
-let data;
-try { data = JSON.parse(text); } catch { data = { _raw: text.slice(0, 500) }; }
 
-if (!res.ok) {
-  console.error(`HTTP ${res.status}:`, data.message || data._raw || '');
-  process.exit(1);
+async function call(endpoint) {
+  const res = await fetch(`${base}/wp-json/qr/v1/${endpoint}/${pageId}`, {
+    headers: { Authorization: auth },
+  });
+  const text = await res.text();
+  let data;
+  try { data = JSON.parse(text); } catch { data = { _raw: text.slice(0, 300) }; }
+  if (!res.ok) {
+    console.error(`${endpoint}: HTTP ${res.status}`, data.message || data._raw || '');
+    process.exit(1);
+  }
+  return data;
 }
 
-console.log(`Page #${data.id}: raw_len=${data.raw_len}, json_ok=${data.json_ok}, top_level=${data.top_level}`);
-console.log('meta_rows:', JSON.stringify(data.meta_rows));
-console.log(`bad_count=${data.bad_count}`);
-for (const b of data.bad || []) console.log('  ✗', b);
-if (!data.bad_count) console.log('  (không tìm thấy settings hỏng theo heuristic)');
+const d1 = await call('diagnose');
+console.log(`[diagnose] Page #${d1.id}: raw_len=${d1.raw_len}, json_ok=${d1.json_ok}, top_level=${d1.top_level}`);
+console.log(`[diagnose] meta_rows: ${JSON.stringify(d1.meta_rows)}`);
+console.log(`[diagnose] bad_count=${d1.bad_count}`);
+for (const b of d1.bad || []) console.log('  ✗', b);
+
+const d2 = await call('diagnose2');
+console.log(`[diagnose2] bad_count=${d2.bad_count}`);
+for (const b of d2.bad || []) console.log('  ✗', b);
+if (!d2.bad_count) console.log('  (không tìm thấy repeater row hỏng)');
