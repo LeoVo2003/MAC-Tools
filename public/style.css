@@ -2297,7 +2297,8 @@ details.qr-section:not([open]) > .qr-section-head::before { transform: rotate(0d
 }
 #qrPrimarySwatch, #qrSecondarySwatch {
   width: 40px; height: 40px; border-radius: 8px; flex: none;
-  border: 1px solid #D0D5DD; cursor: pointer;
+  border: 1px solid #D0D5DD; cursor: pointer; padding: 0;
+  background: none;
   box-shadow: 0 1px 2px rgba(16,24,40,.05);
 }
 #qrPrimarySwatch:hover, #qrSecondarySwatch:hover { box-shadow: 0 1px 3px rgba(16,24,40,.12); }
