@@ -2175,3 +2175,4 @@ details.qr-section:not([open]) > .qr-section-head::before { transform: rotate(0d
 @media (max-width: 768px) {
   .qr-sticky-actions { margin: 12px -12px -12px; padding: 10px 12px; }
 }
+.qr-logo-filter { margin-top: 8px; font-size: 13px; }
