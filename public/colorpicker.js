@@ -291,7 +291,7 @@
         <button type="button" id="qr-cp-apply" class="qr-cp-btn qr-cp-btn-primary">Chọn</button>
       </div>
     </div>`;
-  const $ = (id) => document.getElementById(id);
+  const $ = (id) => pop.querySelector('#' + id);
   const dlg = pop.querySelector('.uui-cp-dialog');
 
   /* ================= Helpers ================= */
