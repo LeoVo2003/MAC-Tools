@@ -1574,101 +1574,80 @@ function qrLog(line) {
   qrLogBox.scrollTop = qrLogBox.scrollHeight;
 }
 
-/* Sync text hex <-> color picker */
-// Tự sinh màu phụ: HSL smart, giữ hue/saturation (khớp backend)
-function rgbToHsl(r, g, b) {
-  r /= 255; g /= 255; b /= 255;
-  const max = Math.max(r, g, b), min = Math.min(r, g, b);
-  const l = (max + min) / 2;
-  if (max === min) return [0, 0, l];
-  const d = max - min;
-  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-  let h;
-  if (max === r) h = ((g - b) / d + (g < b ? 6 : 0));
-  else if (max === g) h = ((b - r) / d + 2);
-  else h = ((r - g) / d + 4);
-  return [h * 60, s, l];
-}
-function hslToRgb(h, s, l) {
-  h = (((h % 360) + 360) % 360) / 360;
-  const hue2rgb = (p, q, t) => {
-    if (t < 0) t += 1;
-    if (t > 1) t -= 1;
-    if (t < 1 / 6) return p + (q - p) * 6 * t;
-    if (t < 1 / 2) return q;
-    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-    return p;
-  };
-  let r, g, b;
-  if (s === 0) { r = g = b = l; }
-  else {
-    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-    const p = 2 * l - q;
-    r = hue2rgb(p, q, h + 1 / 3); g = hue2rgb(p, q, h); b = hue2rgb(p, q, h - 1 / 3);
-  }
-  return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
-}
-function contrastShadeHex(hex) {
-  const m = /^#([0-9a-fA-F]{6})([0-9a-fA-F]{2})?$/i.exec(hex.trim());
-  if (!m) return null;
-  const n = parseInt(m[1], 16);
-  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
-  const alpha = m[2] ? m[2].toUpperCase() : '';
-  const [h, s, l] = rgbToHsl(r, g, b);
-  let targetL, targetS = s;
-  const boost = (factor) => (s > 0.25 ? Math.min(1, s * factor) : s);
-  if (l < 0.12) { targetL = 0.52; targetS = boost(1.12); }
-  else if (l < 0.3) { targetL = 0.55; targetS = boost(1.06); }
-  else if (l < 0.45) { targetL = 0.62; }
-  else if (l <= 0.6) { targetL = l < 0.52 ? 0.72 : 0.32; }
-  else if (l < 0.85) { targetL = 0.35; }
-  else { targetL = 0.45; }
-  const [nr, ng, nb] = hslToRgb(h, targetS, targetL);
-  const hx = (v) => Math.max(0, Math.min(255, v)).toString(16).padStart(2, '0');
-  return ('#' + hx(nr) + hx(ng) + hx(nb)).toUpperCase() + alpha;
-}
-// Giữ tên cũ để không vỡ chỗ gọi khác (nếu có)
-function darkenHex(hex, pct) { return contrastShadeHex(hex); }
-function syncColorPair(textId, pickerId, onPrimaryChange) {
-  const text = document.getElementById(textId);
-  const picker = document.getElementById(pickerId);
-  if (!text || !picker) return;
-  picker.addEventListener('input', () => {
-    text.value = picker.value.toUpperCase();
-    text.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-  text.addEventListener('input', () => {
-    const v = text.value.trim();
-    // Hỗ trợ hex 6 hoặc 8 ký tự — picker chỉ lấy 6 ký tự đầu
-    if (/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(v)) {
-      picker.value = v.slice(0, 7);
-      onPrimaryChange?.(v);
-    }
-  });
-}
-// Màu phụ trống → preview = HSL smart từ màu chính (khớp backend)
+/* Palette preview dùng API /api/qr/palette (5.4) — 1 nguồn sự thật với backend */
 let qrPrimaryPicker, qrSecondaryPicker;
-function refreshSecondaryPreview() {
-  const primary = document.getElementById('qrPrimary')?.value.trim() || '';
-  const secText = document.getElementById('qrSecondary');
-  if (!secText) return;
-  if (!secText.value.trim()) {
-    const derived = contrastShadeHex(primary);
-    if (derived && qrSecondaryPicker) qrSecondaryPicker.set(derived);
+let qrPaletteTimer = null;
+let qrLastPalette = null;
+
+function renderPalettePreview(palette) {
+  qrLastPalette = palette;
+  const { vars, report } = palette;
+  const setBg = (id, bg, fg) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.background = bg;
+    el.style.color = fg;
+  };
+  setBg('ppBtnPrimary', vars['--qr-primary'], vars['--qr-text-on-primary']);
+  setBg('ppBtnSecondary', vars['--qr-secondary'], vars['--qr-text-on-secondary']);
+  const soft = document.getElementById('ppSoftBox');
+  if (soft) {
+    soft.style.background = vars['--qr-primary-soft'];
+    soft.style.color = vars['--qr-text-on-soft'];
   }
+  const chip = (id, ratio) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const ok = ratio >= 4.5;
+    el.textContent = ok ? `AA ✓ ${ratio}` : `✗ ${ratio}`;
+    el.classList.toggle('bad', !ok);
+  };
+  chip('ppChipPrimary', report.onPrimary);
+  chip('ppChipSecondary', report.onSecondary);
+  const warnBox = document.getElementById('ppWarnings');
+  if (warnBox) {
+    if (report.warnings && report.warnings.length) {
+      warnBox.hidden = false;
+      warnBox.innerHTML = report.warnings.map((w) => `<div>⚠ ${escapeHtml(w)}</div>`).join('');
+    } else {
+      warnBox.hidden = true;
+      warnBox.innerHTML = '';
+    }
+  }
+}
+
+function fetchPalettePreview() {
+  const primary = document.getElementById('qrPrimary')?.value.trim() || '';
+  const secondary = document.getElementById('qrSecondary')?.value.trim() || '';
+  if (!primary) return;
+  clearTimeout(qrPaletteTimer);
+  qrPaletteTimer = setTimeout(async () => {
+    try {
+      const r = await fetch(`/api/qr/palette?primary=${encodeURIComponent(primary)}&secondary=${encodeURIComponent(secondary)}`, { credentials: 'same-origin' });
+      const d = await r.json();
+      if (d.ok) {
+        renderPalettePreview(d);
+        // Điền màu phụ tự sinh vào placeholder để user thấy
+        const secInput = document.getElementById('qrSecondary');
+        if (secInput && !secInput.value.trim()) secInput.placeholder = `Tự động: ${d.vars['--qr-secondary']}`;
+      }
+    } catch { /* bỏ qua, không chặn user */ }
+  }, 150);
 }
 // Khởi tạo Untitled UI-style pickers
 qrPrimaryPicker = new UIPicker(
   document.getElementById('qrPrimarySwatch'),
   document.getElementById('qrPrimary'),
-  { onChange: () => refreshSecondaryPreview() }
+  { onChange: () => fetchPalettePreview() }
 );
 qrSecondaryPicker = new UIPicker(
   document.getElementById('qrSecondarySwatch'),
-  document.getElementById('qrSecondary')
+  document.getElementById('qrSecondary'),
+  { onChange: () => fetchPalettePreview() }
 );
-document.getElementById('qrSecondary')?.addEventListener('input', refreshSecondaryPreview);
-refreshSecondaryPreview();
+document.getElementById('qrPrimary')?.addEventListener('input', fetchPalettePreview);
+document.getElementById('qrSecondary')?.addEventListener('input', fetchPalettePreview);
+fetchPalettePreview();
 
 // Ẩn/hiện ô WP credentials theo .env
 fetch('/api/qr/wp-configured', { credentials: 'same-origin' })
@@ -1680,6 +1659,48 @@ qrForm?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const getVal = (id) => document.getElementById(id)?.value?.trim() || '';
   const getFile = (id) => document.getElementById(id)?.files?.[0] || null;
+  const runBtn = document.getElementById('qrRunBtn');
+
+  // (5.1#1) Validate JS thay cho HTML5 required trên input ẩn
+  const requiredIds = ['qrEditName', 'qrEditZip', 'qrEditEmail', 'qrEditPhone', 'qrEditAddress', 'qrHomeLink', 'qrMenuLink'];
+  const missing = [];
+  // Xóa warn cũ
+  qrForm.querySelectorAll('.field-warn').forEach((el) => el.classList.remove('field-warn'));
+  for (const id of requiredIds) {
+    const el = document.getElementById(id);
+    if (el && !el.value.trim()) {
+      el.classList.add('field-warn');
+      const label = el.closest('.field')?.querySelector('span')?.textContent?.replace('*', '').trim() || id;
+      missing.push(label);
+    }
+  }
+  // Email format
+  const emailEl = document.getElementById('qrEditEmail');
+  if (emailEl && emailEl.value.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailEl.value.trim())) {
+    emailEl.classList.add('field-warn');
+    missing.push('Email (sai định dạng)');
+  }
+  const missingEl = document.getElementById('qrMissingList');
+  const missingInline = document.getElementById('qrMissingInline');
+  if (missing.length) {
+    const msg = `Còn thiếu: ${missing.join(' · ')}`;
+    if (missingEl) { missingEl.textContent = msg; missingEl.className = 'hint hint--error'; }
+    if (missingInline) missingInline.textContent = msg;
+    qrLog('Thiếu: ' + missing.join(', '));
+    setBadge(qrStatusBadge, 'error', 'Thiếu dữ liệu');
+    // Cuộn tới ô đầu tiên thiếu
+    const firstBad = qrForm.querySelector('.field-warn');
+    if (firstBad) {
+      // Chuyển về bước chứa ô đó
+      const pane = firstBad.closest('.qr-steppane');
+      if (pane) qrGotoStep(pane.dataset.pane);
+      firstBad.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      firstBad.focus({ preventScroll: true });
+    }
+    return;
+  }
+  if (missingEl) { missingEl.textContent = ''; missingEl.className = 'hint hint--muted'; }
+  if (missingInline) missingInline.textContent = '';
 
   // Validate: mỗi ảnh cần file hoặc URL
   const images = [
@@ -1691,6 +1712,8 @@ qrForm?.addEventListener('submit', async (e) => {
     if (!getFile(fileId) && !getVal(urlId)) {
       qrLog(`Thiếu ${label}: upload file hoặc paste link.`);
       setBadge(qrStatusBadge, 'error', 'Thiếu ảnh');
+      // Chuyển về bước 3 (Giao diện)
+      qrGotoStep('3');
       return;
     }
   }
@@ -1718,21 +1741,20 @@ qrForm?.addEventListener('submit', async (e) => {
   fd.append('qrBg2Url', getVal('qrBg2Url'));
   // Flag ghi đè (được set bởi nút "Ghi đè page cũ")
   if (window._qrForceOverwrite) fd.append('force', 'true');
-  // wpmData: lấy từ lần fill gần nhất (lưu ở window)
-  // Đọc data từ ô edit (user có thể sửa sau fill)
+  // wpmData: đọc TRỰC TIẾP từ ô input (5.1#3) — xóa trắng nghĩa là xóa, không fallback về WPM
   const getEdit = (id) => document.getElementById(id)?.value?.trim() || '';
   const wpmData = {
-    shopName: getEdit('qrEditName') || window.__qrWpmData?.shopName || '',
-    projectName: getEdit('qrEditName') || window.__qrWpmData?.shopName || '',
-    zip: getEdit('qrEditZip') || window.__qrWpmData?.zip || '',
-    email: getEdit('qrEditEmail') || window.__qrWpmData?.email || '',
-    phone: getEdit('qrEditPhone') || window.__qrWpmData?.phone || '',
-    address: getEdit('qrEditAddress') || window.__qrWpmData?.address || '',
+    shopName: getEdit('qrEditName'),
+    projectName: getEdit('qrEditName'),
+    zip: getEdit('qrEditZip'),
+    email: getEdit('qrEditEmail'),
+    phone: getEdit('qrEditPhone'),
+    address: getEdit('qrEditAddress'),
     social: {
-      facebook: getEdit('qrEditFb') || window.__qrWpmData?.social?.facebook || '',
-      instagram: getEdit('qrEditIg') || window.__qrWpmData?.social?.instagram || '',
-      yelp: getEdit('qrEditYelp') || window.__qrWpmData?.social?.yelp || '',
-      google: getEdit('qrEditGg') || window.__qrWpmData?.social?.google || '',
+      facebook: getEdit('qrEditFb'),
+      instagram: getEdit('qrEditIg'),
+      yelp: getEdit('qrEditYelp'),
+      google: getEdit('qrEditGg'),
     },
   };
   fd.append('wpmData', JSON.stringify(wpmData));
@@ -1743,6 +1765,8 @@ qrForm?.addEventListener('submit', async (e) => {
   qrLogBox.innerHTML = '';
   setBadge(qrStatusBadge, 'running', 'Đang tạo...');
   qrLog('Bắt đầu tạo QR page...');
+  // (5.1#2) Khóa nút khi đang chạy — chống double-click
+  if (runBtn) { runBtn.disabled = true; runBtn.textContent = 'Đang tạo...'; }
 
   try {
     const res = await fetch('/api/qr/generate', { method: 'POST', body: fd, credentials: 'same-origin' });
@@ -1775,19 +1799,84 @@ qrForm?.addEventListener('submit', async (e) => {
     setBadge(qrStatusBadge, 'done', 'Xong');
     window._qrForceOverwrite = false; // reset flag ghi đè
     qrLog(`Hoàn tất: ${data.page?.url}`);
-    // Hiện kết quả
-    const panel = document.getElementById('qrResultPanel');
-    const outUrl = document.getElementById('qrOutUrl');
-    if (panel && outUrl && data.page?.url) {
-      outUrl.textContent = data.page.url;
-      outUrl.href = data.page.url;
-      panel.hidden = false;
-    }
+    // Hiện kết quả (5.6)
+    renderQrResult(data);
   } catch (err) {
     qrLog('Lỗi: ' + err.message);
     setBadge(qrStatusBadge, 'error', 'Lỗi');
+  } finally {
+    // (5.1#2) Mở khóa nút
+    if (runBtn) { runBtn.disabled = false; runBtn.textContent = 'Tạo QR Page'; }
   }
 });
+
+/* ============ QR: Stepper (5.2) ============ */
+function qrGotoStep(n) {
+  const s = String(n);
+  document.querySelectorAll('.qr-step').forEach((el) => {
+    el.classList.toggle('is-active', el.dataset.step === s);
+  });
+  document.querySelectorAll('.qr-steppane').forEach((el) => {
+    const active = el.dataset.pane === s;
+    el.hidden = !active;
+    el.classList.toggle('is-active', active);
+  });
+  // Đánh dấu các bước đã qua
+  document.querySelectorAll('.qr-step').forEach((el) => {
+    el.classList.toggle('is-done', Number(el.dataset.step) < Number(s));
+  });
+}
+document.querySelectorAll('.qr-step').forEach((el) => {
+  el.addEventListener('click', () => qrGotoStep(el.dataset.step));
+});
+document.querySelectorAll('.qr-next, .qr-back').forEach((el) => {
+  el.addEventListener('click', () => qrGotoStep(el.dataset.goto));
+});
+
+/* ============ QR: Kết quả (5.6) ============ */
+function renderQrResult(data) {
+  const panel = document.getElementById('qrResultPanel');
+  const card = document.getElementById('qrResultCard');
+  if (!panel || !card) return;
+  const page = data.page || {};
+  const cf7 = data.cf7 || {};
+  const verified = data.verified !== false;
+  const pageUrl = page.url || '';
+  const chips = [];
+  chips.push(`<span class="qr-chip ${verified ? 'ok' : 'bad'}">${verified ? 'Verify ✓' : 'Verify ✗'}</span>`);
+  if (page.id) chips.push(`<span class="qr-chip">Page #${escapeHtml(String(page.id))}</span>`);
+  if (cf7.id) chips.push(`<span class="qr-chip">CF7 #${escapeHtml(String(cf7.id))} → ${escapeHtml(cf7.mailTo || data.email || '')}</span>`);
+  const palette = qrLastPalette?.vars;
+  const paletteHtml = palette
+    ? `<div class="qr-palette-applied">${['--qr-primary', '--qr-secondary', '--qr-primary-soft', '--qr-bg'].map((k) => `<span title="${k}: ${palette[k]}" style="background:${palette[k]}"></span>`).join('')}</div>`
+    : '';
+  card.innerHTML = `
+    <a class="qr-result-url" href="${escapeHtml(pageUrl)}" target="_blank" rel="noopener">${escapeHtml(pageUrl)}</a>
+    <div class="qr-result-actions">
+      <button type="button" class="btn btn-light btn-sm" data-copy-url="${escapeHtml(pageUrl)}">Copy</button>
+      <a class="btn btn-primary btn-sm" href="${escapeHtml(pageUrl)}" target="_blank" rel="noopener">Mở</a>
+      <button type="button" class="btn btn-ghost btn-sm" id="qrNewPageBtn">Tạo page khác</button>
+    </div>
+    <div class="qr-chips">${chips.join('')}</div>
+    ${paletteHtml}
+    ${!verified ? `<div class="qr-result-warn"><strong>⚠ Đã tạo nhưng trang báo lỗi khi kiểm tra.</strong><br><span class="muted small">Mở trang kiểm tra trực tiếp, hoặc xem Log phía trên để biết chi tiết.</span></div>` : ''}
+  `;
+  panel.hidden = false;
+  // Wire buttons
+  card.querySelector('[data-copy-url]')?.addEventListener('click', (ev) => {
+    navigator.clipboard.writeText(ev.target.dataset.copyUrl).catch(() => {});
+    ev.target.textContent = 'Đã copy!';
+    setTimeout(() => { ev.target.textContent = 'Copy'; }, 1500);
+  });
+  document.getElementById('qrNewPageBtn')?.addEventListener('click', () => {
+    panel.hidden = true;
+    qrGotoStep('1');
+    document.getElementById('qrWpmUrl').value = '';
+    document.getElementById('qrWpmUrl').focus();
+  });
+  // Chuyển sang bước 4 để thấy kết quả
+  qrGotoStep('4');
+}
 
 /* ============ DASHBOARD ============ */
 const TOOL_LABELS = {
@@ -2143,7 +2232,8 @@ document.getElementById('qrFillBtn')?.addEventListener('click', async () => {
     const nameInput = document.getElementById('qrProjectName');
     if (nameInput && data.shopName) nameInput.value = data.zip ? `${data.zip} ${data.shopName}` : data.shopName;
     // QR chỉ hiện log liên quan, bỏ mấy dòng F Package (username/password/website)
-    const skipPatterns = [/username/i, /password/i, /main web/i, /website information/i, /mở website khách/i, /live/i];
+    // (5.1#11) Bỏ /live/i — nó ẩn nhầm mọi dòng chứa "live", "deliver", "alive"
+    const skipPatterns = [/username/i, /password/i, /main web/i, /website information/i, /mở website khách/i];
     (data.logs || []).forEach((l) => {
       if (!skipPatterns.some((p) => p.test(l))) qrLog(l);
     });
@@ -2172,6 +2262,21 @@ document.getElementById('qrFillBtn')?.addEventListener('click', async () => {
     if (social.youtube) {
       document.getElementById('qrSocialYoutubeRow').hidden = false;
       document.getElementById('qrEditYoutube').value = social.youtube;
+    }
+    // (5.1#6) Prefill Homepage link từ websiteUrl của WPM
+    const homeInput = document.getElementById('qrHomeLink');
+    if (homeInput && data.websiteUrl && !homeInput.value.trim()) {
+      homeInput.value = data.websiteUrl;
+      qrLog(`Homepage: tự điền từ WPM (${data.websiteUrl})`);
+    }
+    // Cập nhật tóm tắt social
+    const sumEl = document.getElementById('qrSocialSummary');
+    if (sumEl) {
+      const parts = [
+        ['FB', social.facebook], ['IG', social.instagram],
+        ['Yelp', social.yelp], ['Google', social.google],
+      ].map(([k, v]) => `${k} ${v && !v.startsWith('#link_') ? '✓' : '✗'}`).join(' ');
+      sumEl.textContent = `(${parts})`;
     }
     document.getElementById('qrDataEdit').hidden = false;
     const processReviewInput = async (socialUrl, inputId, defaultTag, platform) => {

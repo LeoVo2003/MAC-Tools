@@ -338,13 +338,21 @@
 
         <!-- QR Tool -->
         <section id="tab-qr" hidden>
-          <form class="block" id="qrForm">
-            <div class="section">
-              <h2>Tạo QR landing page</h2>
+          <!-- Stepper 4 bước (5.2) -->
+          <nav class="qr-stepper" aria-label="Các bước tạo QR page">
+            <button type="button" class="qr-step is-active" data-step="1"><span class="qr-step-n">1</span> Nguồn</button>
+            <button type="button" class="qr-step" data-step="2"><span class="qr-step-n">2</span> Thông tin</button>
+            <button type="button" class="qr-step" data-step="3"><span class="qr-step-n">3</span> Giao diện</button>
+            <button type="button" class="qr-step" data-step="4"><span class="qr-step-n">4</span> Tạo &amp; kết quả</button>
+          </nav>
+          <form class="block" id="qrForm" novalidate>
+            <!-- Bước 1: Nguồn -->
+            <div class="section qr-steppane is-active" data-pane="1">
+              <h2>Nguồn dữ liệu</h2>
               <div class="field-row">
                 <label class="field grow">
                   <span>WPM Project URL</span>
-                  <input id="qrWpmUrl" name="qrWpmUrl" type="url" required placeholder="https://wpm.macusaone.com/projects/627/edit" />
+                  <input id="qrWpmUrl" name="qrWpmUrl" type="url" placeholder="https://wpm.macusaone.com/projects/627/edit" />
                 </label>
                 <button type="button" id="qrFillBtn" class="btn btn-primary self-end">Fill data</button>
               </div>
@@ -355,45 +363,62 @@
                   <label class="field"><span>App Password <em class="muted">(.env chưa có)</em></span><input id="qrWpPass" type="password" autocomplete="off" /></label>
                 </div>
               </div>
-              <div id="qrDataEdit" hidden>
-                <div class="grid">
-                  <label class="field"><span>Tên project</span><input id="qrProjectName" type="text" readonly placeholder="Fill data sẽ tự lấy" /></label>
-                  <label class="field"><span>Tên tiệm <b class="req">*</b></span><input id="qrEditName" type="text" required /></label>
-                  <label class="field"><span>ZIP <b class="req">*</b></span><input id="qrEditZip" type="text" required /></label>
-                  <label class="field"><span>Email <b class="req">*</b></span><input id="qrEditEmail" type="email" required /></label>
-                  <label class="field"><span>Phone <b class="req">*</b></span><input id="qrEditPhone" type="text" required /></label>
-                  <label class="field"><span>Địa chỉ <b class="req">*</b></span><input id="qrEditAddress" type="text" required /></label>
-                </div>
-                <div class="grid">
-                  <label class="field"><span>Facebook</span><input id="qrEditFb" type="text" placeholder="https:// hoặc #link_fb" /></label>
-                  <label class="field"><span>Instagram</span><input id="qrEditIg" type="text" placeholder="https:// hoặc #link_ig" /></label>
-                  <label class="field"><span>Yelp</span><input id="qrEditYelp" type="text" placeholder="https:// hoặc #link_yelp" /></label>
-                  <label class="field"><span>Google</span><input id="qrEditGg" type="text" placeholder="https:// hoặc #link_gg" /></label>
-                </div>
-                <div class="grid" id="qrSocialTiktokRow" hidden>
-                  <label class="field"><span>TikTok</span><input id="qrEditTiktok" type="text" placeholder="https:// (trống = ẩn)" /></label>
-                </div>
-                <div class="grid" id="qrSocialYoutubeRow" hidden>
-                  <label class="field"><span>YouTube</span><input id="qrEditYoutube" type="text" placeholder="https:// (trống = ẩn)" /></label>
-                </div>
-                <div class="grid">
-                  <label class="field"><span>Google review link <em class="muted">(xóa trống = bỏ nút; #link_ = giữ nút)</em></span><input id="qrReviewGg" type="text" value="#link_gg_rv" placeholder="https://" /></label>
-                  <label class="field"><span>Yelp review link <em class="muted">(xóa trống = bỏ nút; #link_ = giữ nút)</em></span><input id="qrReviewYelp" type="text" value="#link_yelp_rv" placeholder="https://" /></label>
-                </div>
-                <div class="grid">
-                  <label class="field"><span>Homepage link <b class="req">*</b></span><input id="qrHomeLink" type="url" placeholder="https://" required /></label>
-                  <label class="field"><span>Menu link <b class="req">*</b></span><input id="qrMenuLink" type="url" placeholder="https://" required /></label>
-                </div>
-                <p class="muted small">Sửa trực tiếp nếu data WPM chưa đúng.</p>
+              <div class="row qr-stepnav">
+                <span></span>
+                <button type="button" class="btn btn-primary qr-next" data-goto="2">Tiếp: Thông tin →</button>
               </div>
             </div>
 
-            <div class="section">
+            <!-- Bước 2: Thông tin -->
+            <div class="section qr-steppane" data-pane="2" hidden>
+              <h2>Thông tin tiệm</h2>
+              <div id="qrDataEdit">
+                <div class="grid">
+                  <label class="field"><span>Tên project</span><input id="qrProjectName" type="text" readonly placeholder="Fill data sẽ tự lấy" /></label>
+                  <label class="field"><span>Tên tiệm <b class="req">*</b></span><input id="qrEditName" type="text" data-qr-required="1" /></label>
+                  <label class="field"><span>ZIP <b class="req">*</b></span><input id="qrEditZip" type="text" data-qr-required="1" /></label>
+                  <label class="field"><span>Email <b class="req">*</b></span><input id="qrEditEmail" type="email" data-qr-required="1" /></label>
+                  <label class="field"><span>Phone <b class="req">*</b></span><input id="qrEditPhone" type="text" data-qr-required="1" /></label>
+                  <label class="field"><span>Địa chỉ <b class="req">*</b></span><input id="qrEditAddress" type="text" data-qr-required="1" /></label>
+                </div>
+                <details class="qr-collapsible">
+                  <summary>Social &amp; Review <span id="qrSocialSummary" class="muted small"></span></summary>
+                  <div class="grid">
+                    <label class="field"><span>Facebook</span><input id="qrEditFb" type="text" placeholder="https:// hoặc #link_fb" /></label>
+                    <label class="field"><span>Instagram</span><input id="qrEditIg" type="text" placeholder="https:// hoặc #link_ig" /></label>
+                    <label class="field"><span>Yelp</span><input id="qrEditYelp" type="text" placeholder="https:// hoặc #link_yelp" /></label>
+                    <label class="field"><span>Google</span><input id="qrEditGg" type="text" placeholder="https:// hoặc #link_gg" /></label>
+                  </div>
+                  <div class="grid" id="qrSocialTiktokRow" hidden>
+                    <label class="field"><span>TikTok</span><input id="qrEditTiktok" type="text" placeholder="https:// (trống = ẩn)" /></label>
+                  </div>
+                  <div class="grid" id="qrSocialYoutubeRow" hidden>
+                    <label class="field"><span>YouTube</span><input id="qrEditYoutube" type="text" placeholder="https:// (trống = ẩn)" /></label>
+                  </div>
+                  <div class="grid">
+                    <label class="field"><span>Google review link <em class="muted">(xóa trống = bỏ nút; #link_ = giữ nút)</em></span><input id="qrReviewGg" type="text" value="#link_gg_rv" placeholder="https://" /></label>
+                    <label class="field"><span>Yelp review link <em class="muted">(xóa trống = bỏ nút; #link_ = giữ nút)</em></span><input id="qrReviewYelp" type="text" value="#link_yelp_rv" placeholder="https://" /></label>
+                  </div>
+                </details>
+                <div class="grid">
+                  <label class="field"><span>Homepage link <b class="req">*</b></span><input id="qrHomeLink" type="url" placeholder="https://" data-qr-required="1" /></label>
+                  <label class="field"><span>Menu link <b class="req">*</b></span><input id="qrMenuLink" type="url" placeholder="https://" data-qr-required="1" /></label>
+                </div>
+                <p class="muted small">Sửa trực tiếp nếu data WPM chưa đúng. Xóa trắng ô = xóa dữ liệu.</p>
+              </div>
+              <div class="row qr-stepnav">
+                <button type="button" class="btn btn-ghost qr-back" data-goto="1">← Nguồn</button>
+                <button type="button" class="btn btn-primary qr-next" data-goto="3">Tiếp: Giao diện →</button>
+              </div>
+            </div>
+
+            <!-- Bước 3: Giao diện -->
+            <div class="section qr-steppane" data-pane="3" hidden>
               <h2>Màu sắc</h2>
               <div class="grid">
                 <label class="field"><span>Màu chính <em class="muted">(hex hoặc gradient)</em></span>
                   <div class="color-field">
-                    <input id="qrPrimary" type="text" value="#E31E24" placeholder="#E31E24" required />
+                    <input id="qrPrimary" type="text" value="#E31E24" placeholder="#E31E24" />
                     <span id="qrPrimarySwatch"></span>
                   </div>
                 </label>
@@ -404,9 +429,21 @@
                   </div>
                 </label>
               </div>
-            </div>
+              <!-- Palette preview (5.4) -->
+              <div class="palette-preview" id="qrPalettePreview" aria-live="polite">
+                <div class="palette-row">
+                  <span class="palette-btn" id="ppBtnPrimary">Nút chính</span>
+                  <span class="palette-btn" id="ppBtnSecondary">Nút phụ</span>
+                  <span class="palette-chip" id="ppChipPrimary" title="Contrast chữ trên nút chính"></span>
+                  <span class="palette-chip" id="ppChipSecondary" title="Contrast chữ trên nút phụ"></span>
+                </div>
+                <div class="palette-soft" id="ppSoftBox">
+                  <strong>Card nền nhạt</strong>
+                  <p>Chữ trên nền soft — ví dụ giờ mở cửa, địa chỉ.</p>
+                </div>
+                <div class="palette-warn" id="ppWarnings" hidden></div>
+              </div>
 
-            <div class="section">
               <h2>Hình ảnh</h2>
               <p class="muted small">Mỗi hình: upload file hoặc paste link.</p>
               <div class="grid grid-3">
@@ -423,16 +460,29 @@
                   <input id="qrBg2Url" type="url" placeholder="https://..." class="qr-url-input" />
                 </div>
               </div>
-            </div>
 
-            <div class="section">
               <h2>Tùy chọn</h2>
               <label class="inline"><input type="checkbox" id="qrLogoFilter" checked /> Đảo màu logo (trắng)</label>
-              <label class="inline"><input type="checkbox" id="qrSkipCf7" /> Bỏ qua tạo CF7 form <em class="muted">(test khi PHP cũ)</em></label>
-              <div class="actions">
-                <button type="submit" id="qrRunBtn" class="btn btn-primary btn-lg">Tạo QR Page</button>
-                <span id="qrStatusBadge" class="badge" role="status" aria-live="polite">Idle</span>
+              <div class="row qr-stepnav">
+                <button type="button" class="btn btn-ghost qr-back" data-goto="2">← Thông tin</button>
+                <button type="button" class="btn btn-primary qr-next" data-goto="4">Tiếp: Tạo →</button>
               </div>
+            </div>
+
+            <!-- Bước 4: Tạo & kết quả -->
+            <div class="section qr-steppane" data-pane="4" hidden>
+              <h2>Tạo QR Page</h2>
+              <p id="qrMissingList" class="hint hint--muted"></p>
+              <div class="row qr-stepnav">
+                <button type="button" class="btn btn-ghost qr-back" data-goto="3">← Giao diện</button>
+              </div>
+            </div>
+
+            <!-- Thanh hành động sticky (5.2) -->
+            <div class="qr-sticky-actions">
+              <span id="qrMissingInline" class="muted small"></span>
+              <button type="submit" id="qrRunBtn" class="btn btn-primary btn-lg">Tạo QR Page</button>
+              <span id="qrStatusBadge" class="badge" role="status" aria-live="polite">Idle</span>
             </div>
           </form>
           <section class="block">
@@ -441,9 +491,7 @@
           </section>
           <section class="block" id="qrResultPanel" hidden>
             <h2>Kết quả</h2>
-            <dl class="kv">
-              <dt>QR Page URL</dt><dd><a id="qrOutUrl" href="#" target="_blank" rel="noopener"></a> <button type="button" class="btn btn-light btn-sm" data-copy="qrOutUrl">Copy</button></dd>
-            </dl>
+            <div id="qrResultCard"></div>
           </section>
         </section>
 

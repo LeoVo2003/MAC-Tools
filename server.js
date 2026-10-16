@@ -465,6 +465,14 @@ export function createApp() {
     }
   });
 
+  // (2.16) Error handler cho Multer — trả JSON thay vì HTML
+  app.use('/api/qr/generate', (err, req, res, next) => {
+    if (err && (err.name === 'MulterError' || err.code === 'LIMIT_FILE_SIZE')) {
+      return res.status(400).json({ ok: false, error: `Lỗi upload: ${err.message}` });
+    }
+    next(err);
+  });
+
   app.post('/api/chrome-live/input', requireAuth, async (req, res) => {
     if (process.env.CHROME_LIVE !== 'true') {
       return res.status(404).json({ error: 'Chrome Live tắt.' });

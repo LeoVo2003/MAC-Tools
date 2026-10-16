@@ -184,21 +184,28 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   log('Upload 3 ảnh lên WP...');
   // Dedup: tính MD5 trước, nếu đã có trên web (kể cả khác tên) thì dùng lại
   const md5 = (buf) => createHash('md5').update(buf).digest('hex');
-  const getOrUpload = async (file, label) => {
+  // (2.15) Tên file ASCII an toàn: qr-<zip>-<slug>-<role>.<ext>
+  const asciiFilename = (file, role) => {
+    const ext = String(file.filename || '').split('.').pop().toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+    const safeExt = ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext) ? ext : 'jpg';
+    return `qr-${zip}-${slug}-${role}.${safeExt}`;
+  };
+  const getOrUpload = async (file, label, role) => {
     const hash = md5(file.buffer);
     const existing = await wpFindMediaByHash(hash);
     if (existing) {
       log(`Dùng lại ảnh ${label} #${existing.id} (đã có trên web)`);
       return { id: existing.id, url: existing.url };
     }
-    const media = await wpUploadMedia(file.buffer, file.filename, file.mimetype);
+    const safeName = asciiFilename(file, role);
+    const media = await wpUploadMedia(file.buffer, safeName, file.mimetype);
     await wpSaveMediaHash(media.id, hash);
     return media;
   };
   const [logoMedia, bg1Media, bg2Media] = await Promise.all([
-    getOrUpload(logoFile, 'logo'),
-    getOrUpload(bg1File, 'background'),
-    getOrUpload(bg2File, 'hình form'),
+    getOrUpload(logoFile, 'logo', 'logo'),
+    getOrUpload(bg1File, 'background', 'bg1'),
+    getOrUpload(bg2File, 'hình form', 'bg2'),
   ]);
   step('upload', true, `logo=${logoMedia.id}, bg1=${bg1Media.id}, bg2=${bg2Media.id}`);
   result.media = { logo: logoMedia, bg1: bg1Media, bg2: bg2Media };

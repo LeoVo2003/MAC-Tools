@@ -358,23 +358,14 @@ export function setCssVariables(elements, variables) {
 export function rebindCF7(elements, newFormId) {
   let count = 0;
   walkElements(elements, (el) => {
-    // Elementor CF7 widget thường có elType 'widget', widgetType chứa 'cf7' hoặc 'contact-form'
+    // (2.11) Chỉ match widgetType === 'contact-form-7' chính xác
+    // (tránh nhầm với Elementor Form/Login widget)
     const wt = String(el.widgetType || '').toLowerCase();
-    if (wt.includes('cf7') || wt.includes('contact') || wt.includes('form')) {
+    if (wt === 'contact-form-7') {
       const s = el.settings || {};
-      // Các key có thể chứa form ID
-      for (const key of ['contact_form', 'form_id', 'id', 'selected_form']) {
-        if (key in s) {
-          s[key] = String(newFormId);
-          count++;
-        }
-      }
-      // Nếu không tìm thấy key, log để debug
-      if (count === 0) {
-        // Thử set key phổ biến nhất
-        s.contact_form = String(newFormId);
-        count++;
-      }
+      // Chỉ set key contact_form (key chuẩn của CF7 widget)
+      s.contact_form = String(newFormId);
+      count++;
     }
   });
   return count;
