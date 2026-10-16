@@ -137,7 +137,7 @@ export async function wpGetElementorData(postId) {
 /** Tạo CF7 form → { id, title } */
 export async function wpCreateCF7Form({ title, form, mail }) {
   // Dùng custom endpoint /qr/v1/create-cf7 (PHP API trực tiếp).
-  // Cần snippet v11+. Trả về lỗi chi tiết nếu thiếu mail_to.
+  // Cần snippet v12+. Trả về lỗi chi tiết nếu thiếu mail_to.
   const data = await wpFetch('/qr/v1/create-cf7', {
     method: 'POST',
     body: {
