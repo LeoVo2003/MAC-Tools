@@ -62,9 +62,20 @@ export function replaceMedia(elements, mappings) {
 }
 
 /**
+ * Kiểm tra element có chứa Contact Form 7 widget trong subtree không.
+ */
+function containsFormWidget(el) {
+  let found = false;
+  walkElements([el], (sub) => {
+    if (String(sub.widgetType || '').includes('contact-form-7')) found = true;
+  });
+  return found;
+}
+
+/**
  * Replace background images theo VAI TRÒ (không hardcode attachment ID,
  * vì template rebuild là ID đổi).
- * - Element có css_id 'left-form' → bg2 (hình form).
+ * - Element chứa form (CF7) hoặc css_id 'left-form' → bg2 (hình form).
  * - Các background_image còn lại → bg1 (background chung).
  * - Bỏ qua css_id trong keepCssIds.
  * @param {Array} elements
@@ -87,7 +98,8 @@ export function replaceBackgroundsByRole(elements, bg1Media, bg2Media, keepCssId
       details.push(`giữ ${cssId || el.id} (#${bg.id})`);
       return;
     }
-    const isForm = cssId === 'left-form';
+    // Hình form: element có css_id left-form HOẶC chứa CF7 widget
+    const isForm = cssId === 'left-form' || containsFormWidget(el);
     const target = isForm ? bg2Media : bg1Media;
     // Bỏ qua nếu đã đúng ảnh mới (tránh replace vòng)
     if (bg.id === target.id || bg.url === target.url) return;
@@ -115,7 +127,7 @@ export function replaceCustomCssImages(elements, bg1Media, bg2Media, keepCssIds 
     if (typeof css !== 'string' || !css.includes('url(')) return;
     const cssId = String(s.css_id || s._element_id || s._css_id || el.id || '');
     if (keep.has(cssId)) return;
-    const isForm = cssId === 'left-form';
+    const isForm = cssId === 'left-form' || containsFormWidget(el);
     const target = isForm ? bg2Media : bg1Media;
     const re = /url\(\s*(['"]?)(https?:\/\/[^'")]+?\.(?:jpg|jpeg|png|webp|gif|svg|avif))(\1)\s*\)/gi;
     let newCss = css;
