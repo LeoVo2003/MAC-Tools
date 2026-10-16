@@ -323,6 +323,17 @@ export function createApp() {
     res.json({ configured: ok });
   });
 
+  /** QR Palette: GET /api/qr/palette?primary=&secondary= — preview màu dùng chung logic với backend (4.6) */
+  app.get('/api/qr/palette', requireAuth, async (req, res) => {
+    try {
+      const { buildPalette } = await import('./src/qr/qrColor.js');
+      const palette = buildPalette(String(req.query.primary || ''), String(req.query.secondary || ''));
+      res.json({ ok: true, ...palette });
+    } catch (e) {
+      res.status(400).json({ ok: false, error: e.message });
+    }
+  });
+
   /** Review Link: GET /api/review-link?url= — bọc tracking. */
 
   /** QR Tool: POST /api/qr/generate (multipart: 3 ảnh + fields) */

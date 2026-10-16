@@ -26,7 +26,6 @@ import {
   replaceThemeCssImages,
   patchButtonWeight,
   replaceTokens,
-  replaceColors,
   replaceLogoInHeader,
   buildCssVariablesBlock,
   replaceCssVariables,
@@ -36,6 +35,7 @@ import {
   countElements,
 } from './elementor.js';
 import { installBridge, removeBridge } from './sftpBridge.js';
+import { buildPalette, logoFilterCss } from './qrColor.js';
 
 function getTemplateId() { return Number(process.env.QR_TEMPLATE_ID) || 2806; }
 
@@ -48,130 +48,6 @@ const KEEP_BACKGROUND_CSS_IDS = ['37e07fe4'];
 const KEEP_BACKGROUND_URLS = [
   '303-bg-1-1-hori-cc-beige-brown.jpg', // user chốt 2026-10-16: giữ nguyên
 ];
-
-/** RGB (0-255) → HSL (h:0-360, s:0-1, l:0-1) */
-function rgbToHsl(r, g, b) {
-  r /= 255; g /= 255; b /= 255;
-  const max = Math.max(r, g, b), min = Math.min(r, g, b);
-  const l = (max + min) / 2;
-  if (max === min) return [0, 0, l];
-  const d = max - min;
-  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-  let h;
-  if (max === r) h = ((g - b) / d + (g < b ? 6 : 0));
-  else if (max === g) h = ((b - r) / d + 2);
-  else h = ((r - g) / d + 4);
-  return [h * 60, s, l];
-}
-
-/** HSL → RGB (0-255) */
-function hslToRgb(h, s, l) {
-  h = ((h % 360) + 360) % 360 / 360;
-  const hue2rgb = (p, q, t) => {
-    if (t < 0) t += 1;
-    if (t > 1) t -= 1;
-    if (t < 1 / 6) return p + (q - p) * 6 * t;
-    if (t < 1 / 2) return q;
-    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-    return p;
-  };
-  let r, g, b;
-  if (s === 0) {
-    r = g = b = l;
-  } else {
-    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-    const p = 2 * l - q;
-    r = hue2rgb(p, q, h + 1 / 3);
-    g = hue2rgb(p, q, h);
-    b = hue2rgb(p, q, h - 1 / 3);
-  }
-  return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
-}
-
-/**
- * Tự sinh màu phụ từ màu chính (khi user để trống).
- * Logic nâng cao để màu đẹp, hài hòa:
- * - Giữ nguyên hue → cùng tone với màu chính.
- * - Điều chỉnh lightness về vùng "đẹp": tối thì sáng lên, sáng thì tối đi.
- * - Tăng nhẹ saturation cho màu rất tối để không bị phớt xám.
- * Giữ nguyên alpha nếu là #RRGGBBAA.
- */
-function contrastShadeHex(hex) {
-  const m = /^#([0-9a-fA-F]{6})([0-9a-fA-F]{2})?$/i.exec(String(hex || '').trim());
-  if (!m) return '#000000';
-  const n = parseInt(m[1], 16);
-  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
-  const alpha = m[2] ? m[2].toUpperCase() : '';
-  let [h, s, l] = rgbToHsl(r, g, b);
-
-  let targetL, targetS = s;
-  // Chỉ boost saturation khi màu gốc đã có sắc (tránh xám bị ám màu)
-  const boost = (factor) => (s > 0.25 ? Math.min(1, s * factor) : s);
-  if (l < 0.12) {
-    // Rất tối (gần đen) → lên mid-tone
-    targetL = 0.52;
-    targetS = boost(1.12);
-  } else if (l < 0.3) {
-    // Tối → sáng lên vùng 55%
-    targetL = 0.55;
-    targetS = boost(1.06);
-  } else if (l < 0.45) {
-    // Hơi tối → lên 62%
-    targetL = 0.62;
-  } else if (l <= 0.6) {
-    // Trung bình → lệch đi cho có contrast (ưu tiên tối đi)
-    targetL = l < 0.52 ? 0.72 : 0.32;
-  } else if (l < 0.85) {
-    // Sáng → tối về 35%
-    targetL = 0.35;
-  } else {
-    // Rất sáng (gần trắng) → về 45%
-    targetL = 0.45;
-  }
-
-  const [nr, ng, nb] = hslToRgb(h, targetS, targetL);
-  const hx = (v) => Math.max(0, Math.min(255, v)).toString(16).padStart(2, '0');
-  return `#${hx(nr)}${hx(ng)}${hx(nb)}`.toUpperCase() + alpha;
-}
-
-/**
- * Sinh --qr-primary-soft / --qr-text / --qr-text-on-soft từ primary
- * (cùng công thức với JS qrThemeInit trong theme).
- * Tool fill trực tiếp để không phụ thuộc JS — JS của theme chỉ parse
- * được hex 6 ký tự, primary 8-digit sẽ làm nó fail.
- * Thêm --qr-text-on-primary và --qr-text-on-secondary cho màu chữ trên nút.
- */
-function deriveThemeColors(primary, secondary) {
-  const m = /^#([0-9a-fA-F]{6})([0-9a-fA-F]{2})?$/i.exec(String(primary || '').trim());
-  if (!m) return {};
-  const n = parseInt(m[1], 16);
-  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
-  // soft: primary pha 75% trắng (đủ tương phản để primary nổi bật)
-  const sr = r * 0.25 + 255 * 0.75, sg = g * 0.25 + 255 * 0.75, sb = b * 0.25 + 255 * 0.75;
-  const hx = (v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0');
-  const soft = `#${hx(sr)}${hx(sg)}${hx(sb)}`.toUpperCase();
-  // chữ trên nền đậm/nhạt: đảo theo YIQ
-  const yiq = (r * 299 + g * 587 + b * 114) / 1000;
-  const yiqSoft = (sr * 299 + sg * 587 + sb * 114) / 1000;
-  const result = {
-    '--qr-primary-soft': soft,
-    '--qr-text': yiq > 128 ? '#141414' : '#FFFFFF',
-    '--qr-text-on-soft': yiqSoft > 128 ? '#141414' : '#FFFFFF',
-  };
-  // Màu chữ trên nút primary/secondary (tính theo YIQ của từng màu)
-  // Ngưỡng 150 thay vì 128: xám vừa (#989898) nhìn tối nên dùng chữ trắng cho dễ đọc
-  const yiqOf = (hex) => {
-    const mm = /^#([0-9a-fA-F]{6})/.exec(String(hex || '').trim());
-    if (!mm) return 255;
-    const nn = parseInt(mm[1], 16);
-    return (((nn >> 16) & 255) * 299 + (((nn >> 8) & 255) * 587) + ((nn & 255) * 114)) / 1000;
-  };
-  result['--qr-text-on-primary'] = yiqOf(primary) > 150 ? '#141414' : '#FFFFFF';
-  if (secondary) {
-    result['--qr-text-on-secondary'] = yiqOf(secondary) > 150 ? '#141414' : '#FFFFFF';
-  }
-  return result;
-}
 
 /** Convert social URL → review URL qua worker */
 async function convertToReviewUrl(socialUrl) {
@@ -245,19 +121,16 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   if (!zip || !businessName) throw new Error('Thiếu ZIP hoặc tên tiệm từ WPM');
   const title = `${zip} ${businessName}`;
   const slug = `${zip}-${slugify(businessName)}`;
-  const primary = String(inputs.primary || '').trim();
-  const isHex = (v) => /^#[0-9A-F]{6}([0-9A-F]{2})?$/i.test(v);
-  const isGradient = (v) => /^(linear|radial)-gradient\(/i.test(v);
-  if (!isHex(primary) && !isGradient(primary)) throw new Error('Màu chính không hợp lệ (hex hoặc gradient)');
-  let secondaryRaw = inputs.secondary?.trim() || '';
-  if (!secondaryRaw) {
-    // Tự sinh màu phụ hài hòa từ màu chính (HSL smart).
-    // Gradient thì dùng nguyên primary.
-    secondaryRaw = isHex(primary) ? contrastShadeHex(primary) : primary;
+  // (4.6) Dùng qrColor.js — nguồn duy nhất cho logic màu
+  let palette;
+  try {
+    palette = buildPalette(inputs.primary, inputs.secondary);
+  } catch (e) {
+    throw new Error(`Màu không hợp lệ: ${e.message}`);
   }
-  secondaryRaw = secondaryRaw.toUpperCase();
-  if (!isHex(secondaryRaw) && !isGradient(secondaryRaw)) throw new Error('Màu phụ không hợp lệ (hex hoặc gradient)');
-  const secondary = secondaryRaw;
+  for (const w of palette.report.warnings) log(`[color] ⚠ ${w}`);
+  const primary = palette.vars['--qr-primary'];
+  const secondary = palette.vars['--qr-secondary'];
   step('validate', true, `${title} / ${slug}`);
 
   // Xóa PHP fatal log đầu job (snippet v5+) để log chỉ chứa lỗi run này
@@ -497,22 +370,15 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   const tokenCount = replaceTokens(elements, tokens);
   step('replace-tokens', true, `${tokenCount} chỗ`);
 
-  // 7c. Màu → CSS variables
-  const colorCount = replaceColors(elements, [
-    { hex: '#1D1BE0', variable: '--qr-primary' },
-    { hex: '#567445', variable: '--qr-secondary' },
-  ]);
-  // Build CSS variables: primary/secondary/logo-filter + soft/text tự sinh từ primary
-  // (tool fill trực tiếp để không phụ thuộc JS của theme)
+  // 7c. Màu → CSS variables (4.6: dùng palette từ qrColor.js, bỏ replaceColors)
+  // Build CSS variables từ palette + logo filter
   const cssVars = {
-    '--qr-primary': primary,
-    '--qr-secondary': secondary,
-    '--qr-logo-filter': inputs.logoFilter ? 'brightness(0) invert(1)' : 'none',
-    ...deriveThemeColors(primary, secondary),
+    ...palette.vars,
+    '--qr-logo-filter': logoFilterCss(inputs.logoFilterMode || 'auto', palette.vars['--qr-text-on-primary']),
   };
   const cssVarsBlock = buildCssVariablesBlock(cssVars);
   const cssOk = replaceCssVariables(elements, cssVars);
-  step('replace-colors', true, `${colorCount} chỗ, primary=${primary}, secondary=${secondary}`);
+  step('replace-colors', true, `primary=${primary}, secondary=${secondary}`);
   // (2.12) Nếu không thay được biến CSS, DỪNG để tránh publish page mất màu
   if (!cssOk) throw new Error('Không tìm thấy khối :root có --qr-primary trong template — dừng để tránh publish page mất màu');
   step('css-variables', cssOk, 'đã thay trong widget');
@@ -573,6 +439,8 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   // CSS variables để inject (trả về cho frontend log)
   result.cssVariables = cssVars;
   result.cssVariablesBlock = cssVarsBlock;
+  // (4.6) Palette đầy đủ để UI hiển thị
+  result.palette = { vars: palette.vars, report: palette.report };
 
   return result;
   } finally {
