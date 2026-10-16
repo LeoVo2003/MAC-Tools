@@ -152,6 +152,16 @@ export async function wpCreateCF7Form({ title, form, mail }) {
   return { id: data.id, title: data.title || title, mailToSaved: data.mail_to_saved };
 }
 
+/** Xóa CF7 form cũ (khi ghi đè page). Cần snippet v14+. */
+export async function wpDeleteCF7Form(id) {
+  try {
+    await wpFetch(`/qr/v1/delete-cf7/${id}`, { method: 'DELETE' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Tìm page theo slug → page object hoặc null */
 export async function wpFindPageBySlug(slug) {
   const pages = await wpFetch(`/wp/v2/pages?slug=${encodeURIComponent(slug)}`);

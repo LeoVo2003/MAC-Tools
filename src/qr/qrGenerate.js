@@ -8,6 +8,7 @@ import {
   wpSaveMediaHash,
   wpGetElementorData,
   wpCreateCF7Form,
+  wpDeleteCF7Form,
   wpFindPageBySlug,
   wpCreatePage,
   wpImportTemplate,
@@ -258,6 +259,34 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   }
   if (existing && force) step('slug', true, `ghi đè page ${existing.id}`);
 
+  // Tìm form CF7 cũ của page (để xóa sau khi tạo form mới, tránh trùng)
+  let oldCf7Id = null;
+  if (existing && force) {
+    try {
+      const oldElements = await wpGetElementorData(existing.id);
+      if (Array.isArray(oldElements)) {
+        // Tìm widget CF7 trong data cũ
+        const findCf7 = (els) => {
+          for (const el of els || []) {
+            const wt = String(el.widgetType || '').toLowerCase();
+            if (wt.includes('cf7') || wt.includes('contact')) {
+              const s = el.settings || {};
+              const fid = s.contact_form || s.form_id || s.id || s.selected_form;
+              if (fid) return parseInt(fid, 10) || null;
+            }
+            const found = findCf7(el.elements);
+            if (found) return found;
+          }
+          return null;
+        };
+        oldCf7Id = findCf7(oldElements);
+        if (oldCf7Id) step('cf7-old', true, `form cũ #${oldCf7Id} sẽ xóa sau khi rebind`);
+      }
+    } catch {
+      // Không lấy được data cũ thì bỏ qua, không chặn flow
+    }
+  }
+
   // 3. Upload 3 ảnh (file upload hoặc download từ URL)
   log('Chuẩn bị 3 ảnh...');
   const prepareImage = async (file, name) => {
@@ -476,6 +505,11 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   if (cf7Form) {
     const cf7Count = rebindCF7(elements, cf7Form.id);
     step('rebind-cf7', true, `${cf7Count} widget`);
+    // Xóa form cũ nếu ghi đè (tránh trùng form)
+    if (oldCf7Id && oldCf7Id !== cf7Form.id) {
+      const deleted = await wpDeleteCF7Form(oldCf7Id);
+      step('cf7-cleanup', deleted, deleted ? `đã xóa form cũ #${oldCf7Id}` : `không xóa được form cũ #${oldCf7Id}`);
+    }
   }
 
   // 7e. Xóa nút review nếu user xóa trống ô input
