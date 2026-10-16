@@ -3,9 +3,39 @@
 (function () {
   'use strict';
 
-  /* ================= Color math (HSB) ================= */
+  /* ================= Color math (HSB) + vector 2D ================= */
   const CM = {
     clamp(v, min, max) { return Math.min(max, Math.max(min, v)); },
+    lerp(a, b, t) { return a + (b - a) * t; },
+    lerpPoint(p1, p2, t) {
+      return { x: this.lerp(p1.x, p2.x, t), y: this.lerp(p1.y, p2.y, t) };
+    },
+    // Kéo dài đường thẳng qua p1→p2 ra tới biên [0,100]² (port từ bản gốc)
+    extendLineToEdges(p1, p2) {
+      let dx = p2.x - p1.x, dy = p2.y - p1.y;
+      if (Math.hypot(dx, dy) < 0.001) { dx = 1; dy = 1; }
+      let tMin = -Infinity, tMax = Infinity;
+      if (Math.abs(dx) > 1e-6) {
+        const tx0 = (0 - p1.x) / dx, tx1 = (100 - p1.x) / dx;
+        tMin = Math.max(tMin, Math.min(tx0, tx1));
+        tMax = Math.min(tMax, Math.max(tx0, tx1));
+      }
+      if (Math.abs(dy) > 1e-6) {
+        const ty0 = (0 - p1.y) / dy, ty1 = (100 - p1.y) / dy;
+        tMin = Math.max(tMin, Math.min(ty0, ty1));
+        tMax = Math.min(tMax, Math.max(ty0, ty1));
+      }
+      return {
+        start: { x: this.clamp(p1.x + tMin * dx, 0, 100), y: this.clamp(p1.y + tMin * dy, 0, 100) },
+        end: { x: this.clamp(p1.x + tMax * dx, 0, 100), y: this.clamp(p1.y + tMax * dy, 0, 100) },
+      };
+    },
+    projectPointOntoLine(pt, start, end) {
+      const dx = end.x - start.x, dy = end.y - start.y;
+      const lenSq = dx * dx + dy * dy;
+      if (lenSq < 1e-6) return 0;
+      return this.clamp(((pt.x - start.x) * dx + (pt.y - start.y) * dy) / lenSq, 0, 1);
+    },
     hsbToRgb(h, s, b) {
       h = ((h % 360) + 360) % 360;
       s = this.clamp(s, 0, 100) / 100;
@@ -59,10 +89,10 @@
       return hsb;
     },
     parseGradient(str) {
-      // linear-gradient(135deg, #A 0%, #B 100%) hoặc radial-gradient(circle, ...)
-      const m = String(str).match(/(linear|radial)-gradient\((.*)\)\s*$/s);
+      // linear/radial/conic-gradient(...) — stops dạng #RRGGBB(AA) + %
+      const m = String(str).match(/(linear|radial|conic)-gradient\((.*)\)\s*$/s);
       if (!m) return null;
-      const type = m[1];
+      let type = m[1] === 'conic' ? 'angular' : m[1];
       const inner = m[2];
       const parts = [];
       let depth = 0, cur = '';
@@ -76,7 +106,14 @@
       let angle = 135, startIdx = 0;
       const degM = parts[0] && parts[0].match(/(\d+)\s*deg/);
       if (degM) { angle = +degM[1]; startIdx = 1; }
-      else if (parts[0] && /circle|ellipse|at\s/i.test(parts[0])) { startIdx = 1; }
+      else if (parts[0] && /circle|ellipse|at\s|from\s/i.test(parts[0])) {
+        startIdx = 1;
+        // conic at X% Y% (không phải 50% 50%) → diamond
+        if (type === 'angular') {
+          const atM = parts[0].match(/at\s+(\d+)%\s+(\d+)%/i);
+          if (atM && (+atM[1] !== 50 || +atM[2] !== 50)) type = 'diamond';
+        }
+      }
       const stops = [];
       for (let i = startIdx; i < parts.length; i++) {
         const pm = parts[i].match(/(#[0-9a-fA-F]{6,8}|rgba?\([^)]+\))\s*(\d+(?:\.\d+)?)?\s*%?/);
@@ -109,6 +146,9 @@
     solid: { h: 0, s: 100, b: 100, a: 1 },
     grad: {
       type: 'linear', angle: 135, active: 0,
+      pStart: { x: 12, y: 12 },
+      pEnd: { x: 88, y: 88 },
+      line: { start: { x: 0, y: 0 }, end: { x: 100, y: 100 } },
       stops: [
         { pos: 0, h: 0, s: 100, b: 100, a: 1 },
         { pos: 100, h: 0, s: 100, b: 60, a: 1 },
@@ -116,12 +156,55 @@
     },
   };
 
+  /* 2D helpers cho gradient (port từ bản gốc) */
+  function endpointsToAngle(start, end) {
+    const dx = end.x - start.x, dy = end.y - start.y;
+    const deg = Math.round((Math.atan2(dy, dx) * 180) / Math.PI + 90);
+    return ((deg % 360) + 360) % 360;
+  }
+  function getStop2DPoint(index) {
+    const g = S.grad, all = g.stops;
+    if (index === 0) return { ...g.pStart };
+    if (index === all.length - 1) return { ...g.pEnd };
+    const firstPos = all[0].pos, lastPos = all[all.length - 1].pos;
+    const span = Math.max(1, lastPos - firstPos);
+    const relT = CM.clamp((all[index].pos - firstPos) / span, 0, 1);
+    return CM.lerpPoint(g.pStart, g.pEnd, relT);
+  }
+  function syncLineFromEndpoints(newPStart, newPEnd) {
+    const g = S.grad, all = g.stops;
+    const oldSpan = Math.max(1, all[all.length - 1].pos - all[0].pos);
+    const innerFractions = all.map((st, idx) => {
+      if (idx === 0) return 0;
+      if (idx === all.length - 1) return 1;
+      return CM.clamp((st.pos - all[0].pos) / oldSpan, 0.02, 0.98);
+    });
+    g.pStart = { x: CM.clamp(newPStart.x, 0, 100), y: CM.clamp(newPStart.y, 0, 100) };
+    g.pEnd = { x: CM.clamp(newPEnd.x, 0, 100), y: CM.clamp(newPEnd.y, 0, 100) };
+    const ext = CM.extendLineToEdges(g.pStart, g.pEnd);
+    g.line.start = ext.start; g.line.end = ext.end;
+    g.angle = endpointsToAngle(g.pStart, g.pEnd);
+    const t0 = CM.projectPointOntoLine(g.pStart, g.line.start, g.line.end);
+    const t1 = CM.projectPointOntoLine(g.pEnd, g.line.start, g.line.end);
+    all[0].pos = Math.round(t0 * 100);
+    all[all.length - 1].pos = Math.max(all[0].pos + 1, Math.round(t1 * 100));
+    const newSpan = Math.max(1, all[all.length - 1].pos - all[0].pos);
+    all.forEach((st, idx) => {
+      if (idx > 0 && idx < all.length - 1) {
+        st.pos = CM.clamp(
+          Math.round(all[0].pos + innerFractions[idx] * newSpan),
+          all[0].pos + 1, all[all.length - 1].pos - 1);
+      }
+    });
+  }
+
   /* ================= DOM (build 1 lần) ================= */
-  const backdrop = document.createElement('div');
-  backdrop.className = 'qr-cp-backdrop';
-  backdrop.hidden = true;
-  backdrop.innerHTML = `
-    <div class="uui-cp-dialog" role="dialog" aria-modal="true" aria-label="Chọn màu">
+  // Popup nhỏ absolute dưới ô màu — KHÔNG dùng backdrop fullscreen
+  const pop = document.createElement('div');
+  pop.className = 'qr-cp-pop';
+  pop.hidden = true;
+  pop.innerHTML = `
+    <div class="uui-cp-dialog" role="dialog" aria-label="Chọn màu">
       <div class="uui-tabs-list" role="tablist" aria-label="Kiểu màu">
         <button type="button" class="uui-tab-trigger" data-mode="solid" data-active="true" role="tab" aria-selected="true">Solid</button>
         <button type="button" class="uui-tab-trigger" data-mode="gradient" data-active="false" role="tab" aria-selected="false">Gradient</button>
@@ -153,17 +236,28 @@
         </div>
       </div>
 
-      <!-- GRADIENT -->
+      <!-- GRADIENT (giống bản gốc: 2D vector + type + slider + stops) -->
       <div id="qr-cp-pane-gradient" hidden>
-        <div id="qr-cp-grad-preview" class="qr-cp-grad-preview uui-checkerboard"></div>
+        <div id="qr-cp-grad-2d" class="uui-cp-area uui-checkerboard qr-cp-grad-2d" role="group" aria-label="Hướng gradient và các điểm màu">
+          <div id="qr-cp-grad-2d-fill" class="qr-cp-grad-2d-fill"></div>
+          <svg id="qr-cp-grad-2d-svg" class="qr-cp-grad-2d-svg" aria-hidden="true">
+            <line id="qr-cp-grad-vector" x1="12%" y1="12%" x2="88%" y2="88%"
+              stroke="rgba(255,255,255,0.65)" stroke-width="2"
+              stroke-dasharray="3 5" stroke-linecap="round" />
+          </svg>
+          <div id="qr-cp-grad-2d-handles" class="qr-cp-grad-2d-handles"></div>
+        </div>
         <div class="qr-cp-row">
           <select id="qr-cp-grad-type" class="uui-select" aria-label="Kiểu gradient">
             <option value="linear">Linear</option>
             <option value="radial">Radial</option>
+            <option value="angular">Angular</option>
+            <option value="diamond">Diamond</option>
           </select>
           <div class="uui-input-cell" data-position="only" id="qr-cp-grad-angle-wrap" title="Góc (độ)">
             <input id="qr-cp-grad-angle" inputmode="numeric" aria-label="Góc gradient">
           </div>
+          <button type="button" id="qr-cp-grad-reverse" class="qr-cp-mini-btn" title="Đảo ngược gradient" aria-label="Đảo ngược gradient">⇄</button>
           <button type="button" id="qr-cp-grad-add" class="qr-cp-mini-btn">+ Thêm</button>
         </div>
         <div id="qr-cp-grad-bar" class="uui-cp-slider uui-checkerboard" role="slider" aria-label="Vị trí các điểm màu">
@@ -197,9 +291,8 @@
         <button type="button" id="qr-cp-apply" class="qr-cp-btn qr-cp-btn-primary">Chọn</button>
       </div>
     </div>`;
-  document.body.appendChild(backdrop);
   const $ = (id) => document.getElementById(id);
-  const dlg = backdrop.querySelector('.uui-cp-dialog');
+  const dlg = pop.querySelector('.uui-cp-dialog');
 
   /* ================= Helpers ================= */
   function gradientCss() {
@@ -207,9 +300,11 @@
     const sorted = [...g.stops].sort((a, b) => a.pos - b.pos);
     // Backend gradientStops() chỉ match #RRGGBB — dùng hex, không dùng rgb()
     const parts = sorted.map((st) => `${CM.hsbaToHex(st.h, st.s, st.b, st.a)} ${Math.round(st.pos)}%`);
-    return g.type === 'linear'
-      ? `linear-gradient(${g.angle}deg, ${parts.join(', ')})`
-      : `radial-gradient(circle, ${parts.join(', ')})`;
+    const cx = Math.round(g.pStart.x), cy = Math.round(g.pStart.y);
+    if (g.type === 'radial') return `radial-gradient(circle at 50% 50%, ${parts.join(', ')})`;
+    if (g.type === 'angular') return `conic-gradient(from ${g.angle}deg at 50% 50%, ${parts.join(', ')})`;
+    if (g.type === 'diamond') return `conic-gradient(from ${g.angle}deg at ${cx}% ${cy}%, ${parts.join(', ')})`;
+    return `linear-gradient(${g.angle}deg, ${parts.join(', ')})`;
   }
   function currentValue() {
     const sl = S.solid;
@@ -223,7 +318,7 @@
 
   /* ================= Render ================= */
   function renderTabs() {
-    backdrop.querySelectorAll('.uui-tab-trigger').forEach((b) => {
+    pop.querySelectorAll('.uui-tab-trigger').forEach((b) => {
       const on = b.dataset.mode === S.mode;
       b.dataset.active = on ? 'true' : 'false';
       b.setAttribute('aria-selected', on ? 'true' : 'false');
@@ -259,15 +354,86 @@
   function renderGradient() {
     const g = S.grad;
     const css = gradientCss();
-    $('qr-cp-grad-preview').style.background = css;
-    $('qr-cp-grad-bar-fill').style.background = css;
     $('qr-cp-grad-type').value = g.type;
-    $('qr-cp-grad-angle-wrap').style.display = g.type === 'linear' ? '' : 'none';
     const angleInp = $('qr-cp-grad-angle');
     if (document.activeElement !== angleInp) angleInp.value = g.angle + '°';
+    // Bar ngang luôn hiện linear 90deg để dễ kéo stops
+    const sorted = [...g.stops].sort((a, b) => a.pos - b.pos);
+    $('qr-cp-grad-bar-fill').style.background =
+      `linear-gradient(90deg, ${sorted.map((st) => `${CM.hsbaToHex(st.h, st.s, st.b, st.a)} ${Math.round(st.pos)}%`).join(', ')})`;
+    renderGrad2D(css);
     renderGradHandles();
     renderGradStops();
     renderGradEditor();
+  }
+
+  // 2D vector area: fill gradient + đường dashed nối pStart→pEnd + handles kéo 2D
+  function renderGrad2D(css) {
+    const g = S.grad;
+    $('qr-cp-grad-2d-fill').style.background = css;
+    const line = $('qr-cp-grad-vector');
+    line.setAttribute('x1', g.pStart.x + '%');
+    line.setAttribute('y1', g.pStart.y + '%');
+    line.setAttribute('x2', g.pEnd.x + '%');
+    line.setAttribute('y2', g.pEnd.y + '%');
+    const wrap = $('qr-cp-grad-2d-handles');
+    wrap.innerHTML = '';
+    g.stops.forEach((st, idx) => {
+      const pt = getStop2DPoint(idx);
+      const h = document.createElement('button');
+      h.type = 'button';
+      h.className = 'uui-grad-handle';
+      h.style.left = pt.x + '%';
+      h.style.top = pt.y + '%';
+      h.style.background = CM.hsbaToCss(st.h, st.s, st.b, st.a);
+      h.dataset.active = idx === g.active ? 'true' : 'false';
+      h.setAttribute('aria-label', `Điểm màu ${idx + 1} (${Math.round(st.pos)}%)`);
+      h.addEventListener('pointerdown', (e) => start2DStopDrag(e, idx, h));
+      wrap.appendChild(h);
+    });
+  }
+
+  // Kéo handle trên mặt phẳng 2D (port từ bản gốc)
+  function start2DStopDrag(e, idx, handleEl) {
+    e.stopPropagation();
+    e.preventDefault();
+    const g = S.grad;
+    g.active = idx;
+    handleEl.dataset.dragging = 'true';
+    const areaEl = $('qr-cp-grad-2d');
+    const isFirst = idx === 0, isLast = idx === g.stops.length - 1;
+    const endSnapshot = { ...g.pEnd };
+    const startSnapshot = { ...g.pStart };
+    renderGradient();
+    const move = (ev) => {
+      const rect = areaEl.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const px = CM.clamp(((ev.clientX - rect.left) / rect.width) * 100, 0, 100);
+      const py = CM.clamp(((ev.clientY - rect.top) / rect.height) * 100, 0, 100);
+      if (isFirst) {
+        if (Math.hypot(px - endSnapshot.x, py - endSnapshot.y) < 3) return;
+        syncLineFromEndpoints({ x: px, y: py }, endSnapshot);
+      } else if (isLast) {
+        if (Math.hypot(px - startSnapshot.x, py - startSnapshot.y) < 3) return;
+        syncLineFromEndpoints(startSnapshot, { x: px, y: py });
+      } else {
+        // Điểm giữa: trượt % dọc vector + tịnh tiến vector theo chuột
+        const t = CM.projectPointOntoLine({ x: px, y: py }, g.line.start, g.line.end);
+        const sorted = [...g.stops].sort((a, b) => a.pos - b.pos);
+        const firstPos = sorted[0].pos, lastPos = sorted[sorted.length - 1].pos;
+        g.stops[idx].pos = CM.clamp(Math.round(firstPos + t * (lastPos - firstPos)), firstPos + 1, lastPos - 1);
+      }
+      renderGradient();
+    };
+    const up = () => {
+      handleEl.dataset.dragging = 'false';
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
   }
 
   function renderGradHandles() {
@@ -440,7 +606,7 @@
   });
 
   /* Tabs */
-  backdrop.querySelectorAll('.uui-tab-trigger').forEach((b) => {
+  pop.querySelectorAll('.uui-tab-trigger').forEach((b) => {
     b.addEventListener('click', () => { S.mode = b.dataset.mode; render(); });
   });
 
@@ -451,7 +617,18 @@
   });
   $('qr-cp-grad-angle').addEventListener('change', (e) => {
     const v = parseInt(String(e.target.value).replace(/[^0-9]/g, ''), 10);
-    if (!isNaN(v)) S.grad.angle = CM.clamp(v, 0, 360);
+    if (isNaN(v)) { render(); return; }
+    const g = S.grad;
+    g.angle = CM.clamp(v, 0, 360);
+    // Xoay vector 2D theo góc (cho linear)
+    if (g.type === 'linear') {
+      const rad = ((g.angle - 90) * Math.PI) / 180;
+      const cx = 50, cy = 50, r = 38;
+      g.pStart = { x: CM.clamp(cx - Math.cos(rad) * r, 0, 100), y: CM.clamp(cy - Math.sin(rad) * r, 0, 100) };
+      g.pEnd = { x: CM.clamp(cx + Math.cos(rad) * r, 0, 100), y: CM.clamp(cy + Math.sin(rad) * r, 0, 100) };
+      const ext = CM.extendLineToEdges(g.pStart, g.pEnd);
+      g.line.start = ext.start; g.line.end = ext.end;
+    }
     render();
   });
   $('qr-cp-grad-add').addEventListener('click', () => {
@@ -460,6 +637,19 @@
     const src = g.stops[g.active] || g.stops[0];
     g.stops.push({ pos: 50, h: src.h, s: src.s, b: src.b, a: src.a });
     g.active = g.stops.length - 1;
+    render();
+  });
+  // Đảo ngược gradient: đảo thứ tự stops + hoán đổi pStart/pEnd
+  $('qr-cp-grad-reverse').addEventListener('click', () => {
+    const g = S.grad;
+    g.stops.reverse();
+    g.stops.forEach((st) => { st.pos = 100 - st.pos; });
+    g.stops.sort((a, b) => a.pos - b.pos);
+    const tmp = g.pStart; g.pStart = g.pEnd; g.pEnd = tmp;
+    const ext = CM.extendLineToEdges(g.pStart, g.pEnd);
+    g.line.start = ext.start; g.line.end = ext.end;
+    g.angle = endpointsToAngle(g.pStart, g.pEnd);
+    g.active = 0;
     render();
   });
 
@@ -471,13 +661,16 @@
     S.solid = { h: 0, s: 100, b: 100, a: 1 };
     S.grad = {
       type: 'linear', angle: 135, active: 0,
+      pStart: { x: 12, y: 12 },
+      pEnd: { x: 88, y: 88 },
+      line: { start: { x: 0, y: 0 }, end: { x: 100, y: 100 } },
       stops: [
         { pos: 0, h: 0, s: 100, b: 100, a: 1 },
         { pos: 100, h: 0, s: 100, b: 60, a: 1 },
       ],
     };
     if (!val) return;
-    if (/^(linear|radial)-gradient/i.test(val)) {
+    if (/^(linear|radial|conic)-gradient/i.test(val)) {
       const g = CM.parseGradient(val);
       if (g) {
         S.mode = 'gradient';
@@ -485,6 +678,15 @@
         S.grad.angle = g.angle;
         S.grad.stops = g.stops;
         S.grad.active = 0;
+        // Dựng lại pStart/pEnd từ angle cho linear
+        if (g.type === 'linear') {
+          const rad = ((g.angle - 90) * Math.PI) / 180;
+          const cx = 50, cy = 50, r = 38;
+          S.grad.pStart = { x: CM.clamp(cx - Math.cos(rad) * r, 0, 100), y: CM.clamp(cy - Math.sin(rad) * r, 0, 100) };
+          S.grad.pEnd = { x: CM.clamp(cx + Math.cos(rad) * r, 0, 100), y: CM.clamp(cy + Math.sin(rad) * r, 0, 100) };
+          const ext = CM.extendLineToEdges(S.grad.pStart, S.grad.pEnd);
+          S.grad.line.start = ext.start; S.grad.line.end = ext.end;
+        }
         const st = g.stops[0];
         S.solid = { h: st.h, s: st.s, b: st.b, a: st.a };
       }
@@ -498,30 +700,55 @@
     S.target = target;
     loadFromValue(target.input.value);
     render();
-    backdrop.hidden = false;
-    document.body.style.overflow = 'hidden';
+    // Popup absolute trong .color-field bọc quanh input+swatch (không fullscreen)
+    const wrap = target.input.closest('.color-field');
+    if (wrap && pop.parentElement !== wrap) wrap.appendChild(pop);
+    pop.hidden = false;
   }
   function close() {
-    backdrop.hidden = true;
-    document.body.style.overflow = '';
+    pop.hidden = true;
     S.target = null;
   }
-  function commit(val) {
+  async function commit(val) {
     const t = S.target;
     if (!t) { close(); return; }
+    const isPrimary = t.input.id === 'qrPrimary';
     t.input.value = val;
     paintSwatch(t.swatch, val);
     t.input.dispatchEvent(new Event('input', { bubbles: true }));
     if (typeof t.onChange === 'function') { try { t.onChange(val); } catch {} }
     close();
+    // Auto-suggest màu phụ khi vừa chọn màu chính mà ô phụ đang trống
+    if (isPrimary && val) {
+      const secInput = document.getElementById('qrSecondary');
+      if (secInput && !secInput.value.trim()) {
+        try {
+          const r = await fetch(`/api/qr/palette?primary=${encodeURIComponent(val)}`, { credentials: 'same-origin' });
+          const d = await r.json();
+          const sug = d && d.ok && d.vars && d.vars['--qr-secondary'];
+          if (sug) {
+            secInput.value = sug;
+            paintSwatch(document.getElementById('qrSecondarySwatch'), sug);
+            secInput.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+        } catch { /* bỏ qua */ }
+      }
+    }
   }
 
   $('qr-cp-apply').addEventListener('click', () => commit(currentValue()));
   $('qr-cp-clear').addEventListener('click', () => commit(''));
   $('qr-cp-cancel').addEventListener('click', close);
-  backdrop.addEventListener('mousedown', (e) => { if (e.target === backdrop) close(); });
+  // Click outside popup → đóng (không chặn thao tác khác trên page)
+  document.addEventListener('mousedown', (e) => {
+    if (pop.hidden || !S.target) return;
+    const t = S.target;
+    if (pop.contains(e.target)) return;
+    if (t.input.contains(e.target) || (t.swatch && t.swatch.contains(e.target))) return;
+    close();
+  });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !backdrop.hidden) close();
+    if (e.key === 'Escape' && !pop.hidden) close();
   });
 
   /* ================= Public API ================= */
