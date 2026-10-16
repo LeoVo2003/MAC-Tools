@@ -23,15 +23,23 @@ test('secondary tự sinh luôn phân biệt được với primary (hex)', () =
   }
 });
 
-test('luôn trả đủ 10 biến, kể cả gradient / alpha', () => {
+test('luôn trả đủ 11 biến, kể cả gradient / alpha', () => {
   for (const p of SAMPLES) {
     const { vars } = buildPalette(p);
-    for (const k of ['--qr-primary', '--qr-secondary', '--qr-primary-soft', '--qr-bg', '--qr-text',
+    for (const k of ['--qr-primary', '--qr-primary-bg', '--qr-secondary', '--qr-primary-soft', '--qr-bg', '--qr-text',
       '--qr-text-on-primary', '--qr-text-on-secondary', '--qr-text-on-soft', '--qr-accent-ink']) {
       assert.ok(vars[k], `${p} thiếu ${k}`);
     }
     assert.ok(parseHex(vars['--qr-secondary'].slice(0, 7)) || isGradient(vars['--qr-secondary']));
   }
+});
+
+test('--qr-primary-bg giữ gradient, --qr-primary luôn đặc', () => {
+  const g = buildPalette('linear-gradient(90deg,#FF512F,#F09819)');
+  assert.ok(isGradient(g.vars['--qr-primary-bg']), 'primary-bg phải giữ gradient');
+  assert.ok(parseHex(g.vars['--qr-primary']), 'primary phải là màu đặc');
+  const s = buildPalette('#E31E24');
+  assert.equal(s.vars['--qr-primary-bg'], s.vars['--qr-primary'], 'màu đặc: bg = primary');
 });
 
 test('contrast đen/trắng = 21', () => assert.equal(Math.round(contrast('#000000', '#FFFFFF')), 21));

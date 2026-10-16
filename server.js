@@ -432,7 +432,8 @@ export function createApp() {
         reviewYelp: req.body.qrReviewYelp || '',
         tiktok: req.body.qrTiktok || '',
         youtube: req.body.qrYoutube || '',
-        logoFilter: req.body.qrLogoFilter === 'on' || req.body.qrLogoFilter === 'true',
+        // (1.6) logoFilterMode: ưu tiên giá trị mới, fallback từ checkbox boolean cũ
+        logoFilterMode: req.body.qrLogoFilterMode || req.body.logoFilterMode || (req.body.qrLogoFilter === 'on' || req.body.qrLogoFilter === 'true' ? 'white' : 'auto'),
         skipCf7: req.body.qrSkipCf7 === '1' || req.body.qrSkipCf7 === 'true',
       };
 

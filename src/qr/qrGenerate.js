@@ -7,8 +7,10 @@ import {
   wpFindMediaByHash,
   wpSaveMediaHash,
   wpGetElementorData,
+  wpGetTemplateRaw,
   wpCreateCF7Form,
   wpDeleteCF7Form,
+  wpGetCf7Title,
   wpDeletePage,
   wpFindPageBySlug,
   wpCreatePage,
@@ -288,9 +290,17 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   // 7. Tạo page → import template NGUYÊN BẢN server-side (verbatim, không JSON round-trip)
   // Page sau bước này phải render giống hệt template preview.
   let pageId;
+  let oldRaw = null;  // (3.1) Lưu raw data cũ để khôi phục khi rollback ghi đè
   if (existing && force) {
     pageId = existing.id;
     step('page', true, `dùng lại page #${pageId} (ghi đè)`);
+    // (3.1) Lưu raw _elementor_data của page cũ trước khi ghi đè
+    try {
+      oldRaw = await wpGetTemplateRaw(pageId);
+      log(`[qr] Đã lưu raw data cũ của page #${pageId} (${oldRaw?.length || 0} bytes) để rollback`);
+    } catch (e) {
+      log(`[qr] ⚠ Không lưu được raw data cũ: ${e.message}`);
+    }
   } else {
     const createdPage = await wpCreatePage({ title, slug });
     pageId = createdPage.id;
@@ -412,6 +422,7 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   result.page = { id: pageId, slug, url: published.link || `${getWpBase()}/${slug}/` };
 
   // 11. Verify bằng GET (trigger render thật, không phải HEAD)
+  // (3.3) Verify mạnh: check form mới, không còn placeholder, đúng màu primary
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 25000);
@@ -419,13 +430,26 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
     clearTimeout(t);
     const body = await res.text();
     const hasCritical = /critical error/i.test(body);
-    if (res.ok && !hasCritical) {
-      step('verify', true, `HTTP ${res.status}`);
+    const hasNewForm = cf7Form ? body.includes(`wpcf7-f${cf7Form.id}`) : true;
+    const hasPlaceholder = /\{\{/.test(body);
+    const hasPrimaryVar = body.includes(`--qr-primary: ${primary}`) || body.includes(`--qr-primary:${primary}`);
+    const verifyOk = res.ok && !hasCritical && hasNewForm && !hasPlaceholder && hasPrimaryVar;
+    if (verifyOk) {
+      step('verify', true, `HTTP ${res.status}, form #${cf7Form?.id || 'n/a'} OK`);
       result.verified = true;  // (2.4)
       // (2.2) Chỉ xóa form cũ SAU KHI verify OK — page mới đã live ổn định
+      // (3.2) Kiểm tra title form trước khi xóa để tránh xóa nhầm form dùng chung
       if (oldCf7Id && cf7Form && oldCf7Id !== cf7Form.id) {
-        const deleted = await wpDeleteCF7Form(oldCf7Id);
-        step('cf7-cleanup', deleted, deleted ? `đã xóa form cũ #${oldCf7Id}` : `không xóa được form cũ #${oldCf7Id}`);
+        const oldTitle = await wpGetCf7Title(oldCf7Id);
+        // Title form do tool tạo có dạng "{zip} {tên tiệm}" — chỉ xóa khi khớp
+        const expectedPattern = new RegExp(`^${zip}\\s+`, 'i');
+        if (oldTitle && expectedPattern.test(oldTitle)) {
+          const deleted = await wpDeleteCF7Form(oldCf7Id);
+          step('cf7-cleanup', deleted, deleted ? `đã xóa form cũ #${oldCf7Id} ("${oldTitle}")` : `không xóa được form cũ #${oldCf7Id}`);
+        } else {
+          log(`[qr] ⚠ Không xóa form cũ #${oldCf7Id} — title "${oldTitle}" không khớp pattern "{zip} {tên}" (có thể là form dùng chung)`);
+          step('cf7-cleanup', true, `giữ lại form #${oldCf7Id} (không phải do tool tạo)`);
+        }
       }
     } else {
       // Đọc PHP fatal log thật từ server
@@ -434,7 +458,13 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
         log('[qr] PHP fatal log từ server:');
         for (const line of elog.split('\n')) log(`[php] ${line}`);
       }
-      step('verify', false, `HTTP ${res.status}${hasCritical ? ' + critical error (xem [php] log)' : ''}`);
+      const reasons = [];
+      if (!res.ok) reasons.push(`HTTP ${res.status}`);
+      if (hasCritical) reasons.push('critical error');
+      if (!hasNewForm) reasons.push(`thiếu form wpcf7-f${cf7Form?.id}`);
+      if (hasPlaceholder) reasons.push('còn placeholder {{}}');
+      if (!hasPrimaryVar) reasons.push('thiếu --qr-primary');
+      step('verify', false, reasons.join(', ') + ' (xem [php] log)');
       result.verified = false;  // (2.4)
     }
   } catch (err) {
@@ -450,8 +480,17 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
 
   return result;
   } catch (err) {
-    // (2.3) Rollback: xóa CF7/page đã tạo khi lỗi giữa chừng
+    // (2.3/3.1) Rollback: xóa CF7/page mới tạo, hoặc khôi phục page cũ khi ghi đè
     log(`[qr] Lỗi: ${err.message} — đang rollback...`);
+    // (3.1) Nếu ghi đè (không phải page mới) và có oldRaw: khôi phục data cũ
+    if (!created.pageIsNew && oldRaw && pageId) {
+      try {
+        await wpSetElementorData(pageId, JSON.parse(oldRaw));
+        log(`[qr] Đã khôi phục _elementor_data cũ cho page #${pageId}`);
+      } catch (e) {
+        log(`[qr] ⚠ Không khôi phục được page cũ: ${e.message}`);
+      }
+    }
     for (const undo of rollback.reverse()) {
       try { await undo(); } catch {}
     }

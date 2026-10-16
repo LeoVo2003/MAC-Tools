@@ -163,8 +163,12 @@ export function buildPalette(primaryRaw, secondaryRaw = '') {
   }
 
   const onPrimary = pickTextColor(primStops), onSecondary = pickTextColor(secStops), onSoft = pickTextColor(soft);
+  // (1.5) --qr-primary-bg: gradient giữ nguyên, màu đặc dùng cho background-color
+  // Template dùng background: var(--qr-primary-bg) thay vì background-color
+  const primBase = oklchToHex({ L: p.L, C: p.C, h: p.h });
   const vars = {
-    '--qr-primary': primary,
+    '--qr-primary': grad ? primBase : primary,  // luôn là màu đặc (cho color, border)
+    '--qr-primary-bg': primary,  // gradient hoặc màu đặc (cho background)
     '--qr-secondary': secondary,
     '--qr-primary-soft': soft,
     '--qr-bg': bg,

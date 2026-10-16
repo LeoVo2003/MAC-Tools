@@ -171,6 +171,16 @@ export async function wpDeleteCF7Form(id) {
   }
 }
 
+/** (3.2) Lấy title của CF7 form để kiểm tra trước khi xóa */
+export async function wpGetCf7Title(id) {
+  try {
+    const form = await wpFetch(`/wp/v2/wpcf7_contact_form/${id}`);
+    return form?.title || null;
+  } catch {
+    return null;
+  }
+}
+
 /** Xóa page (dùng cho rollback) — force delete */
 export async function wpDeletePage(id) {
   try {
