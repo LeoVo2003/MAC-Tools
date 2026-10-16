@@ -149,7 +149,7 @@ export async function wpCreateCF7Form({ title, form, mail }) {
     },
   });
   if (!data?.id) throw new Error(`Tạo CF7 form thất bại: ${data?.message || data?.code || 'không có ID trả về'}`);
-  return { id: data.id, title: data.title || title, mailToSaved: data.mail_to_saved };
+  return { id: data.id, title: data.title || title, mailToSaved: data.mail_to_saved, mailFromSaved: data.mail_from_saved };
 }
 
 /** Xóa CF7 form cũ (khi ghi đè page). Cần snippet v14+. */
