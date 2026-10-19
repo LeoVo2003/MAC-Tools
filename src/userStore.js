@@ -6,12 +6,9 @@ import { db } from './db.js';
  * (S4) Không hardcode admin trong code nữa — admin chỉ lấy từ ADMIN_EMAILS (env).
  * Giữ hằng rỗng để tương thích logic merge trong adminEmails().
  */
-const DEFAULT_ADMIN_EMAILS = [];
+const DEFAULT_ADMIN_EMAILS = ['leo.vo@macusaone.com'];
 
-// (S4) Cảnh báo rõ ràng nếu production mà không cấu hình admin nào
-if (process.env.NODE_ENV === 'production' && !String(process.env.ADMIN_EMAILS || '').trim()) {
-  console.warn('[userStore] CẢNH BÁO: ADMIN_EMAILS rỗng ở production — không có tài khoản nào được công nhận là admin.');
-}
+// (S4) Admin mặc định là leo.vo@macusaone.com, có thể thêm qua ADMIN_EMAILS env
 
 function appSecret() {
   const s = process.env.APP_SECRET || process.env.SESSION_SECRET || 'dev-change-me-app-secret';
