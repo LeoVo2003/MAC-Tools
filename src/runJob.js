@@ -10,7 +10,7 @@ import {
   normalizeWpmProjectUrl,
   sleepExact,
 } from './utils.js';
-import { loginToWPM, openProjectAndQuickLogin, syncAccountToWPM } from './steps/wpm.js';
+import { loginToWPM, openProjectAndQuickLogin, syncAccountToWPM, syncAccountToWPMViaHttp } from './steps/wpm.js';
 import { installAndBackupUpdraftPlus } from './steps/backup.js';
 import { createCustomerAccount } from './steps/user.js';
 import { isHttpStepsEnabled } from './http/wpSession.js';
@@ -286,7 +286,13 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
       currentStep = 'wpm-sync-account';
       mark('syncWpm', 'start');
       log('▶ Sync tài khoản lên WPM...');
-      await syncAccountToWPM(wpmPage, wpmProjectUrl, account, log, targetOpts);
+      // Thử HTTP trước, fallback browser
+      try {
+        await syncAccountToWPMViaHttp(wpmPage, wpmProjectUrl, account, log, targetOpts);
+      } catch (err) {
+        log(`⚠ Sync WPM HTTP thất bại (${(err?.message || '').slice(0, 120)}) — dùng browser...`);
+        await syncAccountToWPM(wpmPage, wpmProjectUrl, account, log, targetOpts);
+      }
       mark('syncWpm', 'done');
     } else if (enabled.has('syncWpm') && accountExistsOnWeb) {
       /* đã log ở trên */

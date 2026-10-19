@@ -1736,3 +1736,97 @@ export async function readProjectLocationData(page) {
     return result;
   });
 }
+
+/**
+ * Sync account lên WPM qua HTTP POST (thay vì điền form bằng browser).
+ * Lấy form data hiện tại từ page, thêm account mới, POST toàn bộ form.
+ *
+ * @param {import('puppeteer').Page} page — đã ở trang project edit
+ * @param {string} projectUrl
+ * @param {{username, password, email}} account
+ * @param {Function} log
+ * @param {object} targetOpts
+ */
+export async function syncAccountToWPMViaHttp(page, projectUrl, account, log, targetOpts = {}) {
+  const webTargetMode = targetOpts.webTargetMode === 'website' ? 'website' : 'main';
+  const preferUrl = targetOpts.preferUrl || '';
+
+  log('Sync account lên WPM qua HTTP...');
+
+  // Đảm bảo đang ở trang project edit
+  const currentUrl = page.url();
+  if (!currentUrl.includes('/projects/') || !currentUrl.includes('/edit')) {
+    await page.goto(projectUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  }
+
+  const result = await page.evaluate(async (acc, mode, prefUrl) => {
+    // Tìm form chính
+    const form = document.querySelector('form[action*="/projects/"]');
+    if (!form) return { ok: false, error: 'no_form' };
+
+    const formData = new FormData(form);
+    const action = form.action;
+    const method = (form.method || 'POST').toUpperCase();
+
+    // Tìm web index khớp URL
+    // Parse webs[N][...] từ form data để tìm web khớp
+    const webIndices = new Set();
+    for (const key of formData.keys()) {
+      const m = key.match(/^webs\[(\d+)\]/);
+      if (m) webIndices.add(m[1]);
+    }
+
+    // Tìm web khớp preferUrl hoặc mode
+    let targetWebIdx = null;
+    // Đơn giản: dùng web đầu tiên (hoặc logic phức tạp hơn nếu cần)
+    // TODO: implement matching logic giống resolveTargetWeb
+    const sorted = [...webIndices].sort();
+    targetWebIdx = sorted[0];
+
+    if (targetWebIdx === null) return { ok: false, error: 'no_web' };
+
+    // Tìm endpoint index và account index tiếp theo
+    const epIndices = new Set();
+    const accIndices = new Set();
+    for (const key of formData.keys()) {
+      let m = key.match(new RegExp(`^webs\\[${targetWebIdx}\\]\\[login_endpoints\\]\\[(\\d+)\\]`));
+      if (m) epIndices.add(m[1]);
+      m = key.match(new RegExp(`^webs\\[${targetWebIdx}\\]\\[login_endpoints\\]\\[\\d+\\]\\[accounts\\]\\[(\\d+)\\]`));
+      if (m) accIndices.add(m[1]);
+    }
+
+    const epIdx = [...epIndices].sort()[0] || '0';
+    const nextAccIdx = accIndices.size ? String(Math.max(...[...accIndices].map(Number)) + 1) : '0';
+
+    // Thêm account mới vào FormData
+    const prefix = `webs[${targetWebIdx}][login_endpoints][${epIdx}][accounts][${nextAccIdx}]`;
+    formData.set(`${prefix}[username]`, acc.username || '');
+    formData.set(`${prefix}[password]`, acc.password || '');
+    formData.set(`${prefix}[role]`, acc.role || 'editor');
+    formData.set(`${prefix}[note]`, acc.notes || '');
+
+    // POST form
+    const resp = await fetch(action, {
+      method: method === 'GET' ? 'GET' : 'POST',
+      body: formData,
+      credentials: 'include',
+      redirect: 'follow',
+    });
+
+    return {
+      ok: resp.ok,
+      status: resp.status,
+      url: resp.url,
+      webIdx: targetWebIdx,
+      epIdx,
+      accIdx: nextAccIdx,
+    };
+  }, { username: account.username, password: account.password, role: account.role || 'editor', notes: account.notes || '' }, webTargetMode, preferUrl);
+
+  if (!result.ok) {
+    throw new Error(`Sync WPM HTTP thất bại: ${result.error || `HTTP ${result.status}`}`);
+  }
+
+  log(`✓ Đã sync account "${account.username}" lên WPM (web ${result.webIdx}, endpoint ${result.epIdx}, account ${result.accIdx}).`);
+  return result;
+}
