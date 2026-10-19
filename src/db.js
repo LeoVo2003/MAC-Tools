@@ -246,6 +246,9 @@ class JsonDbShim {
     if (/SELECT COUNT\(\*\) AS c FROM runs/i.test(s)) {
       return { get: () => ({ c: this._loadRuns().length }) };
     }
+    if (/SELECT COUNT\(\*\) AS c FROM users/i.test(s)) {
+      return { get: () => ({ c: this._loadUsers().length }) };
+    }
     if (/SELECT id FROM runs WHERE status/i.test(s)) {
       return { all: () => this._loadRuns().filter(r => r.status === 'running').map(r => ({ id: r.id })) };
     }
