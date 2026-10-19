@@ -288,22 +288,27 @@ function mactools_webinfo_move_top() {
     // Cần remove_submenu_page + add_menu_page — nhưng slug đã đăng ký bởi plugin khác
     // Cách thực tế: dùng filter admin_menu để reorder — nhưng helper này là tạm thời
     // NOTE: Nếu Web Info là JetEngine options page, thử tìm và update meta
-    $pages = get_posts([
-        'post_type' => 'jet-engine-options-pages',
-        'posts_per_page' => -1,
-        'post_status' => 'publish',
-    ]);
-    foreach ($pages as $p) {
-        if (stripos($p->post_title, 'Web Info') !== false) {
-            $meta = get_post_meta($p->ID);
-            return [
-                'moved' => false,
-                'reason' => 'jetengine_found',
-                'page_id' => $p->ID,
-                'page_title' => $p->post_title,
-                'meta_keys' => array_keys($meta),
-                'note' => 'Tìm thấy JetEngine Web Info. Gửi meta_keys để xác định key cho menu position.',
-            ];
+    // Thử nhiều post type có thể của JetEngine
+    $jet_types = ['jet-engine-options-pages', 'jet-engine-options-page', 'options-page'];
+    foreach ($jet_types as $pt) {
+        $pages = get_posts([
+            'post_type' => $pt,
+            'posts_per_page' => -1,
+            'post_status' => 'any',
+        ]);
+        foreach ($pages as $p) {
+            if (stripos($p->post_title, 'Web Info') !== false || $p->ID == 1) {
+                $meta = get_post_meta($p->ID);
+                return [
+                    'moved' => false,
+                    'reason' => 'jetengine_found',
+                    'page_id' => $p->ID,
+                    'page_title' => $p->post_title,
+                    'post_type' => $pt,
+                    'meta_keys' => array_keys($meta),
+                    'note' => 'Tìm thấy JetEngine Web Info. Gửi meta_keys để xác định key cho menu position.',
+                ];
+            }
         }
     }
     return [
