@@ -846,6 +846,25 @@ export async function configureFPackageUserViaBrowser(page, packageTier = 'F', l
  * 2.1: HTTP ưu tiên, fallback Chrome.
  */
 export async function installMacRoleViaMacCore(page, log) {
+  // Phase 1: thử REST (helper tải từ CRM giống Mac Core)
+  if (isHttpStepsEnabled()) {
+    try {
+      const { getRestAuth, callHelper } = await import('../http/helperClient.js');
+      const { originOf } = await import('../utils.js');
+      const base = originOf(page.url());
+      const auth = await getRestAuth(page, base);
+      log('Cài Mac Role qua REST (từ CRM)...');
+      const res = await callHelper(base, auth, '/mac-role/install-from-crm', { slug: 'mac-role' });
+      if (res.skipped) {
+        log(`⏭ Mac Role đã ${res.reason === 'already_active' ? 'cài & active' : 'cài'} — bỏ qua.`);
+      } else {
+        log(`✓ Đã cài Mac Role từ CRM (${res.via}).`);
+      }
+      return;
+    } catch (err) {
+      log(`⚠ REST cài Mac Role thất bại (${(err?.message || '').slice(0, 120)}) — thử HTTP/DOM...`);
+    }
+  }
   if (isHttpStepsEnabled()) {
     try {
       await installMacRoleViaHttp(page, log);

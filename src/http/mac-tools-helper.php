@@ -21,6 +21,7 @@
  *   POST /mac/v1/options/set               — set WordPress option
  *   GET  /mac/v1/options/get               — get WordPress option
  *   POST /mac/v1/mac-role/grant-capabilities — bật Grant WP capabilities
+ *   POST /mac/v1/mac-role/install-from-crm  — cài Mac Role từ WPM CRM API
  *
  * Auth: Application Password (Basic Auth) của admin.
  */
@@ -103,6 +104,11 @@ add_action('rest_api_init', function () {
     register_rest_route('mac/v1', '/mac-role/grant-capabilities', [
         'methods' => 'POST',
         'callback' => 'mactools_macrole_grant_capabilities',
+        'permission_callback' => $perm,
+    ]);
+    register_rest_route('mac/v1', '/mac-role/install-from-crm', [
+        'methods' => 'POST',
+        'callback' => 'mactools_macrole_install_from_crm',
         'permission_callback' => $perm,
     ]);
 });
@@ -397,6 +403,87 @@ function mactools_macrole_grant_capabilities() {
         'mac_options_found' => $found,
         'note' => 'Không tìm thấy option grant capabilities. Dùng /options/get để kiểm tra tay.',
     ];
+}
+
+/* ================= Mac Role: install từ CRM (WPM API) ================= */
+
+function mactools_macrole_install_from_crm(WP_REST_Request $req) {
+    $slug = sanitize_key($req->get_param('slug') ?: 'mac-role');
+
+    // Kiểm tra đã cài chưa
+    require_once ABSPATH . 'wp-admin/includes/plugin.php';
+    $all = get_plugins();
+    foreach ($all as $file => $data) {
+        if (strpos($file, $slug) === 0 || dirname($file) === $slug) {
+            if (is_plugin_active($file)) {
+                return ['installed' => true, 'active' => true, 'skipped' => true, 'reason' => 'already_active', 'file' => $file];
+            }
+            $res = activate_plugin($file);
+            if (is_wp_error($res)) return $res;
+            return ['installed' => true, 'active' => true, 'file' => $file, 'via' => 'activate_existing'];
+        }
+    }
+
+    // Chưa cài — tải từ CRM (WPM API), giống Mac Core
+    $license_key = get_option('mac_domain_valid_key', '');
+    if (!$license_key) {
+        return new WP_Error('no_license', 'Thiếu mac_domain_valid_key — không tải được từ CRM.', ['status' => 400]);
+    }
+    $site_url = get_site_url() . '/';
+    $api_url = 'https://wpm.macusaone.com/api/v1/plugins/' . rawurlencode($slug);
+
+    $resp = wp_remote_post($api_url, [
+        'method' => 'POST',
+        'timeout' => 30,
+        'sslverify' => true,
+        'headers' => ['Content-Type' => 'application/x-www-form-urlencoded', 'Accept' => 'application/json'],
+        'body' => ['key' => $license_key, 'url' => $site_url, 'action' => 'download', 'slug' => $slug],
+    ]);
+    if (is_wp_error($resp)) {
+        return new WP_Error('crm_fail', 'CRM request thất bại: ' . $resp->get_error_message(), ['status' => 500]);
+    }
+    $code = wp_remote_retrieve_response_code($resp);
+    $body = wp_remote_retrieve_body($resp);
+    $data = json_decode($body, true);
+    if ($code !== 200 || empty($data['download_url'])) {
+        return new WP_Error('crm_no_url', 'CRM không trả download_url (HTTP ' . $code . ').', ['status' => 500]);
+    }
+
+    // Download + cài
+    require_once ABSPATH . 'wp-admin/includes/file.php';
+    require_once ABSPATH . 'wp-admin/includes/misc.php';
+    require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+    if (!function_exists('download_url')) {
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+    }
+    $tmp = download_url($data['download_url']);
+    if (is_wp_error($tmp)) return $tmp;
+
+    $upgrader = new Plugin_Upgrader(new WP_Ajax_Upgrader_Skin());
+    $result = $upgrader->install($tmp);
+    @unlink($tmp);
+    if (is_wp_error($result)) return $result;
+    if (!$result) {
+        return new WP_Error('install_fail', 'Cài plugin thất bại.', ['status' => 500]);
+    }
+
+    $plugin_file = $upgrader->plugin_info();
+    if (!$plugin_file) {
+        // Tìm file sau khi cài
+        $all2 = get_plugins();
+        foreach ($all2 as $f => $d) {
+            if (strpos($f, $slug) === 0 || dirname($f) === $slug) {
+                $plugin_file = $f;
+                break;
+            }
+        }
+    }
+    if ($plugin_file && !is_plugin_active($plugin_file)) {
+        $res = activate_plugin($plugin_file);
+        if (is_wp_error($res)) return $res;
+    }
+
+    return ['installed' => true, 'active' => true, 'file' => $plugin_file, 'via' => 'crm'];
 }
 
 /* ================= Plugins cleanup ================= */
