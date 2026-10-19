@@ -64,6 +64,7 @@ export async function launchBrowser({
   downloadPath,
   headless: headlessOpt,
   forceHeaded = false,
+  display, // (S6) Display riêng cho user — cô lập Live VNC
 } = {}) {
   const executablePath = findChromePath();
   const chromeLiveEnv = process.env.CHROME_LIVE === 'true';
@@ -118,6 +119,8 @@ export async function launchBrowser({
     ignoreDefaultArgs: ['--enable-automation'],
     ignoreHTTPSErrors: true,
     userDataDir,
+    // (S6) Chạy Chrome trên display riêng của user nếu có
+    ...(display ? { env: { ...process.env, DISPLAY: display } } : {}),
   });
 
   const page = await browser.newPage();

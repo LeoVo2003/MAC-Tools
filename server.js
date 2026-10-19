@@ -28,6 +28,7 @@ import {
   deleteRunsByStatuses,
   closeInterruptedRuns,
 } from './src/tracking.js';
+import { pruneRuns } from './src/db.js';
 import {
   ensureKnownUsers,
   loginWithWpm,
@@ -873,6 +874,14 @@ export function createApp() {
 
 export async function startServer({ openBrowser: shouldOpen } = {}) {
   await ensureKnownUsers();
+
+  // (B6) Retention runs: xóa runs cũ hơn 90 ngày khi khởi động
+  try {
+    const { deleted } = pruneRuns(90);
+    if (deleted > 0) console.log(`[retention] Đã xóa ${deleted} runs cũ hơn 90 ngày.`);
+  } catch (err) {
+    console.warn('[retention] pruneRuns lỗi:', err?.message || err);
+  }
 
   const retentionDays = Number(process.env.BACKUP_RETENTION_DAYS) || 7;
   try {

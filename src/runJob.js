@@ -147,9 +147,13 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
       (await browser.newPage());
     log('→ Resume: tái sử dụng Chrome đang mở.');
   } else {
+    // (S6) Mỗi user chạy Chrome trên display riêng — cô lập Live VNC
+    const { getUserDisplay } = await import('./liveDisplayManager.js');
+    const userDisplay = hooks.liveUserId ? getUserDisplay(hooks.liveUserId) : undefined;
     ({ browser, page: wpmPage } = await launchBrowser({
       downloadPath: DOWNLOADS_DIR,
       forceHeaded,
+      display: userDisplay,
     }));
     hooks.setBrowser?.(browser);
     if (process.env.CHROME_LIVE === 'true') {

@@ -1,11 +1,6 @@
-import fs from 'fs';
-import path from 'path';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
-import { getAppRoot } from './envStore.js';
-
-const DATA_DIR = path.join(getAppRoot(), 'data');
-const USERS_FILE = path.join(DATA_DIR, 'users.json');
+import { db } from './db.js';
 
 /**
  * (S4) Không hardcode admin trong code nữa — admin chỉ lấy từ ADMIN_EMAILS (env).
@@ -16,10 +11,6 @@ const DEFAULT_ADMIN_EMAILS = [];
 // (S4) Cảnh báo rõ ràng nếu production mà không cấu hình admin nào
 if (process.env.NODE_ENV === 'production' && !String(process.env.ADMIN_EMAILS || '').trim()) {
   console.warn('[userStore] CẢNH BÁO: ADMIN_EMAILS rỗng ở production — không có tài khoản nào được công nhận là admin.');
-}
-
-function ensureDataDir() {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
 function appSecret() {
@@ -33,55 +24,131 @@ function appSecret() {
 }
 
 /**
- * Mã hóa AES-256-GCM: IV ngẫu nhiên 12 byte + auth tag cho từng bản ghi, prefix `v1:`.
+ * Mã hóa AES-256-GCM: IV ngẫu nhiên 12 byte + auth tag cho từng bản ghi.
  *
- * LIMITATION đã biết (S1): chưa hỗ trợ xoay khóa (key rotation).
- * Đổi APP_SECRET sẽ làm toàn bộ wpmPasswordEnc đã lưu KHÔNG giải mã được nữa
- * (decryptSecret ném lỗi do sai key/tag) — phải yêu cầu mọi user login lại.
- * TODO: thêm keyVersion vào từng bản ghi + giữ khóa cũ để giải mã dần khi xoay khóa.
+ * Format v2: `v2:<keyId>:<ivB64>:<tagB64>:<dataB64>`
+ * - keyId = 8 ký tự đầu của sha256(secret) hex → nhận diện key nào đã mã hóa.
+ * - encryptSecret LUÔN dùng key hiện tại (APP_SECRET).
+ *
+ * XOAY KHÓA (key rotation) — quy trình cho admin:
+ *   1. Đặt `APP_SECRET_PREVIOUS=<key cũ>`, `APP_SECRET=<key mới>`, restart server.
+ *      Data cũ vẫn đọc được (nhờ PREVIOUS), data mới ghi bằng key mới (v2 + keyId mới).
+ *   2. Sau khi chắc chắn mọi data cũ đã được ghi lại / không còn cần
+ *      (vd 30 ngày), xóa `APP_SECRET_PREVIOUS` và restart.
+ *   3. Nếu còn bản ghi mã hóa bằng key đã xóa, decryptSecret ném lỗi rõ ràng
+ *      yêu cầu user login lại thay vì crash im lặng.
+ *
+ * Backward compat: format `v1:<iv>:<tag>:<data>` cũ vẫn giải mã được
+ * bằng APP_SECRET hiện tại.
  */
+function keyIdFor(secret) {
+  return crypto.createHash('sha256').update(String(secret)).digest('hex').slice(0, 8);
+}
+
+/** Trả về danh sách { id, secret } — key hiện tại trước, key cũ sau. */
+function knownSecrets() {
+  const list = [{ id: keyIdFor(appSecret()), secret: appSecret() }];
+  const prev = String(process.env.APP_SECRET_PREVIOUS || '').trim();
+  if (prev) {
+    if (process.env.NODE_ENV === 'production' && (/change-me/i.test(prev) || prev.length < 32)) {
+      console.error('FATAL: APP_SECRET_PREVIOUS quá yếu ở production. Từ chối khởi động.');
+      process.exit(1);
+    }
+    const prevId = keyIdFor(prev);
+    if (prevId !== list[0].id) list.push({ id: prevId, secret: prev });
+  }
+  return list;
+}
+
+function secretForKeyId(keyId) {
+  return knownSecrets().find((k) => k.id === keyId) || null;
+}
+
 export function encryptSecret(plain) {
-  const key = crypto.createHash('sha256').update(appSecret()).digest();
+  const secret = appSecret();
+  const key = crypto.createHash('sha256').update(secret).digest();
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
   const enc = Buffer.concat([cipher.update(String(plain), 'utf8'), cipher.final()]);
   const tag = cipher.getAuthTag();
-  return `v1:${iv.toString('base64')}:${tag.toString('base64')}:${enc.toString('base64')}`;
+  return `v2:${keyIdFor(secret)}:${iv.toString('base64')}:${tag.toString('base64')}:${enc.toString('base64')}`;
 }
 
 export function decryptSecret(blob) {
   if (!blob) return '';
   const s = String(blob);
-  if (!s.startsWith('v1:')) return s;
-  const [, ivB64, tagB64, dataB64] = s.split(':');
-  const key = crypto.createHash('sha256').update(appSecret()).digest();
-  const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(ivB64, 'base64'));
-  decipher.setAuthTag(Buffer.from(tagB64, 'base64'));
-  return Buffer.concat([
-    decipher.update(Buffer.from(dataB64, 'base64')),
-    decipher.final(),
-  ]).toString('utf8');
-}
-
-function readAll() {
-  ensureDataDir();
-  if (!fs.existsSync(USERS_FILE)) return { users: [] };
-  try {
-    return JSON.parse(fs.readFileSync(USERS_FILE, 'utf-8'));
-  } catch (e) {
-    // (6.3) File hỏng → FAIL LOUD, không im lặng trả rỗng (tránh mất user + chiếm admin)
-    const bak = USERS_FILE + '.corrupt-' + Date.now() + '.bak';
-    try { fs.copyFileSync(USERS_FILE, bak); } catch {}
-    throw new Error(`users.json hỏng (đã backup tại ${bak}): ${e.message}`);
+  // v2: tìm key theo keyId (hỗ trợ xoay khóa)
+  if (s.startsWith('v2:')) {
+    const parts = s.split(':');
+    if (parts.length !== 5) throw new Error('Định dạng mã hóa v2 không hợp lệ.');
+    const [, keyId, ivB64, tagB64, dataB64] = parts;
+    const entry = secretForKeyId(keyId);
+    if (!entry) {
+      throw new Error(
+        `Không tìm thấy key mã hóa (keyId ${keyId}). ` +
+        `Nếu vừa xoay khóa, hãy đặt APP_SECRET_PREVIOUS=<key cũ> rồi restart; ` +
+        `nếu không, user cần đăng nhập lại để tạo bản ghi mới.`
+      );
+    }
+    const key = crypto.createHash('sha256').update(entry.secret).digest();
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(ivB64, 'base64'));
+    decipher.setAuthTag(Buffer.from(tagB64, 'base64'));
+    return Buffer.concat([
+      decipher.update(Buffer.from(dataB64, 'base64')),
+      decipher.final(),
+    ]).toString('utf8');
   }
+  // v1 (legacy): giải bằng key hiện tại
+  if (s.startsWith('v1:')) {
+    const [, ivB64, tagB64, dataB64] = s.split(':');
+    const key = crypto.createHash('sha256').update(appSecret()).digest();
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(ivB64, 'base64'));
+    decipher.setAuthTag(Buffer.from(tagB64, 'base64'));
+    return Buffer.concat([
+      decipher.update(Buffer.from(dataB64, 'base64')),
+      decipher.final(),
+    ]).toString('utf8');
+  }
+  return s;
 }
 
-function writeAll(data) {
-  ensureDataDir();
-  // (6.3) Ghi atomic: tmp → rename (tránh file cụt khi crash)
-  const tmp = USERS_FILE + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
-  fs.renameSync(tmp, USERS_FILE);
+/* ================= SQLite (B6) — prepared statements ================= */
+
+const stmtFindByEmail = db.prepare('SELECT * FROM users WHERE lower(email) = lower(?) LIMIT 1');
+const stmtFindById = db.prepare('SELECT * FROM users WHERE id = ? LIMIT 1');
+const stmtList = db.prepare(
+  'SELECT id, email, is_admin, wpm_password_enc, created_at, updated_at FROM users ORDER BY created_at ASC'
+);
+const stmtInsert = db.prepare(`
+  INSERT INTO users (id, email, password_hash, wpm_password_enc, is_admin, wpm_username, created_at, updated_at)
+  VALUES (@id, @email, @password_hash, @wpm_password_enc, @is_admin, @wpm_username, @created_at, @updated_at)
+`);
+const stmtUpdateCreds = db.prepare(`
+  UPDATE users SET wpm_username = ?, wpm_password_enc = ?, updated_at = ? WHERE id = ?
+`);
+const stmtUpdatePassHash = db.prepare('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?');
+const stmtResetCreds = db.prepare(
+  `UPDATE users SET wpm_password_enc = '', password_hash = '', updated_at = ? WHERE id = ?`
+);
+const stmtSetRole = db.prepare('UPDATE users SET is_admin = ?, updated_at = ? WHERE id = ?');
+
+/** Map row DB → object user camelCase (giữ shape cũ cho code gọi). */
+function toUser(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    username: row.email,
+    passwordHash: row.password_hash || '',
+    role: row.is_admin ? 'admin' : 'user',
+    wpmUsername: row.wpm_username || '',
+    wpmPasswordEnc: row.wpm_password_enc || '',
+    createdAt: row.created_at || '',
+    updatedAt: row.updated_at || '',
+  };
+}
+
+function nowIso() {
+  return new Date().toISOString();
 }
 
 /** Danh sách email admin — (S4) chỉ từ ADMIN_EMAILS (env), không hardcode. */
@@ -100,23 +167,25 @@ export function isAdminIdentity(username) {
 }
 
 export function findUserByUsername(username) {
-  const want = String(username || '').trim().toLowerCase();
-  return readAll().users.find((u) => u.username.toLowerCase() === want) || null;
+  const want = String(username || '').trim();
+  if (!want) return null;
+  return toUser(stmtFindByEmail.get(want));
 }
 
 export function findUserById(id) {
-  return readAll().users.find((u) => u.id === id) || null;
+  if (!id) return null;
+  return toUser(stmtFindById.get(String(id)));
 }
 
 /** Danh sách tài khoản cho admin — không trả password. */
 export function listUsersPublic() {
-  return readAll().users.map((u) => ({
-    id: u.id,
-    username: u.username,
-    role: u.role || 'user',
-    createdAt: u.createdAt || '',
-    updatedAt: u.updatedAt || '',
-    passwordStored: Boolean(u.wpmPasswordEnc),
+  return stmtList.all().map((r) => ({
+    id: r.id,
+    username: r.email,
+    role: r.is_admin ? 'admin' : 'user',
+    createdAt: r.created_at || '',
+    updatedAt: r.updated_at || '',
+    passwordStored: Boolean(r.wpm_password_enc),
   }));
 }
 
@@ -124,14 +193,10 @@ export function listUsersPublic() {
  * Xóa password đã lưu. Lần login sau nhận pass mới (đúng pass WPM) và lưu lại.
  */
 export function resetUserPassword(userId) {
-  const data = readAll();
-  const user = data.users.find((u) => u.id === userId);
+  const user = findUserById(userId);
   if (!user) throw new Error('Không tìm thấy tài khoản.');
-  user.wpmPasswordEnc = '';
-  user.passwordHash = '';
-  user.updatedAt = new Date().toISOString();
-  writeAll(data);
-  return user;
+  stmtResetCreds.run(nowIso(), String(userId));
+  return findUserById(userId);
 }
 
 export async function createUser({ username, password, role = 'user' }) {
@@ -139,7 +204,6 @@ export async function createUser({ username, password, role = 'user' }) {
   const pass = String(password || '');
   if (!name || !pass) throw new Error('Thiếu username/password.');
   if (findUserByUsername(name)) throw new Error('Username đã tồn tại.');
-  const data = readAll();
   const user = {
     id: crypto.randomUUID?.() || `u_${Date.now()}`,
     username: name,
@@ -147,42 +211,45 @@ export async function createUser({ username, password, role = 'user' }) {
     role,
     wpmUsername: name,
     wpmPasswordEnc: encryptSecret(pass),
-    createdAt: new Date().toISOString(),
+    createdAt: nowIso(),
   };
-  data.users.push(user);
-  writeAll(data);
+  stmtInsert.run({
+    id: user.id,
+    email: name,
+    password_hash: user.passwordHash,
+    wpm_password_enc: user.wpmPasswordEnc,
+    is_admin: role === 'admin' ? 1 : 0,
+    wpm_username: name,
+    created_at: user.createdAt,
+    updated_at: null,
+  });
   return user;
 }
 
 export function setUserWpmCredentials(userId, wpmUsername, wpmPassword) {
-  const data = readAll();
-  const user = data.users.find((u) => u.id === userId);
+  const user = findUserById(userId);
   if (!user) throw new Error('User không tồn tại.');
-  user.wpmUsername = String(wpmUsername || '').trim();
-  user.wpmPasswordEnc = encryptSecret(String(wpmPassword || ''));
-  user.updatedAt = new Date().toISOString();
-  writeAll(data);
-  return user;
+  stmtUpdateCreds.run(
+    String(wpmUsername || '').trim(),
+    encryptSecret(String(wpmPassword || '')),
+    nowIso(),
+    String(userId)
+  );
+  return findUserById(userId);
 }
 
 async function updateLoginPassword(userId, password) {
-  const data = readAll();
-  const user = data.users.find((u) => u.id === userId);
+  const user = findUserById(userId);
   if (!user) throw new Error('User không tồn tại.');
-  user.passwordHash = await bcrypt.hash(String(password), 10);
-  user.updatedAt = new Date().toISOString();
-  writeAll(data);
-  return user;
+  stmtUpdatePassHash.run(await bcrypt.hash(String(password), 10), nowIso(), String(userId));
+  return findUserById(userId);
 }
 
 export function setUserRole(userId, role) {
-  const data = readAll();
-  const user = data.users.find((u) => u.id === userId);
+  const user = findUserById(userId);
   if (!user) throw new Error('User không tồn tại.');
-  user.role = role;
-  user.updatedAt = new Date().toISOString();
-  writeAll(data);
-  return user;
+  stmtSetRole.run(role === 'admin' ? 1 : 0, nowIso(), String(userId));
+  return findUserById(userId);
 }
 
 export function getUserWpmCredentials(userId) {
@@ -242,9 +309,9 @@ export async function loginWithWpm(username, password) {
   return findUserById(user.id);
 }
 
-/** Không seed admin/web nữa — user tự tạo khi login WPM. */
+/** Không seed admin/web nữa — user tự tạo khi login WPM. DB tự migrate khi import './db.js'. */
 export async function ensureKnownUsers() {
-  ensureDataDir();
+  // (B6) SQLite: không cần seed; migration từ users.json (nếu có) chạy lúc mở DB.
 }
 
 export function toPublicUser(user) {

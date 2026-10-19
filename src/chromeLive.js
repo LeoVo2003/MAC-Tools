@@ -10,6 +10,26 @@ import httpProxy from 'http-proxy';
 import { requireAuth, verifySessionId, getSessionIdFromCookie } from './auth.js';
 import { acquireLiveVnc, releaseLiveVnc, probeLiveVnc, ensureLiveVnc } from './liveVnc.js';
 import { getLiveMode, isFrameLiveMode } from './liveSession.js';
+import { ensureUserVnc, getUserWsPort } from './liveDisplayManager.js';
+
+// Cache proxy theo userId — mỗi user proxy tới VNC riêng (S6)
+const userProxies = new Map();
+function getUserProxy(userId, wsPort) {
+  let proxy = userProxies.get(userId);
+  if (!proxy) {
+    proxy = httpProxy.createProxyServer({
+      target: `http://127.0.0.1:${wsPort}`,
+      ws: true,
+      changeOrigin: true,
+      xfwd: true,
+    });
+    proxy.on('error', (err) => {
+      console.warn(`[chrome-live] proxy user ${userId}:`, err?.message || err);
+    });
+    userProxies.set(userId, proxy);
+  }
+  return proxy;
+}
 
 const NOVNC_CANDIDATES = [
   process.env.NOVNC_PATH,
@@ -325,6 +345,20 @@ export function attachChromeLiveWs(server) {
         req.url = `/${q}`;
       } else {
         req.url = raw.replace(/^\/chrome-live/, '') || '/';
+      }
+
+      // (S6) Route tới VNC riêng của user — không dùng chung display :99 nữa
+      if (sess?.userId && pathname.includes('websockify')) {
+        try {
+          await ensureUserVnc(sess.userId);
+          const wsPort = getUserWsPort(sess.userId);
+          if (wsPort) {
+            const userProxy = getUserProxy(sess.userId, wsPort);
+            return userProxy.ws(req, socket, head);
+          }
+        } catch (err) {
+          console.warn('[chrome-live] user VNC error:', err?.message);
+        }
       }
 
       liveProxy.ws(req, socket, head);

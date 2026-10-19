@@ -1,13 +1,40 @@
-import fs from 'fs';
-import path from 'path';
+/**
+ * Tracking runs — SQLite (B6), thay runs.jsonl.
+ * Giữ nguyên mọi function export và shape row cho code gọi.
+ */
 import crypto from 'crypto';
-import { getAppRoot } from './envStore.js';
+import { db } from './db.js';
 
-const DATA_DIR = path.join(getAppRoot(), 'data');
-const RUNS_FILE = path.join(DATA_DIR, 'runs.jsonl');
+const stmtInsertRun = db.prepare(`
+  INSERT INTO runs (id, user_id, status, started_at, finished_at, meta)
+  VALUES (@id, @user_id, @status, @started_at, @finished_at, @meta)
+`);
+const stmtGetRun = db.prepare('SELECT * FROM runs WHERE id = ? LIMIT 1');
+const stmtUpdateRun = db.prepare('UPDATE runs SET status = ?, finished_at = ?, meta = ? WHERE id = ?');
+const stmtCountRuns = db.prepare('SELECT COUNT(*) AS c FROM runs');
+const stmtRunningIds = db.prepare(`SELECT id FROM runs WHERE status = 'running'`);
+const stmtClearRuns = db.prepare('DELETE FROM runs');
 
-function ensureDataDir() {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+/** Map row DB → shape cũ (camelCase + meta spread). */
+function toRow(r) {
+  if (!r) return null;
+  let meta = {};
+  try { meta = JSON.parse(r.meta || '{}'); } catch { /* giữ rỗng */ }
+  return {
+    id: r.id,
+    status: r.status,
+    startedAt: r.started_at || null,
+    finishedAt: r.finished_at || null,
+    ...meta,
+  };
+}
+
+function readAllRuns() {
+  return db.prepare('SELECT * FROM runs ORDER BY started_at ASC').all().map(toRow);
+}
+
+function newId() {
+  return crypto.randomUUID?.() || `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function durationOf(row) {
@@ -23,69 +50,47 @@ function durationOf(row) {
  * @returns {string} runId
  */
 export function startRun(meta = {}) {
-  ensureDataDir();
-  const id = crypto.randomUUID?.() || `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  const row = {
+  const id = newId();
+  const { userId, ...rest } = meta || {};
+  stmtInsertRun.run({
     id,
+    user_id: userId ? String(userId) : null,
     status: 'running',
-    startedAt: new Date().toISOString(),
-    finishedAt: null,
-    error: null,
-    ...meta,
-  };
-  fs.appendFileSync(RUNS_FILE, `${JSON.stringify(row)}\n`, 'utf-8');
+    started_at: new Date().toISOString(),
+    finished_at: null,
+    // Giữ userId trong meta để tương thích shape row cũ
+    meta: JSON.stringify({ error: null, userId: userId ? String(userId) : null, ...rest }),
+  });
   return id;
 }
 
 export function finishRun(id, { status = 'success', error = null, result = null, stepResults = null } = {}) {
-  ensureDataDir();
-  if (!fs.existsSync(RUNS_FILE)) return;
-  const lines = fs.readFileSync(RUNS_FILE, 'utf-8').split(/\r?\n/).filter(Boolean);
+  const r = stmtGetRun.get(String(id));
+  if (!r) return;
+  const row = toRow(r);
   const finishedAt = new Date().toISOString();
-  const updated = lines.map((line) => {
-    try {
-      const row = JSON.parse(line);
-      if (row.id !== id) return line;
-      const startMs = row.startedAt ? Date.parse(row.startedAt) : NaN;
-      const endMs = Date.parse(finishedAt);
-      const durationMs =
-        Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, endMs - startMs) : null;
-      return JSON.stringify({
-        ...row,
-        status,
-        error: error || null,
-        finishedAt,
-        durationMs,
-        stepResults: Array.isArray(stepResults) ? stepResults : row.stepResults || null,
-        resultSummary: result
-          ? {
-              project: result.project || '',
-              loginUrl: result.loginUrl || '',
-              username: result.username || '',
-              accountExists: Boolean(result.accountExists),
-            }
-          : row.resultSummary || null,
-      });
-    } catch {
-      return line;
-    }
-  });
-  fs.writeFileSync(RUNS_FILE, `${updated.join('\n')}\n`, 'utf-8');
-}
-
-function readAllRuns() {
-  ensureDataDir();
-  if (!fs.existsSync(RUNS_FILE)) return [];
-  const lines = fs.readFileSync(RUNS_FILE, 'utf-8').split(/\r?\n/).filter(Boolean);
-  const rows = [];
-  for (const line of lines) {
-    try {
-      rows.push(JSON.parse(line));
-    } catch {
-      /* skip */
-    }
-  }
-  return rows;
+  const startMs = row.startedAt ? Date.parse(row.startedAt) : NaN;
+  const endMs = Date.parse(finishedAt);
+  const durationMs =
+    Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, endMs - startMs) : null;
+  const merged = {
+    ...row,
+    status,
+    error: error || null,
+    finishedAt,
+    durationMs,
+    stepResults: Array.isArray(stepResults) ? stepResults : row.stepResults || null,
+    resultSummary: result
+      ? {
+          project: result.project || '',
+          loginUrl: result.loginUrl || '',
+          username: result.username || '',
+          accountExists: Boolean(result.accountExists),
+        }
+      : row.resultSummary || null,
+  };
+  const { id: _id, status: _s, startedAt, finishedAt: _f, ...meta } = merged;
+  stmtUpdateRun.run(status, finishedAt, JSON.stringify(meta), String(id));
 }
 
 /** Chuẩn hóa tool: dòng cũ không có tool → f-package. */
@@ -226,9 +231,8 @@ export function runsToCsv(rows) {
 
 /** Xóa toàn bộ lịch sử báo cáo (admin). */
 export function clearRuns() {
-  ensureDataDir();
-  const before = readAllRuns().length;
-  fs.writeFileSync(RUNS_FILE, '', 'utf-8');
+  const before = stmtCountRuns.get().c;
+  stmtClearRuns.run();
   return { cleared: before };
 }
 
@@ -237,18 +241,11 @@ export function clearRuns() {
  * @param {string[]} ids
  */
 export function deleteRunsByIds(ids) {
-  ensureDataDir();
-  const want = new Set((ids || []).map((id) => String(id || '').trim()).filter(Boolean));
-  if (!want.size) return { deleted: 0 };
-  const rows = readAllRuns();
-  const kept = rows.filter((r) => !want.has(String(r.id || '')));
-  const deleted = rows.length - kept.length;
-  fs.writeFileSync(
-    RUNS_FILE,
-    kept.length ? `${kept.map((r) => JSON.stringify(r)).join('\n')}\n` : '',
-    'utf-8'
-  );
-  return { deleted };
+  const want = (ids || []).map((id) => String(id || '').trim()).filter(Boolean);
+  if (!want.length) return { deleted: 0 };
+  const placeholders = want.map(() => '?').join(',');
+  const info = db.prepare(`DELETE FROM runs WHERE id IN (${placeholders})`).run(...want);
+  return { deleted: info.changes };
 }
 
 /**
@@ -256,20 +253,11 @@ export function deleteRunsByIds(ids) {
  * @param {string[]} statuses
  */
 export function deleteRunsByStatuses(statuses) {
-  ensureDataDir();
-  const set = new Set(
-    (statuses || []).map((s) => String(s || '').trim().toLowerCase()).filter(Boolean)
-  );
-  if (!set.size) return { deleted: 0 };
-  const rows = readAllRuns();
-  const kept = rows.filter((r) => !set.has(String(r.status || '').toLowerCase()));
-  const deleted = rows.length - kept.length;
-  fs.writeFileSync(
-    RUNS_FILE,
-    kept.length ? `${kept.map((r) => JSON.stringify(r)).join('\n')}\n` : '',
-    'utf-8'
-  );
-  return { deleted };
+  const set = (statuses || []).map((s) => String(s || '').trim().toLowerCase()).filter(Boolean);
+  if (!set.length) return { deleted: 0 };
+  const placeholders = set.map(() => '?').join(',');
+  const info = db.prepare(`DELETE FROM runs WHERE lower(status) IN (${placeholders})`).run(...set);
+  return { deleted: info.changes };
 }
 
 
@@ -280,38 +268,31 @@ export function deleteRunsByStatuses(statuses) {
  * @returns {{ closed: number }}
  */
 export function closeInterruptedRuns() {
-  ensureDataDir();
-  if (!fs.existsSync(RUNS_FILE)) return { closed: 0 };
-  const lines = fs.readFileSync(RUNS_FILE, 'utf-8').split(/\r?\n/).filter(Boolean);
+  const running = stmtRunningIds.all();
+  if (!running.length) return { closed: 0 };
   const finishedAt = new Date().toISOString();
-  let closed = 0;
-  const updated = lines.map((line) => {
-    try {
-      const row = JSON.parse(line);
-      if (row.status !== 'running') return line;
-      closed++;
+  const closeOne = db.transaction((rows) => {
+    let closed = 0;
+    for (const { id } of rows) {
+      const r = stmtGetRun.get(id);
+      if (!r) continue;
+      const row = toRow(r);
       const startMs = row.startedAt ? Date.parse(row.startedAt) : NaN;
       const endMs = Date.parse(finishedAt);
       const durationMs =
         Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, endMs - startMs) : null;
-      // Bước nào start mà chưa done → đánh dấu interrupted
-      const stepResults = Array.isArray(row.stepResults) ? row.stepResults : [];
-      return JSON.stringify({
+      const { id: _id, status: _s, startedAt, finishedAt: _f, ...meta } = {
         ...row,
-        status: 'interrupted',
         error: 'Server restart giữa chừng (interrupted).',
-        finishedAt,
         durationMs,
-        stepResults,
-      });
-    } catch {
-      return line;
+        stepResults: Array.isArray(row.stepResults) ? row.stepResults : [],
+      };
+      stmtUpdateRun.run('interrupted', finishedAt, JSON.stringify(meta), id);
+      closed++;
     }
+    return closed;
   });
-  if (closed > 0) {
-    fs.writeFileSync(RUNS_FILE, `${updated.join('\n')}\n`, 'utf-8');
-  }
-  return { closed };
+  return { closed: closeOne(running) };
 }
 
 /**

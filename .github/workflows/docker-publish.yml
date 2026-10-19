@@ -13,9 +13,7 @@ permissions:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  # (S4) Không hardcode user/đường dẫn VPS trong repo public —
-  # đặt DEPLOY_PATH trong GitHub repo variables (Settings → Variables).
-  DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+  DEPLOY_PATH: /home/flashvps/User-Guide
 
 jobs:
   test:
