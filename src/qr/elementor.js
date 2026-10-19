@@ -247,8 +247,13 @@ export function patchButtonWeight(elements, weight = 600) {
       for (const key of ['html', 'custom_html']) {
         const val = s[key];
         if (typeof val === 'string' && val.includes('.btn-m a') && val.includes('</style>')) {
-          // Nếu đã có patch màu chữ mới thì thôi
+          // Nếu đã có patch màu chữ mới → chỉ update font-weight nếu khác
           if (val.includes('--qr-text-on-primary')) {
+            const weightRe = /(\.btn-m a, \.btn-s a, \.btn-l a, \.btn-s \.wpcf7-submit\s*\{\s*font-weight:\s*)(\d+)/;
+            const m = val.match(weightRe);
+            if (m && Number(m[2]) !== weight) {
+              s[key] = val.replace(weightRe, `$1${weight}`);
+            }
             patched = true;
           } else {
             // Xóa patch cũ (nếu có) rồi thêm patch mới
