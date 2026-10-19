@@ -33,6 +33,15 @@ add_action('rest_api_init', function () {
         return current_user_can('manage_options');
     };
 
+    // Version check
+    register_rest_route('mac/v1', '/version', [
+        'methods' => 'GET',
+        'callback' => function () {
+            return ['version' => '1.0.5', 'endpoints' => 14];
+        },
+        'permission_callback' => $perm,
+    ]);
+
     // --- Backup ---
     register_rest_route('mac/v1', '/backup/run', [
         'methods' => 'POST',
