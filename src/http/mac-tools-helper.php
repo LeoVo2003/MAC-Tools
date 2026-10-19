@@ -390,46 +390,16 @@ function mactools_options_get(WP_REST_Request $req) {
 /* ================= Mac Role: Grant capabilities ================= */
 
 function mactools_macrole_grant_capabilities() {
-    // Tìm option của Mac Role — thử nhiều pattern
-    global $wpdb;
+    // Mac Role lưu setting này dạng option đơn: rud_grant_caps_for_allowed_urls = 1
+    // (thấy trong admin/class-admin-pages.php dòng 271-272)
+    update_option('rud_grant_caps_for_allowed_urls', 1);
 
-    // Lấy tất cả options có tên liên quan đến mac-role hoặc role
-    $rows = $wpdb->get_results(
-        "SELECT option_name, option_value FROM {$wpdb->options}
-         WHERE option_name LIKE '%mac_role%' OR option_name LIKE '%mac-role%'
-            OR option_name LIKE '%rud_%'
-         LIMIT 50"
-    );
-
-    $tried = [];
-    foreach ($rows as $row) {
-        $tried[] = $row->option_name;
-        $val = maybe_unserialize($row->option_value);
-        if (is_array($val)) {
-            foreach ($val as $k => $v) {
-                if (stripos($k, 'grant') !== false) {
-                    $val[$k] = 1;
-                    update_option($row->option_name, $val);
-                    return ['ok' => true, 'option' => $row->option_name, 'key' => $k, 'via' => 'option_update'];
-                }
-            }
-            // Nếu là array nhưng không có key grant, thử các key phổ biến
-            $grant_keys = ['grant_wp_capabilities', 'grant_capabilities', 'grant_wordpress_capabilities', 'allow_grant'];
-            foreach ($grant_keys as $gk) {
-                if (array_key_exists($gk, $val)) {
-                    $val[$gk] = 1;
-                    update_option($row->option_name, $val);
-                    return ['ok' => true, 'option' => $row->option_name, 'key' => $gk, 'via' => 'option_update'];
-                }
-            }
-        }
-    }
-
+    $val = get_option('rud_grant_caps_for_allowed_urls');
     return [
-        'ok' => false,
-        'reason' => 'not_found',
-        'searched_options' => $tried,
-        'note' => 'Không tìm thấy option grant. Gửi danh sách này để debug.',
+        'ok' => (int)$val === 1,
+        'option' => 'rud_grant_caps_for_allowed_urls',
+        'value' => (int)$val,
+        'via' => 'update_option',
     ];
 }
 
