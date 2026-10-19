@@ -281,6 +281,13 @@ export async function callHelper(siteUrl, auth, endpoint, body = null) {
  */
 export async function removeHelper(page, siteUrl) {
   const base = siteUrl.replace(/\/+$/, '');
+
+  // Auto-accept mọi confirm dialog (delete plugin)
+  const dialogHandler = async (dialog) => {
+    try { await dialog.accept(); } catch {}
+  };
+  page.on('dialog', dialogHandler);
+
   try {
     // 1. Deactivate trước
     await page.goto(`${base}/wp-admin/plugins.php`, { waitUntil: 'domcontentloaded', timeout: 30000 });
@@ -340,6 +347,8 @@ export async function removeHelper(page, siteUrl) {
       : { removed: true };
   } catch (e) {
     return { removed: false, error: e.message };
+  } finally {
+    page.off('dialog', dialogHandler);
   }
 }
 
