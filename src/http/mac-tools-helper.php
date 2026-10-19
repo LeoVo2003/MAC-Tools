@@ -158,8 +158,15 @@ function mactools_backup_run(WP_REST_Request $request) {
     $body = wp_remote_retrieve_body($resp);
     $data = json_decode($body, true);
 
+    // UpdraftPlus trả về {"nonce": "...", "m": "<strong>Start backup:</strong> OK..."}
+    // hoặc {"job_id": "..."} tùy version
     if (isset($data['job_id'])) {
         return ['ok' => true, 'job_id' => $data['job_id'], 'via' => 'rest-ajax'];
+    }
+    // Kiểm tra message có "Start backup" + "OK"
+    $msg = $data['m'] ?? $body;
+    if (stripos($msg, 'Start backup') !== false && stripos($msg, 'OK') !== false) {
+        return ['ok' => true, 'job_id' => $data['nonce'] ?? 'started', 'via' => 'rest-ajax', 'message' => strip_tags($msg)];
     }
 
     return new WP_Error('backup_fail', 'Response: ' . substr($body, 0, 200), ['status' => 500]);
