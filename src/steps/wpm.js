@@ -1840,6 +1840,9 @@ export async function syncAccountToWPMViaHttp(page, projectUrl, account, log, ta
       return { ok: false, error: 'validation_error', body: respText.slice(0, 500) };
     }
 
+    // Verify: kiểm tra username có trong response HTML không
+    const usernameFound = respText.includes(acc.username);
+
     return {
       ok: true,
       status: resp.status,
@@ -1847,6 +1850,8 @@ export async function syncAccountToWPMViaHttp(page, projectUrl, account, log, ta
       webIdx: targetWebIdx,
       epIdx,
       accIdx: nextAccIdx,
+      verified: usernameFound,
+      warning: usernameFound ? null : 'username_not_in_response',
     };
   }, { username: account.username, password: account.password, role: account.role || 'editor', notes: account.notes || '' }, webTargetMode, preferUrl);
 
@@ -1854,6 +1859,10 @@ export async function syncAccountToWPMViaHttp(page, projectUrl, account, log, ta
     throw new Error(`Sync WPM HTTP thất bại: ${result.error || `HTTP ${result.status}`}`);
   }
 
-  log(`✓ Đã sync account "${account.username}" lên WPM (web ${result.webIdx}, endpoint ${result.epIdx}, account ${result.accIdx}).`);
+  if (result.warning === 'username_not_in_response') {
+    log(`⚠ POST thành công nhưng không thấy username "${account.username}" trong response — có thể sync nhầm web hoặc bị validation.`);
+  } else {
+    log(`✓ Đã sync account "${account.username}" lên WPM (web ${result.webIdx}, endpoint ${result.epIdx}, account ${result.accIdx}).`);
+  }
   return result;
 }
