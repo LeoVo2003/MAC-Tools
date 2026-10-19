@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MAC Tools Helper
  * Description: Helper tạm cho MAC Tools User Guide Phase 1. Tool tự cài đầu job, tự xóa cuối job.
- * Version: 1.0.0
+ * Version: 1.0.6
  * Author: MAC Tools
  *
  * Tool tự upload file này (dạng zip) qua wp-admin/plugin-install.php?tab=upload,
@@ -37,7 +37,7 @@ add_action('rest_api_init', function () {
     register_rest_route('mac/v1', '/version', [
         'methods' => 'GET',
         'callback' => function () {
-            return ['version' => '1.0.5', 'endpoints' => 14];
+            return ['version' => '1.0.6', 'endpoints' => 12];
         },
         'permission_callback' => $perm,
     ]);
@@ -97,18 +97,6 @@ add_action('rest_api_init', function () {
         'permission_callback' => $perm,
     ]);
 
-    // --- Options (generic) ---
-    register_rest_route('mac/v1', '/options/set', [
-        'methods' => 'POST',
-        'callback' => 'mactools_options_set',
-        'permission_callback' => $perm,
-    ]);
-    register_rest_route('mac/v1', '/options/get', [
-        'methods' => 'GET',
-        'callback' => 'mactools_options_get',
-        'permission_callback' => $perm,
-    ]);
-
     // --- Mac Role settings ---
     register_rest_route('mac/v1', '/mac-role/grant-capabilities', [
         'methods' => 'POST',
@@ -142,7 +130,6 @@ function mactools_backup_run(WP_REST_Request $request) {
     $ajax_url = admin_url('admin-ajax.php');
     $resp = wp_remote_post($ajax_url, [
         'timeout' => 30,
-        'sslverify' => false,
         'headers' => ['Cookie' => implode('; ', $cookies)],
         'body' => [
             'action' => 'updraft_ajax',
@@ -189,6 +176,12 @@ function mactools_create_user(WP_REST_Request $req) {
     $email = sanitize_email($req->get_param('email'));
     $password = $req->get_param('password');
     $role = sanitize_key($req->get_param('role') ?: 'editor');
+
+    // N2: chỉ cho phép role editor và F package (chặn administrator)
+    $allowed_roles = ['editor', 'f_package_user', 'subscriber', 'customer'];
+    if (!in_array($role, $allowed_roles, true)) {
+        $role = 'editor';
+    }
 
     if (!$username || !$email || !$password) {
         return new WP_Error('missing_params', 'Thiếu username, email hoặc password.', ['status' => 400]);
@@ -337,7 +330,7 @@ function mactools_plugins_install(WP_REST_Request $req) {
     // Kiểm tra đã cài chưa
     $all = get_plugins();
     foreach ($all as $file => $data) {
-        if (strpos($file, $slug) === 0 || dirname($file) === $slug) {
+        if (dirname($file) === $slug) {
             return ['installed' => true, 'skipped' => true, 'reason' => 'already_installed', 'file' => $file];
         }
     }
@@ -393,31 +386,6 @@ function mactools_plugins_activate(WP_REST_Request $req) {
     return ['active' => true, 'file' => $plugin_file];
 }
 
-/* ================= Options (generic) ================= */
-
-function mactools_options_set(WP_REST_Request $req) {
-    $key = sanitize_key($req->get_param('key'));
-    $value = $req->get_param('value');
-    if (!$key) {
-        return new WP_Error('missing_params', 'Thiếu key.', ['status' => 400]);
-    }
-    // Chỉ cho phép các option an toàn (không phải core sensitive)
-    $blocked = ['siteurl', 'home', 'admin_email', 'users_can_register'];
-    if (in_array($key, $blocked, true)) {
-        return new WP_Error('blocked', "Option '{$key}' bị chặn.", ['status' => 403]);
-    }
-    update_option($key, $value);
-    return ['ok' => true, 'key' => $key];
-}
-
-function mactools_options_get(WP_REST_Request $req) {
-    $key = sanitize_key($req->get_param('key'));
-    if (!$key) {
-        return new WP_Error('missing_params', 'Thiếu key.', ['status' => 400]);
-    }
-    return ['key' => $key, 'value' => get_option($key)];
-}
-
 /* ================= Mac Role: Grant capabilities ================= */
 
 function mactools_macrole_grant_capabilities() {
@@ -438,12 +406,15 @@ function mactools_macrole_grant_capabilities() {
 
 function mactools_macrole_install_from_crm(WP_REST_Request $req) {
     $slug = sanitize_key($req->get_param('slug') ?: 'mac-role');
+    // N2: nhận wpm_base từ client thay vì hardcode
+    $wpm_base = esc_url_raw($req->get_param('wpm_base') ?: 'https://wpm.macusaone.com');
+    $wpm_base = rtrim($wpm_base, '/');
 
     // Kiểm tra đã cài chưa
     require_once ABSPATH . 'wp-admin/includes/plugin.php';
     $all = get_plugins();
     foreach ($all as $file => $data) {
-        if (strpos($file, $slug) === 0 || dirname($file) === $slug) {
+        if (dirname($file) === $slug) {
             if (is_plugin_active($file)) {
                 return ['installed' => true, 'active' => true, 'skipped' => true, 'reason' => 'already_active', 'file' => $file];
             }
@@ -459,7 +430,7 @@ function mactools_macrole_install_from_crm(WP_REST_Request $req) {
         return new WP_Error('no_license', 'Thiếu mac_domain_valid_key — không tải được từ CRM.', ['status' => 400]);
     }
     $site_url = get_site_url() . '/';
-    $api_url = 'https://wpm.macusaone.com/api/v1/plugins/' . rawurlencode($slug);
+    $api_url = $wpm_base . '/api/v1/plugins/' . rawurlencode($slug);
 
     $resp = wp_remote_post($api_url, [
         'method' => 'POST',
@@ -539,7 +510,7 @@ function mactools_plugins_remove(WP_REST_Request $req) {
         // Tìm plugin file từ slug
         $plugin_file = null;
         foreach ($all as $file => $data) {
-            if (strpos($file, $slug) === 0 || dirname($file) === $slug) {
+            if (dirname($file) === $slug) {
                 $plugin_file = $file;
                 break;
             }

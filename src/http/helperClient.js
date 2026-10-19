@@ -4,12 +4,10 @@
  * Flow:
  *   1. installHelper(page, siteUrl)  — dùng browser session đã login để upload
  *      plugin zip qua wp-admin/plugin-install.php?tab=upload rồi activate
- *   2. Các bước gọi REST /mac/v1/* bằng Application Password (pure Node fetch)
+ *   2. Các bước gọi REST /mac/v1/* bằng cookie + REST nonce (pure Node fetch)
  *   3. removeHelper(siteUrl, auth)    — xóa plugin cuối job
  */
-import { readFileSync, createWriteStream } from 'fs';
-import { createGzip } from 'zlib';
-import { pipeline } from 'stream/promises';
+import { readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
@@ -103,12 +101,18 @@ function crc32(buf) {
 export async function installHelper(page, siteUrl) {
   const base = siteUrl.replace(/\/+$/, '');
 
-  // Check trước: helper đã cài và active chưa? Nếu rồi thì dùng luôn, khỏi cài lại
+  // N1: check version khi reuse — nếu khác thì cài lại
+  const EXPECTED_VERSION = '1.0.6';
   try {
     const auth = await getRestAuth(page, base);
     const check = await checkHelper(base, auth);
     if (check.ok) {
-      return { ok: true, reused: true };
+      // Kiểm tra version
+      const verRes = await callHelper(base, auth, '/version');
+      if (verRes?.version === EXPECTED_VERSION) {
+        return { ok: true, reused: true };
+      }
+      // Version khác → sẽ cài đè bên dưới
     }
   } catch {}
 

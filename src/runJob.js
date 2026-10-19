@@ -10,7 +10,7 @@ import {
   normalizeWpmProjectUrl,
   sleepExact,
 } from './utils.js';
-import { loginToWPM, openProjectAndQuickLogin, syncAccountToWPM, syncAccountToWPMViaHttp } from './steps/wpm.js';
+import { loginToWPM, openProjectAndQuickLogin, syncAccountToWPM } from './steps/wpm.js';
 import { installAndBackupUpdraftPlus } from './steps/backup.js';
 import { createCustomerAccount } from './steps/user.js';
 import { isHttpStepsEnabled } from './http/wpSession.js';
@@ -403,20 +403,6 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
 
     log('▶ Xong.');
 
-    // Phase 1: xóa helper plugin cuối job (dùng browser vì plugin không tự xóa qua REST được)
-    if (helperInstalled) {
-      try {
-        const { removeHelper } = await import('./http/helperClient.js');
-        const { originOf } = await import('./utils.js');
-        const siteUrl = originOf(wpPage.url());
-        log('▶ Xóa MAC Tools Helper plugin...');
-        const res = await removeHelper(wpPage, siteUrl);
-        log(res.removed ? '✓ Helper đã xóa.' : `⚠ Không xóa được helper: ${res.error || ''}`);
-      } catch (err) {
-        log(`⚠ Lỗi xóa helper: ${(err?.message || '').slice(0, 120)}`);
-      }
-    }
-
     if (process.env.HEADLESS === 'true') {
       await stopLiveSession(liveId).catch(() => {});
       log('→ Headless: đóng Chrome.');
@@ -499,6 +485,22 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
       log('→ Chrome giữ mở để xem lỗi — đóng tay khi xong.');
     }
     throw err;
+  } finally {
+    // N1: luôn xóa helper kể cả khi job lỗi hoặc bị hủy
+    if (helperInstalled) {
+      try {
+        const { removeHelper } = await import('./http/helperClient.js');
+        const { originOf } = await import('./utils.js');
+        const siteUrl = originOf(wpPage?.url?.() || '');
+        if (siteUrl && wpPage && !wpPage.isClosed?.()) {
+          log('▶ Xóa MAC Tools Helper plugin...');
+          const res = await removeHelper(wpPage, siteUrl);
+          log(res.removed ? '✓ Helper đã xóa.' : `⚠ Không xóa được helper: ${res.error || ''}`);
+        }
+      } catch (err) {
+        log(`⚠ Lỗi xóa helper: ${(err?.message || '').slice(0, 120)}`);
+      }
+    }
   }
   // Local (HEADLESS≠true): không browser.close() — để xem / debug.
 }

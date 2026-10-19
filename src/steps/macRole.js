@@ -854,7 +854,8 @@ export async function installMacRoleViaMacCore(page, log) {
       const base = originOf(page.url());
       const auth = await getRestAuth(page, base);
       log('Cài Mac Role qua REST (từ CRM)...');
-      const res = await callHelper(base, auth, '/mac-role/install-from-crm', { slug: 'mac-role' });
+      const wpmBase = String(process.env.WPM_BASE || 'https://wpm.macusaone.com').replace(/\/+$/, '');
+      const res = await callHelper(base, auth, '/mac-role/install-from-crm', { slug: 'mac-role', wpm_base: wpmBase });
       if (res.skipped) {
         log(`⏭ Mac Role đã ${res.reason === 'already_active' ? 'cài & active' : 'cài'} — bỏ qua.`);
       } else {

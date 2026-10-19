@@ -1297,16 +1297,27 @@ export async function installAndBackupUpdraftPlus(page, options = {}, log) {
         const ctx = await readUpdraftAjaxContext(page);
         updraftNonce = ctx.nonce || '';
       } catch {}
+      // N3: lưu last_backup trước khi chạy để verify sau
+      const beforeStatus = await callHelper(base, auth, '/backup/status');
+      const beforeBackup = beforeStatus?.last_backup;
       await callHelper(base, auth, '/backup/run', { nonce: updraftNonce });
-      // Poll status
+      // Poll status — chỉ coi xong khi có bằng chứng backup thật
       const maxWait = 10 * 60 * 1000; // 10 phút
       const start = Date.now();
+      let sawRunning = false;
       while (Date.now() - start < maxWait) {
         if (options.shouldCancel?.()) throw new Error('Job đã bị hủy.');
         const st = await callHelper(base, auth, '/backup/status');
-        if (!st.running) {
+        if (st.running) sawRunning = true;
+        // Chỉ xong khi: đã thấy job chạy rồi dừng, VÀ last_backup đổi
+        const backupChanged = beforeBackup && st.last_backup && st.last_backup !== beforeBackup;
+        if (sawRunning && !st.running && backupChanged) {
           log('✓ Backup trên site xong — không tải file về máy.');
           return;
+        }
+        // Nếu đã thấy job chạy rồi dừng nhưng last_backup không đổi → có vấn đề
+        if (sawRunning && !st.running && !backupChanged) {
+          throw new Error('Backup job kết thúc nhưng không thấy bản backup mới — dừng để kiểm tra.');
         }
         await new Promise(r => setTimeout(r, 10000));
       }

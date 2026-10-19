@@ -1025,7 +1025,9 @@ function renderQueue(q) {
     const row = document.createElement('div');
     row.className = 'queue-row';
     const short = String(item.id || '').slice(0, 8);
-    const who = String(item.user || item.username || '').trim() || '—';
+    const whoRaw = String(item.user || item.username || '').trim() || '—';
+    // C4: escape HTML để chống XSS qua username
+    const who = whoRaw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     const when = item.startedAt
       ? formatVnDateTime(item.startedAt)
       : item.createdAt
@@ -1040,7 +1042,7 @@ function renderQueue(q) {
           <span class="queue-status ${statusClass}">${statusLabel}</span>
           <button type="button" class="btn btn-light btn-sm queue-cancel" data-id="${item.id}">Hủy</button>
         </div>
-        <div class="queue-user" title="${who.replace(/"/g, '&quot;')}">${who}</div>
+        <div class="queue-user" title="${who}">${who}</div>
         <div class="meta">${metaBits}</div>
       </div>`;
     box.appendChild(row);

@@ -274,11 +274,17 @@ export async function loginWithWpm(username, password) {
   let user = findUserByUsername(name);
 
   // Lần đầu — tạo mới, lưu pass luôn
+  // C2: chỉ cho admin email thành admin nếu chưa có admin nào (tránh người lạ chiếm quyền)
   if (!user) {
+    let role = 'user';
+    if (wantAdmin) {
+      const existingAdmins = listUsers().filter(u => u.role === 'admin');
+      role = existingAdmins.length === 0 ? 'admin' : 'user';
+    }
     user = await createUser({
       username: name,
       password: pass,
-      role: wantAdmin ? 'admin' : 'user',
+      role,
     });
     return findUserById(user.id);
   }
@@ -288,10 +294,7 @@ export async function loginWithWpm(username, password) {
   if (legacyNoWpm) {
     await updateLoginPassword(user.id, pass);
     setUserWpmCredentials(user.id, name, pass);
-    if (wantAdmin) setUserRole(user.id, 'admin');
-    else if (user.role === 'admin' && !wantAdmin && name.toLowerCase() !== 'admin') {
-      setUserRole(user.id, 'user');
-    }
+    // C2: không tự promote/demote role khi login
     return findUserById(user.id);
   }
 
@@ -300,9 +303,8 @@ export async function loginWithWpm(username, password) {
 
   await updateLoginPassword(user.id, pass);
   setUserWpmCredentials(user.id, name, pass);
-  if (wantAdmin && user.role !== 'admin') {
-    setUserRole(user.id, 'admin');
-  }
+  // C2: không tự promote lên admin khi login — chỉ admin hiện tại mới promote được
+  // (tránh người biết email admin chiếm quyền)
   return findUserById(user.id);
 }
 

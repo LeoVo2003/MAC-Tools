@@ -98,7 +98,7 @@ export function createApp() {
   app.use(express.json({ limit: '1mb' }));
   app.use(sharedSession);
 
-  app.get('/api/health', (_req, res) => {
+  app.get('/api/health', requireAuth, (req, res) => {
     const snap = queue.snapshot();
     const report = buildHealthReport({
       queueSnapshot: snap,
@@ -109,15 +109,26 @@ export function createApp() {
       queue.listActiveJobs(),
       Number(process.env.JOB_STALE_MINUTES) || 45
     );
-    for (const s of staleJobs) {
-      report.alerts.push({
-        level: 'warn',
-        code: 'job_stale',
-        message: `Job ${s.id.slice(0, 8)}… (${s.user || '?'}) chạy ~${s.ageMinutes} phút.`,
-        jobId: s.id,
-      });
+    // C5: chỉ admin xem chi tiết job, user thường chỉ thấy số lượng
+    if (req.user.role === 'admin') {
+      for (const s of staleJobs) {
+        report.alerts.push({
+          level: 'warn',
+          code: 'job_stale',
+          message: `Job ${s.id.slice(0, 8)}… (${s.user || '?'}) chạy ~${s.ageMinutes} phút.`,
+          jobId: s.id,
+        });
+      }
+      report.staleJobs = staleJobs;
+    } else {
+      // User thường: ẩn chi tiết, chỉ giữ alerts không chứa thông tin job người khác
+      report.alerts = report.alerts.filter(a => a.code !== 'job_stale');
+      report.staleJobs = [];
+      // Ẩn queue snapshot chi tiết
+      if (report.queue) {
+        report.queue = { running: report.queue.running?.length || 0, waiting: report.queue.waiting?.length || 0 };
+      }
     }
-    report.staleJobs = staleJobs;
     const ok = report.chrome.ok && !report.alerts.some((a) => a.level === 'error');
     res.status(ok ? 200 : 503).json({ ok, version: VERSION, ...report });
   });
@@ -506,6 +517,11 @@ export function createApp() {
     }
     const sessionId = String(req.body?.sessionId || req.body?.jobId || '').trim();
     if (!sessionId) return res.status(400).json({ error: 'Thiếu sessionId.' });
+    // C3: kiểm tra session/job thuộc về user hiện tại
+    const job = queue.getJob(sessionId);
+    if (job && String(job.meta?.userId || '') !== String(req.user.id) && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Không điều khiển được phiên của người khác.' });
+    }
     try {
       await dispatchLiveInput(sessionId, req.body || {});
       res.json({ ok: true });
@@ -514,13 +530,19 @@ export function createApp() {
     }
   });
 
-  app.get('/api/chrome-live/sessions', requireAuth, (_req, res) => {
-    res.json({
-      sessions: listLiveSessions().map((id) => ({
+  app.get('/api/chrome-live/sessions', requireAuth, (req, res) => {
+    // C3: chỉ liệt kê sessions của job thuộc về user hiện tại (hoặc admin xem hết)
+    const sessions = listLiveSessions()
+      .filter((id) => {
+        if (req.user.role === 'admin') return true;
+        const job = queue.getJob(id);
+        return job && String(job.meta?.userId || '') === String(req.user.id);
+      })
+      .map((id) => ({
         id,
         hasPage: Boolean(getLiveSession(id)?.page),
-      })),
-    });
+      }));
+    res.json({ sessions });
   });
 
   app.get('/api/status', requireAuth, (req, res) => {
@@ -742,7 +764,11 @@ export function createApp() {
     });
   });
 
-  app.get('/api/output', requireAuth, (_req, res) => {
+  app.get('/api/output', requireAuth, (req, res) => {
+    // C3: output-latest.json là file global, có thể chứa dữ liệu của user khác — chỉ admin được xem
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Chỉ admin xem được output.' });
+    }
     const file = path.join(getAppRoot(), 'output-latest.json');
     if (!fs.existsSync(file)) return res.status(404).json({ error: 'Chưa có output.' });
     res.sendFile(file);
@@ -750,6 +776,10 @@ export function createApp() {
 
   /** Ảnh screenshot lỗi job — bấm link trong Log để xem */
   app.get('/api/errors/:name', requireAuth, (req, res) => {
+    // C3: chỉ admin xem được ảnh lỗi (có thể của job người khác)
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Chỉ admin xem được.' });
+    }
     const name = path.basename(String(req.params.name || ''));
     if (!/^[a-zA-Z0-9._-]+\.png$/i.test(name)) {
       return res.status(400).json({ error: 'Tên file không hợp lệ.' });
@@ -761,7 +791,11 @@ export function createApp() {
     res.sendFile(file);
   });
 
-  app.get('/api/errors', requireAuth, (_req, res) => {
+  app.get('/api/errors', requireAuth, (req, res) => {
+    // C3: chỉ admin liệt kê được ảnh lỗi
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Chỉ admin xem được.' });
+    }
     const dir = path.join(getAppRoot(), 'errors');
     if (!fs.existsSync(dir)) return res.json({ files: [] });
     const files = fs

@@ -186,20 +186,40 @@ class JsonDbShim {
       return {
         run: (...args) => {
           const users = this._loadUsers();
-          // Parse SET clause để biết update field nào — đơn giản: merge theo id cuối cùng
           const id = args[args.length - 1];
           const idx = users.findIndex(u => String(u.id) === String(id));
           if (idx < 0) return { changes: 0 };
-          // Dựa vào SQL để map args
-          if (/wpm_username/i.test(s)) {
-            users[idx].wpmUsername = args[0];
-            users[idx].wpmPasswordEnc = args[1];
-          } else if (/password_hash/i.test(s)) {
-            users[idx].passwordHash = args[0];
-          } else if (/is_admin/i.test(s)) {
-            users[idx].role = args[0] ? 'admin' : 'user';
+          // Parse SET clause: tách từng "field = ?" hoặc "field = 'literal'"
+          const setMatch = s.match(/SET\s+(.+?)\s+WHERE/i);
+          if (setMatch) {
+            const setClause = setMatch[1];
+            // Tách bằng dấu phẩy nhưng cẩn thận với giá trị có dấu phẩy
+            const parts = setClause.split(/,(?![^(]*\))/);
+            let argIdx = 0;
+            for (const part of parts) {
+              const m = part.trim().match(/^(\w+)\s*=\s*(.+)$/);
+              if (!m) continue;
+              const field = m[1].toLowerCase();
+              const valExpr = m[2].trim();
+              let val;
+              if (valExpr === '?') {
+                val = args[argIdx++];
+              } else if (/^'.*'$/.test(valExpr)) {
+                val = valExpr.slice(1, -1); // literal string
+              } else if (/^NULL$/i.test(valExpr)) {
+                val = null;
+              } else {
+                val = valExpr;
+              }
+              // Map field name
+              if (field === 'password_hash') users[idx].passwordHash = val;
+              else if (field === 'wpm_password_enc') users[idx].wpmPasswordEnc = val;
+              else if (field === 'wpm_username') users[idx].wpmUsername = val;
+              else if (field === 'is_admin') users[idx].role = val ? 'admin' : 'user';
+              else if (field === 'updated_at' || field === 'updatedat') users[idx].updatedAt = val;
+              else if (field === 'email') users[idx].email = val;
+            }
           }
-          users[idx].updatedAt = args[args.length - 2] || new Date().toISOString();
           this._saveUsers();
           return { changes: 1 };
         },
@@ -289,6 +309,18 @@ class JsonDbShim {
           this._runs = [];
           this._saveRuns();
           return { changes: before };
+        },
+      };
+    }
+    // N4: pruneRuns — DELETE FROM runs WHERE started_at < ?
+    if (/DELETE FROM runs WHERE started_at/i.test(s)) {
+      return {
+        run: (cutoff) => {
+          const runs = this._loadRuns();
+          const before = runs.length;
+          this._runs = runs.filter(r => !r.started_at || r.started_at >= cutoff);
+          this._saveRuns();
+          return { changes: before - this._runs.length };
         },
       };
     }
