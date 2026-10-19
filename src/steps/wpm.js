@@ -1829,8 +1829,19 @@ export async function syncAccountToWPMViaHttp(page, projectUrl, account, log, ta
       redirect: 'follow',
     });
 
+    const respText = await resp.text();
+
+    // Kiểm tra có lỗi validation không
+    if (!resp.ok) {
+      return { ok: false, error: `HTTP ${resp.status}`, body: respText.slice(0, 500) };
+    }
+    // Laravel redirect về trang edit với errors trong session — kiểm tra
+    if (/error|invalid|required/i.test(respText.slice(0, 2000)) && respText.includes('alert-danger')) {
+      return { ok: false, error: 'validation_error', body: respText.slice(0, 500) };
+    }
+
     return {
-      ok: resp.ok,
+      ok: true,
       status: resp.status,
       url: resp.url,
       webIdx: targetWebIdx,
