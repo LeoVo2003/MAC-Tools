@@ -105,6 +105,9 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   // (2.3) Rollback stack — hoàn tác khi lỗi giữa chừng
   const rollback = [];
   const created = { cf7Id: null, pageId: null, pageIsNew: false };
+  // (3.1) Lưu raw data cũ để khôi phục khi rollback ghi đè — khai báo ngoài try để catch thấy được
+  let pageId = null;
+  let oldRaw = null;
 
   try {
 
@@ -288,8 +291,6 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
 
   // 7. Tạo page → import template NGUYÊN BẢN server-side (verbatim, không JSON round-trip)
   // Page sau bước này phải render giống hệt template preview.
-  let pageId;
-  let oldRaw = null;  // (3.1) Lưu raw data cũ để khôi phục khi rollback ghi đè
   if (existing && force) {
     pageId = existing.id;
     step('page', true, `dùng lại page #${pageId} (ghi đè)`);
