@@ -777,7 +777,7 @@ export async function pullWebInfoToDashboard(page, log) {
       const base = originOf(page.url());
       const auth = await getRestAuth(page, base);
       log('Chuyển Web Info ra menu top-level qua REST...');
-      const res = await callHelper(base, auth, '/web-info/move-to-top');
+      const res = await callHelper(base, auth, '/web-info/move-to-top', {});
       if (res.moved) {
         log('✓ Web Info đã chuyển ra menu top-level.');
         return;

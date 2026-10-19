@@ -1291,7 +1291,7 @@ export async function installAndBackupUpdraftPlus(page, options = {}, log) {
       const { getRestAuth, callHelper } = await import('../http/helperClient.js');
       const auth = await getRestAuth(page, base);
       log('Chạy backup qua REST...');
-      await callHelper(base, auth, '/backup/run');
+      await callHelper(base, auth, '/backup/run', {});
       // Poll status
       const maxWait = 10 * 60 * 1000; // 10 phút
       const start = Date.now();

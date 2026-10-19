@@ -1077,7 +1077,7 @@ export async function enableGrantWpCapabilitiesForAllowedUrls(page, log) {
       const { getRestAuth, callHelper } = await import('../http/helperClient.js');
       const auth = await getRestAuth(page, base);
       log('Bật Grant WP capabilities qua REST...');
-      const res = await callHelper(base, auth, '/mac-role/grant-capabilities');
+      const res = await callHelper(base, auth, '/mac-role/grant-capabilities', {});
       if (res.ok) {
         log(`✓ Đã bật Grant WP capabilities (option ${res.option}, key ${res.key}).`);
         return { via: 'rest', ...res };
