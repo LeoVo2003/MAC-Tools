@@ -230,10 +230,10 @@ export function replaceThemeCssImages(elements, bg2Media) {
  * Patch CSS theme: nút .btn-m/.btn-s thiếu font-weight (theme gốc không set).
  * Append rule override vào cuối <style> của HTML widget theme.
  * @param {Array} elements
- * @param {number} weight - font-weight cho nút (mặc định 700)
+ * @param {number} weight - font-weight cho nút (mặc định 600)
  * @returns {boolean} có patch được không
  */
-export function patchButtonWeight(elements, weight = 700) {
+export function patchButtonWeight(elements, weight = 600) {
   let patched = false;
   // (Review 2 - 1.2) TẤT CẢ nút trong template đều có background = var(--qr-primary)
   // (secondary chỉ là viền), nên chữ/icon LUÔN dùng --qr-text-on-primary.

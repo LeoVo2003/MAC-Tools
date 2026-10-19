@@ -356,7 +356,7 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
 
   // 7a2. Patch font-weight cho nút (theme gốc thiếu)
   const btnWO = patchButtonWeight(elements);
-  if (btnWO) step('patch-btn-weight', true, 'font-weight: 700');
+  if (btnWO) step('patch-btn-weight', true, 'font-weight: 600');
 
   // 7a2. Logo: img trong #custom-header + link về homepage
   const logoOk = replaceLogoInHeader(elements, { id: logoMedia.id, url: logoMedia.url }, inputs.homeLink || '');
