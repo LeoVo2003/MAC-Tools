@@ -1769,21 +1769,37 @@ export async function syncAccountToWPMViaHttp(page, projectUrl, account, log, ta
     const method = (form.method || 'POST').toUpperCase();
 
     // Tìm web index khớp URL
-    // Parse webs[N][...] từ form data để tìm web khớp
     const webIndices = new Set();
+    const webUrls = {}; // idx -> url
     for (const key of formData.keys()) {
       const m = key.match(/^webs\[(\d+)\]/);
       if (m) webIndices.add(m[1]);
+      // Lấy URL của web từ các field chứa url
+      const um = key.match(/^webs\[(\d+)\]\[.*url.*\]/i);
+      if (um) {
+        const v = formData.get(key);
+        if (v && String(v).startsWith('http')) webUrls[um[1]] = String(v);
+      }
     }
 
-    // Tìm web khớp preferUrl hoặc mode
+    // Tìm web khớp preferUrl
     let targetWebIdx = null;
-    // Đơn giản: dùng web đầu tiên (hoặc logic phức tạp hơn nếu cần)
-    // TODO: implement matching logic giống resolveTargetWeb
-    const sorted = [...webIndices].sort();
-    targetWebIdx = sorted[0];
+    if (prefUrl) {
+      const normPref = prefUrl.replace(/\/+$/, '').toLowerCase();
+      for (const [idx, url] of Object.entries(webUrls)) {
+        if (url.replace(/\/+$/, '').toLowerCase().includes(normPref) || normPref.includes(url.replace(/\/+$/, '').toLowerCase())) {
+          targetWebIdx = idx;
+          break;
+        }
+      }
+    }
+    // Fallback: web đầu tiên
+    if (targetWebIdx === null) {
+      const sorted = [...webIndices].sort();
+      targetWebIdx = sorted[0];
+    }
 
-    if (targetWebIdx === null) return { ok: false, error: 'no_web' };
+    if (targetWebIdx === null || targetWebIdx === undefined) return { ok: false, error: 'no_web' };
 
     // Tìm endpoint index và account index tiếp theo
     const epIndices = new Set();
