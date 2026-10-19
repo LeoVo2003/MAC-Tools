@@ -137,25 +137,40 @@ export async function installHelper(page, siteUrl) {
 
     if (!result.ok) throw new Error(`Upload helper thất bại: ${result.status}`);
 
-    // 4. Activate plugin
+    // 4. Activate plugin — click và ĐỢI navigate xong
     await page.goto(`${base}/wp-admin/plugins.php`, { waitUntil: 'domcontentloaded', timeout: 30000 });
     const activated = await page.evaluate((pluginFile) => {
       const link = [...document.querySelectorAll('a')].find(a =>
-        a.href.includes('action=activate') && a.href.includes(encodeURIComponent(pluginFile).replace(/%2F/g, '%2F'))
+        a.href.includes('action=activate') && a.href.includes(pluginFile.replace('/', '%2F'))
       );
       if (link) { link.click(); return 'clicked'; }
-      // Kiểm tra đã active chưa
       const row = document.querySelector(`tr[data-plugin="${pluginFile}"]`);
       if (row && row.classList.contains('active')) return 'already_active';
       return 'not_found';
     }, PLUGIN_FILE);
 
-    // 5. Ổn định page sau khi cài (tránh "Execution context was destroyed")
-    // Sau activate, page có thể đang navigate — về dashboard và đợi load xong
+    if (activated === 'clicked') {
+      // Đợi trang activate load xong (có thể redirect về plugins.php?activate=true)
+      await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+      await new Promise(r => setTimeout(r, 2000));
+    }
+
+    // 5. Verify plugin đã active thật chưa
+    await page.goto(`${base}/wp-admin/plugins.php`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    const isActive = await page.evaluate((pluginFile) => {
+      const row = document.querySelector(`tr[data-plugin="${pluginFile}"]`);
+      return !!(row && row.classList.contains('active'));
+    }, PLUGIN_FILE);
+
+    if (!isActive) {
+      throw new Error(`Plugin ${PLUGIN_SLUG} chưa active sau khi cài (activate=${activated}). Kiểm tra PHP lỗi.`);
+    }
+
+    // 6. Ổn định page sau khi cài
     await page.goto(`${base}/wp-admin/`, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
     await page.waitForFunction(() => document.readyState === 'complete', { timeout: 15000 }).catch(() => {});
 
-    return { installed: true, activate: activated };
+    return { installed: true, activate: activated, verified: isActive };
   } finally {
     const { unlinkSync } = await import('fs');
     try { unlinkSync(zipPath); } catch {}
@@ -259,15 +274,70 @@ export async function callHelper(siteUrl, auth, endpoint, body = null) {
 }
 
 /**
- * Xóa helper plugin cuối job.
+ * Xóa helper plugin cuối job — dùng browser (wp-admin), không dùng REST
+ * vì plugin không tự xóa mình qua endpoint của chính nó được.
+ * @param {import('puppeteer').Page} page — đã login wp-admin
  * @param {string} siteUrl
- * @param {{user: string, pass: string}} auth
  */
-export async function removeHelper(siteUrl, auth) {
-  // Dùng REST của helper chính nó để tự xóa
+export async function removeHelper(page, siteUrl) {
+  const base = siteUrl.replace(/\/+$/, '');
   try {
-    await callHelper(siteUrl, auth, '/plugins/remove', { slugs: [PLUGIN_SLUG] });
-    return { removed: true };
+    // 1. Deactivate trước
+    await page.goto(`${base}/wp-admin/plugins.php`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    const deactivated = await page.evaluate((pluginFile) => {
+      const link = [...document.querySelectorAll('a')].find(a =>
+        a.href.includes('action=deactivate') && a.href.includes(pluginFile.replace('/', '%2F'))
+      );
+      if (link) { link.click(); return true; }
+      return false;
+    }, PLUGIN_FILE);
+    if (deactivated) {
+      await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+      await new Promise(r => setTimeout(r, 1500));
+    }
+
+    // 2. Delete
+    await page.goto(`${base}/wp-admin/plugins.php`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    const deleted = await page.evaluate((pluginFile) => {
+      const link = [...document.querySelectorAll('a')].find(a =>
+        a.href.includes('action=delete-selected') && a.href.includes(pluginFile.replace('/', '%2F'))
+      );
+      if (link) { link.click(); return true; }
+      // Thử link delete trực tiếp
+      const delLink = [...document.querySelectorAll('a.delete')].find(a => {
+        const row = a.closest(`tr[data-plugin="${pluginFile}"]`);
+        return !!row;
+      });
+      if (delLink) { delLink.click(); return true; }
+      return false;
+    }, PLUGIN_FILE);
+
+    if (deleted) {
+      // Xác nhận dialog delete
+      await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+      // Nếu có trang xác nhận, bấm nút Delete
+      const confirmed = await page.evaluate(() => {
+        const btn = document.querySelector('input#submit, button.button-primary');
+        if (btn && /delete|xóa/i.test(btn.value || btn.textContent)) {
+          btn.click();
+          return true;
+        }
+        return false;
+      });
+      if (confirmed) {
+        await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+      }
+    }
+
+    // 3. Verify đã xóa
+    await page.goto(`${base}/wp-admin/plugins.php`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    const stillThere = await page.evaluate((pluginFile) => {
+      return !!document.querySelector(`tr[data-plugin="${pluginFile}"]`);
+    }, PLUGIN_FILE);
+
+    return stillThere
+      ? { removed: false, error: 'Plugin vẫn còn sau khi xóa' }
+      : { removed: true };
   } catch (e) {
     return { removed: false, error: e.message };
   }

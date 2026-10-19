@@ -221,15 +221,21 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
     let helperInstalled = false;
     if (isHttpStepsEnabled()) {
       try {
-        const { installHelper } = await import('./http/helperClient.js');
+        const { installHelper, getRestAuth, checkHelper } = await import('./http/helperClient.js');
         const { originOf } = await import('./utils.js');
         const siteUrl = originOf(wpPage.url());
         log('▶ Cài MAC Tools Helper plugin...');
-        await installHelper(wpPage, siteUrl);
+        const inst = await installHelper(wpPage, siteUrl);
+        // Verify REST hoạt động thật
+        const auth = await getRestAuth(wpPage, siteUrl);
+        const chk = await checkHelper(siteUrl, auth);
+        if (!chk.ok) {
+          throw new Error(`REST không hoạt động: ${chk.error}`);
+        }
         helperInstalled = true;
-        log('✓ Helper đã cài — các bước WP sẽ dùng REST.');
+        log('✓ Helper đã cài + REST OK — các bước WP sẽ dùng REST.');
       } catch (err) {
-        log(`⚠ Không cài được helper (${(err?.message || '').slice(0, 120)}) — dùng HTTP/DOM như cũ.`);
+        log(`⚠ Không cài được helper (${(err?.message || '').slice(0, 150)}) — dùng HTTP/DOM như cũ.`);
       }
     }
 
@@ -394,15 +400,14 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
 
     log('▶ Xong.');
 
-    // Phase 1: xóa helper plugin cuối job
+    // Phase 1: xóa helper plugin cuối job (dùng browser vì plugin không tự xóa qua REST được)
     if (helperInstalled) {
       try {
-        const { removeHelper, getRestAuth } = await import('./http/helperClient.js');
+        const { removeHelper } = await import('./http/helperClient.js');
         const { originOf } = await import('./utils.js');
         const siteUrl = originOf(wpPage.url());
-        const auth = await getRestAuth(wpPage, siteUrl);
         log('▶ Xóa MAC Tools Helper plugin...');
-        const res = await removeHelper(siteUrl, auth);
+        const res = await removeHelper(wpPage, siteUrl);
         log(res.removed ? '✓ Helper đã xóa.' : `⚠ Không xóa được helper: ${res.error || ''}`);
       } catch (err) {
         log(`⚠ Lỗi xóa helper: ${(err?.message || '').slice(0, 120)}`);
