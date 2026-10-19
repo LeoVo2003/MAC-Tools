@@ -1291,7 +1291,13 @@ export async function installAndBackupUpdraftPlus(page, options = {}, log) {
       const { getRestAuth, callHelper } = await import('../http/helperClient.js');
       const auth = await getRestAuth(page, base);
       log('Chạy backup qua REST...');
-      await callHelper(base, auth, '/backup/run', {});
+      // Lấy nonce từ trang UpdraftPlus (browser) rồi gửi cho helper
+      let updraftNonce = '';
+      try {
+        const ctx = await readUpdraftAjaxContext(page);
+        updraftNonce = ctx.nonce || '';
+      } catch {}
+      await callHelper(base, auth, '/backup/run', { nonce: updraftNonce });
       // Poll status
       const maxWait = 10 * 60 * 1000; // 10 phút
       const start = Date.now();

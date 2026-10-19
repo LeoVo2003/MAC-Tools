@@ -124,43 +124,21 @@ add_action('rest_api_init', function () {
 
 /* ================= Backup (UpdraftPlus) ================= */
 
-function mactools_backup_run() {
-    // Lấy nonce thật từ trang UpdraftPlus
-    $page_url = admin_url('options-general.php?page=updraftplus');
+function mactools_backup_run(WP_REST_Request $request) {
+    // Nhận nonce từ client (Node đã lấy từ browser)
+    $nonce = $request->get_param('nonce');
+
+    if (!$nonce) {
+        return new WP_Error('no_nonce', 'Thiếu nonce. Client phải gửi nonce từ trang UpdraftPlus.', ['status' => 400]);
+    }
+
+    // Lấy cookies để gọi AJAX với quyền admin
     $cookies = [];
     foreach ($_COOKIE as $k => $v) {
         $cookies[] = "$k=$v";
     }
-    $page_resp = wp_remote_get($page_url, [
-        'timeout' => 15,
-        'sslverify' => false,
-        'headers' => ['Cookie' => implode('; ', $cookies)],
-    ]);
-    if (is_wp_error($page_resp)) {
-        return new WP_Error('page_fail', 'Không mở được trang UpdraftPlus.', ['status' => 500]);
-    }
-    $html = wp_remote_retrieve_body($page_resp);
 
-    // Tìm nonce cho backupnow — UpdraftPlus dùng nhiều nonce khác nhau
-    // Thử các pattern
-    $nonce = null;
-    if (preg_match('/updraftplus-backupnow-nonce["\']?\s*[:=]\s*["\']([a-f0-9]+)["\']/i', $html, $m)) {
-        $nonce = $m[1];
-    } elseif (preg_match('/name=["\']_wpnonce["\']\s+value=["\']([a-f0-9]+)["\']/i', $html, $m)) {
-        $nonce = $m[1];
-    } elseif (preg_match('/updraft_ajax_nonce["\']?\s*[:=]\s*["\']([^"\']+)["\']/i', $html, $m)) {
-        $nonce = $m[1];
-    }
-
-    if (!$nonce) {
-        return new WP_Error(
-            'no_nonce',
-            'Không tìm thấy nonce UpdraftPlus trong trang.',
-            ['status' => 400]
-        );
-    }
-
-    // Gọi backup via AJAX
+    // Gọi backup via AJAX nội bộ
     $ajax_url = admin_url('admin-ajax.php');
     $resp = wp_remote_post($ajax_url, [
         'timeout' => 30,
@@ -181,7 +159,7 @@ function mactools_backup_run() {
     $data = json_decode($body, true);
 
     if (isset($data['job_id'])) {
-        return ['ok' => true, 'job_id' => $data['job_id'], 'via' => 'ajax-internal'];
+        return ['ok' => true, 'job_id' => $data['job_id'], 'via' => 'rest-ajax'];
     }
 
     return new WP_Error('backup_fail', 'Response: ' . substr($body, 0, 200), ['status' => 500]);
