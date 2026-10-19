@@ -1759,6 +1759,15 @@ export async function syncAccountToWPMViaHttp(page, projectUrl, account, log, ta
     await page.goto(projectUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
   }
 
+  // Mở tab Website Information để webs fields được render
+  await page.evaluate(() => {
+    // Tìm và click tab Website Information
+    const tabs = Array.from(document.querySelectorAll('a, button, [role="tab"]'));
+    const webTab = tabs.find(el => /website information/i.test(el.textContent || ''));
+    if (webTab) webTab.click();
+  });
+  await new Promise(r => setTimeout(r, 2000)); // đợi tab load
+
   const result = await page.evaluate(async (acc, mode, prefUrl) => {
     // Tìm form chính
     const form = document.querySelector('form[action*="/projects/"]');
