@@ -888,6 +888,22 @@ async function openUpdraftPage(page, base, log) {
 }
 
 async function ensureUpdraftInstalledAndActive(page, base, log) {
+  // Phase 1: thử REST trước (nhanh nhất)
+  if (isHttpStepsEnabled()) {
+    try {
+      const { getRestAuth, callHelper } = await import('../http/helperClient.js');
+      const auth = await getRestAuth(page, base);
+      log('Cài/activate UpdraftPlus qua REST...');
+      const inst = await callHelper(base, auth, '/plugins/install', { slug: 'updraftplus' });
+      log(inst.skipped ? 'UpdraftPlus đã cài — bỏ qua.' : '✓ Đã cài UpdraftPlus.');
+      const act = await callHelper(base, auth, '/plugins/activate', { slug: 'updraftplus' });
+      log(act.skipped ? 'UpdraftPlus đã active — bỏ qua.' : '✓ Đã activate UpdraftPlus.');
+      log('UpdraftPlus sẵn sàng (REST).');
+      return;
+    } catch (err) {
+      log(`⚠ REST cài UpdraftPlus thất bại (${(err?.message || '').slice(0, 120)}) — thử HTTP/DOM...`);
+    }
+  }
   if (isHttpStepsEnabled()) {
     const isNavGlitch = (err) =>
       /Execution context was destroyed|Cannot find context|navigat/i.test(

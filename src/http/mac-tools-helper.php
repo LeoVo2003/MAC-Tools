@@ -16,6 +16,8 @@
  *   POST /mac/v1/mac-role/apply-template  — apply template F Package User
  *   POST /mac/v1/web-info/move-to-top     — chuyển Web Info ra menu top-level
  *   POST /mac/v1/plugins/remove           — gỡ plugins theo slugs
+ *   POST /mac/v1/plugins/install          — cài plugin từ WordPress.org
+ *   POST /mac/v1/plugins/activate         — activate plugin
  *
  * Auth: Application Password (Basic Auth) của admin.
  */
@@ -69,6 +71,16 @@ add_action('rest_api_init', function () {
     register_rest_route('mac/v1', '/plugins/remove', [
         'methods' => 'POST',
         'callback' => 'mactools_plugins_remove',
+        'permission_callback' => $perm,
+    ]);
+    register_rest_route('mac/v1', '/plugins/install', [
+        'methods' => 'POST',
+        'callback' => 'mactools_plugins_install',
+        'permission_callback' => $perm,
+    ]);
+    register_rest_route('mac/v1', '/plugins/activate', [
+        'methods' => 'POST',
+        'callback' => 'mactools_plugins_activate',
         'permission_callback' => $perm,
     ]);
 });
@@ -223,6 +235,79 @@ function mactools_webinfo_move_top() {
         'found_slug' => $found,
         'note' => 'Web Info là submenu của plugin khác, cần filter admin_menu. Giữ bước browser cho case này.',
     ];
+}
+
+/* ================= Plugins install/activate ================= */
+
+function mactools_plugins_install(WP_REST_Request $req) {
+    $slug = sanitize_key($req->get_param('slug'));
+    if (!$slug) {
+        return new WP_Error('missing_params', 'Thiếu slug.', ['status' => 400]);
+    }
+
+    require_once ABSPATH . 'wp-admin/includes/plugin.php';
+    require_once ABSPATH . 'wp-admin/includes/file.php';
+    require_once ABSPATH . 'wp-admin/includes/misc.php';
+    require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+    require_once ABSPATH . 'wp-admin/includes/plugin-install.php';
+
+    // Kiểm tra đã cài chưa
+    $all = get_plugins();
+    foreach ($all as $file => $data) {
+        if (strpos($file, $slug) === 0 || dirname($file) === $slug) {
+            return ['installed' => true, 'skipped' => true, 'reason' => 'already_installed', 'file' => $file];
+        }
+    }
+
+    // Lấy thông tin plugin từ WordPress.org
+    $api = plugins_api('plugin_information', ['slug' => $slug, 'fields' => ['download_link' => true]]);
+    if (is_wp_error($api) || empty($api->download_link)) {
+        return new WP_Error('not_found', "Không tìm thấy plugin '{$slug}' trên WordPress.org.", ['status' => 404]);
+    }
+
+    // Cài bằng Plugin_Upgrader
+    $upgrader = new Plugin_Upgrader(new WP_Ajax_Upgrader_Skin());
+    $result = $upgrader->install($api->download_link);
+    if (is_wp_error($result)) return $result;
+    if (!$result) {
+        return new WP_Error('install_fail', "Cài plugin '{$slug}' thất bại.", ['status' => 500]);
+    }
+
+    // Tìm plugin file sau khi cài
+    $plugin_file = $upgrader->plugin_info();
+    return ['installed' => true, 'file' => $plugin_file ?: "{$slug}/{$slug}.php"];
+}
+
+function mactools_plugins_activate(WP_REST_Request $req) {
+    $slug = sanitize_key($req->get_param('slug'));
+    $file = sanitize_text_field($req->get_param('file') ?: '');
+    if (!$slug && !$file) {
+        return new WP_Error('missing_params', 'Thiếu slug hoặc file.', ['status' => 400]);
+    }
+
+    require_once ABSPATH . 'wp-admin/includes/plugin.php';
+
+    // Tìm plugin file từ slug nếu chưa có
+    $plugin_file = $file;
+    if (!$plugin_file) {
+        $all = get_plugins();
+        foreach ($all as $f => $data) {
+            if (strpos($f, $slug) === 0 || dirname($f) === $slug) {
+                $plugin_file = $f;
+                break;
+            }
+        }
+    }
+    if (!$plugin_file) {
+        return new WP_Error('not_installed', "Plugin '{$slug}' chưa cài.", ['status' => 400]);
+    }
+    if (is_plugin_active($plugin_file)) {
+        return ['active' => true, 'skipped' => true, 'reason' => 'already_active', 'file' => $plugin_file];
+    }
+
+    $res = activate_plugin($plugin_file);
+    if (is_wp_error($res)) return $res;
+    return ['active' => true, 'file' => $plugin_file];
 }
 
 /* ================= Plugins cleanup ================= */
