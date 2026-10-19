@@ -1843,8 +1843,13 @@ export async function syncAccountToWPMViaHttp(page, projectUrl, account, log, ta
     // Verify: kiểm tra username có trong response HTML không
     const usernameFound = respText.includes(acc.username);
 
-    // Debug: đếm số accounts trong response
-    const accCount = (respText.match(new RegExp(`webs\\[${targetWebIdx}\\]\\[login_endpoints\\]\\[${epIdx}\\]\\[accounts\\]`, 'g')) || []).length;
+    // Debug: đếm số accounts trong response + liệt kê field names
+    const accPattern = new RegExp(`webs\\[${targetWebIdx}\\]\\[login_endpoints\\]\\[${epIdx}\\]\\[accounts\\]\\[(\\d+)\\]`, 'g');
+    const accMatches = [...respText.matchAll(accPattern)];
+    const accCount = new Set(accMatches.map(m => m[1])).size;
+
+    // Lấy 5 field names đầu để debug cấu trúc
+    const sampleFields = [...formData.keys()].slice(0, 10);
 
     return {
       ok: true,
@@ -1861,6 +1866,8 @@ export async function syncAccountToWPMViaHttp(page, projectUrl, account, log, ta
         accountsInResponse: accCount,
         targetUrl: prefUrl,
         webUrlsFound: webUrls,
+        sampleFields,
+        sentAccountPrefix: `webs[${targetWebIdx}][login_endpoints][${epIdx}][accounts][${nextAccIdx}]`,
       },
     };
   }, { username: account.username, password: account.password, role: account.role || 'editor', notes: account.notes || '' }, webTargetMode, preferUrl);
@@ -1872,7 +1879,9 @@ export async function syncAccountToWPMViaHttp(page, projectUrl, account, log, ta
   if (result.warning === 'username_not_in_response') {
     log(`⚠ POST thành công nhưng không thấy username "${account.username}" trong response.`);
     log(`  Debug: action=${result.debug?.formAction}, fields=${result.debug?.totalFields}, accounts=${result.debug?.accountsInResponse}`);
-    log(`  Target URL: ${result.debug?.targetUrl}, webs found: ${JSON.stringify(result.debug?.webUrlsFound)}`);
+    log(`  Target URL: ${result.debug?.targetUrl}, webs: ${JSON.stringify(result.debug?.webUrlsFound)}`);
+    log(`  Sent prefix: ${result.debug?.sentAccountPrefix}`);
+    log(`  Sample fields: ${(result.debug?.sampleFields || []).slice(0, 5).join(', ')}`);
   } else {
     log(`✓ Đã sync account "${account.username}" lên WPM (web ${result.webIdx}, endpoint ${result.epIdx}, account ${result.accIdx}).`);
   }
