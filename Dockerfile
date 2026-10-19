@@ -1,4 +1,4 @@
-FROM node:20-bookworm-slim
+FROM node:22-bookworm-slim
 
 # Chromium + virtual display + noVNC (live tương tác)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -30,6 +30,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     procps \
     && rm -rf /var/lib/apt/lists/*
 
+# (S2) user không đặc quyền — container không chạy root
+RUN useradd -m -u 1000 app
+
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
@@ -42,6 +45,10 @@ COPY .env.example ./
 
 RUN chmod +x /app/scripts/docker-entrypoint.sh
 
+# CHROME_NO_SANDBOX=true là bắt buộc khi chạy non-root trong Docker mà không có
+# SYS_ADMIN: Chromium sandbox cần userns/CLONE_NEWUSER, bị chặn bởi Docker seccomp
+# mặc định + cap_drop. Đã đánh đổi có chủ ý (xem S2): giảm rủi ro bằng user non-root,
+# cap_drop ALL, no-new-privileges thay vì tắt sandbox khi chạy root.
 ENV NODE_ENV=production \
     OPEN_BROWSER=false \
     HEADLESS=false \
@@ -49,13 +56,18 @@ ENV NODE_ENV=production \
     DISPLAY=:99 \
     CHROME_PATH=/usr/bin/chromium \
     CHROME_NO_SANDBOX=true \
-    MAX_CONCURRENT_JOBS=0 \
+    MAX_CONCURRENT_JOBS=2 \
     PORT=3847 \
     DOWNLOAD_DIR=/data/downloads \
     NOVNC_PATH=/usr/share/novnc
 
-RUN mkdir -p /data/downloads /data/appdata /app/errors
-VOLUME ["/data/downloads", "/data/appdata"]
+# (S2/B4) thư mục dữ liệu thuộc user app — phải làm TRƯỚC VOLUME
+# (mọi thay đổi sau VOLUME sẽ bị Docker bỏ qua)
+RUN mkdir -p /data/downloads /app/data /app/errors \
+    && chown -R app:app /app /data
+VOLUME ["/data/downloads", "/app/data", "/app/errors"]
 
 EXPOSE 3847
+# (S2) chạy app bằng user không đặc quyền
+USER app
 ENTRYPOINT ["/app/scripts/docker-entrypoint.sh"]

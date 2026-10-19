@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import express from 'express';
+import helmet from 'helmet';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -90,6 +91,9 @@ const queue = createJobQueue({
 export function createApp() {
   const app = express();
   app.set('trust proxy', 1);
+  // (B8) Helmet: security headers. Tắt CSP vì app dùng nhiều inline script/style;
+  // /chrome-live tự gỡ X-Frame-Options qua allowEmbed() khi cần embed.
+  app.use(helmet({ contentSecurityPolicy: false }));
   app.use(express.json({ limit: '1mb' }));
   app.use(sharedSession);
 
@@ -150,21 +154,46 @@ export function createApp() {
 
   /**
    * Login = tài khoản WPM (email + password).
-   * Lần đầu tự tạo user trong data/users.json; leo.vo@macusaone.com → admin.
+   * Lần đầu tự tạo user trong data/users.json; email trong ADMIN_EMAILS → admin.
    */
-  /** (6.1) Rate-limit login: 5 lần / 15 phút theo IP+email */
-  const loginAttempts = new Map();
-  const checkLoginRate = (req, email) => {
-    const key = `${req.ip}:${email.toLowerCase()}`;
+  /**
+   * (S5) Rate-limit login: tối đa 5 lần / 15 phút theo IP, và riêng
+   * 5 lần / 15 phút theo email. Không cần package ngoài — dùng Map + dọn định kỳ.
+   */
+  const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+  const LOGIN_MAX_ATTEMPTS = 5;
+  const loginHitsByIp = new Map();    // ip -> number[] (timestamps)
+  const loginHitsByEmail = new Map(); // email (lowercase) -> number[] (timestamps)
+  function loginHitAllowed(map, key) {
     const now = Date.now();
-    const arr = (loginAttempts.get(key) || []).filter((t) => now - t < 15 * 60 * 1000);
-    if (arr.length >= 5) return false;
-    arr.push(now);
-    loginAttempts.set(key, arr);
+    const recent = (map.get(key) || []).filter((t) => now - t < LOGIN_WINDOW_MS);
+    if (recent.length >= LOGIN_MAX_ATTEMPTS) return false;
+    recent.push(now);
+    map.set(key, recent);
     return true;
-  };
+  }
+  // Dọn các key hết hạn mỗi 5 phút để Map không phình vô hạn
+  const loginRateCleanup = setInterval(() => {
+    const now = Date.now();
+    for (const map of [loginHitsByIp, loginHitsByEmail]) {
+      for (const [k, arr] of map) {
+        if (!arr.some((t) => now - t < LOGIN_WINDOW_MS)) map.delete(k);
+      }
+    }
+  }, 5 * 60 * 1000);
+  if (loginRateCleanup && typeof loginRateCleanup.unref === 'function') loginRateCleanup.unref();
 
-  app.post('/api/login', async (req, res) => {
+  function loginRateLimit(req, res, next) {
+    const email = String(req.body?.username || '').trim().toLowerCase();
+    const ipOk = loginHitAllowed(loginHitsByIp, req.ip || 'unknown');
+    const emailOk = email ? loginHitAllowed(loginHitsByEmail, email) : true;
+    if (!ipOk || !emailOk) {
+      return res.status(429).json({ error: 'Đăng nhập thử quá nhiều lần. Vui lòng đợi 15 phút rồi thử lại.' });
+    }
+    next();
+  }
+
+  app.post('/api/login', loginRateLimit, async (req, res) => {
     const username = String(req.body?.username || '').trim();
     const password = String(req.body?.password || '');
     if (!username) {
@@ -179,10 +208,6 @@ export function createApp() {
     const domain = username.split('@')[1]?.toLowerCase() || '';
     if (allowedDomains.length && !allowedDomains.includes(domain)) {
       return res.status(403).json({ error: `Email phải thuộc domain: ${allowedDomains.join(', ')}` });
-    }
-    // (6.1) Rate limit
-    if (!checkLoginRate(req, username)) {
-      return res.status(429).json({ error: 'Thử quá nhiều lần. Vui lòng đợi 15 phút.' });
     }
     try {
       const user = await loginWithWpm(username, password);
@@ -518,6 +543,12 @@ export function createApp() {
   });
 
   app.post('/api/run', requireAuth, (req, res) => {
+    // (B2) Mỗi user tối đa 1 job (đang chạy hoặc đang chờ) — chặn bấm Run liên tục
+    if (queue.hasJobForUser(req.user.id)) {
+      return res
+        .status(429)
+        .json({ error: 'Bạn đang có job chạy, vui lòng đợi job hiện tại xong.' });
+    }
     const body = req.body || {};
     let webTargetMode = body.webTargetMode === 'website' ? 'website' : 'main';
     if (req.user.role !== 'admin') webTargetMode = 'main';

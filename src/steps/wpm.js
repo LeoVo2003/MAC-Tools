@@ -23,7 +23,9 @@ async function fillNative(page, handle, value) {
   }, handle);
 }
 
-const WPM_BASE = 'https://wpm.macusaone.com';
+// (S4) Base URL của WPM lấy từ env để không hardcode domain nội bộ trong code.
+// Mặc định trỏ WPM production của công ty; deploy khác tự đặt WPM_BASE.
+const WPM_BASE = String(process.env.WPM_BASE || 'https://wpm.macusaone.com').replace(/\/+$/, '');
 
 /** Session WPM còn sống (đã vào app, không còn form /login). */
 function isWpmAlreadyLoggedIn(diag = {}) {
@@ -96,8 +98,8 @@ export async function loginToWPM(page, { username, password }, log) {
     const blob = `${diag.title || ''} ${diag.body || ''}`;
     if (/403\s*forbidden/i.test(blob) || /403/.test(diag.title || '')) {
       throw new Error(
-        'WPM trả 403 Forbidden (nginx chặn IP máy chạy tool). ' +
-          'Trên user-guide.keith: nhờ admin whitelist IP VPS vào wpm.macusaone.com — ' +
+        'WPM trả 403 Forbidden (nginx/WAF chặn IP máy chạy tool). ' +
+          'Nhờ admin whitelist IP của máy/VPS chạy tool vào WPM — ' +
           'hoặc chạy tool trên máy local (IP công ty đã được phép). ' +
           `url=${diag.url || '?'}`
       );

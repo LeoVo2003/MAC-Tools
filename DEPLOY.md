@@ -10,7 +10,7 @@
 ## Chạy nhanh (VPS)
 
 ```bash
-git clone <repo> && cd User-Guide
+git clone <repo> && cd mac-tools
 cp .env.example .env
 # BẮT BUỘC sửa: SESSION_SECRET, APP_SECRET
 # Production: HEADLESS=true, OPEN_BROWSER=false, NODE_ENV=production
@@ -23,7 +23,7 @@ UI: `http://SERVER_IP:3847`
 Health: `GET /api/health`
 
 Login tool = **email + password WPM**. Không cần seed admin riêng.  
-Admin mặc định: `leo.vo@macusaone.com` (thêm email: `ADMIN_EMAILS=a@x.com,b@y.com`).
+Admin: cấu hình qua `ADMIN_EMAILS` (thêm email: `ADMIN_EMAILS=a@x.com,b@y.com`).
 
 ## Biến môi trường quan trọng
 
@@ -32,7 +32,7 @@ Admin mặc định: `leo.vo@macusaone.com` (thêm email: `ADMIN_EMAILS=a@x.com,
 | `HEADLESS=true` | Chrome không UI (server) |
 | `OPEN_BROWSER=false` | Không tự mở browser trên server |
 | `SESSION_SECRET` / `APP_SECRET` | Session + mã hóa WPM password |
-| `ADMIN_EMAILS` | Thêm email admin (comma-separated), ngoài leo.vo@… |
+| `ADMIN_EMAILS` | Danh sách email admin (comma-separated) |
 | `CHROME_PATH` | Path Chrome/Chromium nếu không tự tìm |
 | `DOWNLOAD_DIR` | Thư mục lưu file backup |
 | `MAX_CONCURRENT_JOBS` | `0` (mặc định) = không giới hạn job đồng thời; số nguyên dương = giới hạn do admin chọn |
@@ -52,7 +52,7 @@ map $http_upgrade $connection_upgrade {
 
 server {
   listen 80;
-  server_name user-guide.keith;  # đổi domain
+  server_name your-domain.example.com;  # đổi thành domain thật của bạn
 
   # Socket.IO rooms (log/queue theo user) — BẮT BUỘC WebSocket
   location /socket.io/ {
@@ -92,11 +92,11 @@ Nếu Live hiện logo noVNC + "无法连接 / Failed to connect": gần như ch
 Nếu log/queue không realtime sau F5: thêm block `/socket.io/` như trên.
 
 ### Domain thật (FlashVPS)
-`https://user-guide.kietvh.io.vn` — nginx: `/etc/nginx/sites-available/user-guide`
+`https://tools.example.com` — nginx: `/etc/nginx/sites-available/user-guide`
 
 ### Checklist chạy mượt trên VPS
 ```bash
-cd /home/flashvps/User-Guide
+cd /home/USER/mac-tools
 # 1) .env: CHROME_LIVE=true (hoặc false nếu team không cần Live), HEADLESS=false, secrets
 #    Live mặc định tắt trên UI — user bấm Mở Live mới start x11vnc; Đóng Live = tắt (tiết kiệm CPU)
 #    CPU không đặt quota; MAX_CONCURRENT_JOBS=0 để không chờ slot.
@@ -126,7 +126,7 @@ Nhớ inject `.env` an toàn; không build secret vào image.
 
 ### Image từ GHCR + auto deploy
 
-Push `main` / tag `v*` → Actions **build → push GHCR → SSH VPS** (`/home/flashvps/User-Guide`) chạy:
+Push `main` / tag `v*` → Actions **build → push GHCR → SSH VPS** (`/home/USER/mac-tools`) chạy:
 
 `docker compose pull && docker compose up -d --force-recreate`
 
@@ -139,7 +139,7 @@ Image: `ghcr.io/leovo2003/user-guide:latest`
 | Secret | Ý nghĩa |
 |--------|---------|
 | `SSH_HOST` | IP hoặc domain VPS |
-| `SSH_USER` | User SSH (vd. `flashvps`) |
+| `SSH_USER` | User SSH (vd. `USER`) |
 | `SSH_PRIVATE_KEY` | Private key (nội dung file `~/.ssh/id_ed25519` hoặc deploy key) |
 | `SSH_PORT` | (Tuỳ chọn) mặc định `22` |
 | `GHCR_TOKEN` | PAT GitHub quyền `read:packages` (bắt buộc nếu package private) |
@@ -147,7 +147,7 @@ Image: `ghcr.io/leovo2003/user-guide:latest`
 
 #### Chuẩn bị VPS (một lần)
 
-Deploy CI sẽ **tự tạo** `/home/flashvps/User-Guide` nếu chưa có, sync `docker-compose.yml` + `.env.example`.
+Deploy CI sẽ **tự tạo** `/home/USER/mac-tools` nếu chưa có, sync `docker-compose.yml` + `.env.example`.
 
 Lần đầu nếu chưa có `.env`: CI copy từ `.env.example` rồi **dừng** — bạn SSH vào sửa `SESSION_SECRET` / `APP_SECRET`, chạy lại workflow.
 
@@ -156,7 +156,7 @@ Lần đầu nếu chưa có `.env`: CI copy từ `.env.example` rồi **dừng*
 # - Public key trong ~/.ssh/authorized_keys của SSH_USER
 # - User trong group docker
 # (thư mục + compose do CI tạo)
-nano /home/flashvps/User-Guide/.env   # sau lần deploy đầu
+nano /home/USER/mac-tools/.env   # sau lần deploy đầu
 ```
 
 `.env` chỉ nằm trên VPS — không đưa vào image hay GitHub Secrets (trừ SSH/GHCR ở trên).

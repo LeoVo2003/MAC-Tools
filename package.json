@@ -3,6 +3,9 @@
   "version": "2.1.1",
   "description": "MAC Tools — internal ops hub (User Guide / QR Tool / Review Link)",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
@@ -14,11 +17,13 @@
     "dotenv": "^16.4.5",
     "express": "^4.21.0",
     "express-session": "^1.19.0",
+    "helmet": "^8.3.0",
     "http-proxy": "^1.18.1",
     "multer": "^2.4.0",
     "puppeteer-core": "^23.4.0",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "session-file-store": "^1.5.0",
     "socket.io": "^4.8.3",
     "ssh2-sftp-client": "^12.1.1"
   }

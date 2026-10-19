@@ -205,6 +205,19 @@ export function createJobQueue({ onLog, onChange, maxConcurrent = 0 } = {}) {
     return [...active.values()];
   }
 
+  /** (B2) User đã có job đang chạy HOẶC đang chờ trong hàng đợi chưa? */
+  function hasJobForUser(userId) {
+    const uid = String(userId || '');
+    if (!uid) return false;
+    for (const j of active.values()) {
+      if (String(j.meta?.userId || '') === uid) return true;
+    }
+    for (const j of pending) {
+      if (String(j.meta?.userId || '') === uid) return true;
+    }
+    return false;
+  }
+
   /** Đóng Chrome còn giữ sau job xong (cùng user). Không đụng job đang running. */
   async function closeBrowsersForUser(userId) {
     const uid = String(userId || '');
@@ -252,6 +265,7 @@ export function createJobQueue({ onLog, onChange, maxConcurrent = 0 } = {}) {
     snapshotForUser,
     cancel,
     listActiveJobs,
+    hasJobForUser,
     closeBrowsersForUser,
     takeBrowserForUser,
     get active() {

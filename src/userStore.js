@@ -7,8 +7,16 @@ import { getAppRoot } from './envStore.js';
 const DATA_DIR = path.join(getAppRoot(), 'data');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 
-/** Email / username luôn là admin (có thể mở rộng bằng ADMIN_EMAILS). */
-const DEFAULT_ADMIN_EMAILS = ['leo.vo@macusaone.com'];
+/**
+ * (S4) Không hardcode admin trong code nữa — admin chỉ lấy từ ADMIN_EMAILS (env).
+ * Giữ hằng rỗng để tương thích logic merge trong adminEmails().
+ */
+const DEFAULT_ADMIN_EMAILS = [];
+
+// (S4) Cảnh báo rõ ràng nếu production mà không cấu hình admin nào
+if (process.env.NODE_ENV === 'production' && !String(process.env.ADMIN_EMAILS || '').trim()) {
+  console.warn('[userStore] CẢNH BÁO: ADMIN_EMAILS rỗng ở production — không có tài khoản nào được công nhận là admin.');
+}
 
 function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -24,6 +32,14 @@ function appSecret() {
   return s;
 }
 
+/**
+ * Mã hóa AES-256-GCM: IV ngẫu nhiên 12 byte + auth tag cho từng bản ghi, prefix `v1:`.
+ *
+ * LIMITATION đã biết (S1): chưa hỗ trợ xoay khóa (key rotation).
+ * Đổi APP_SECRET sẽ làm toàn bộ wpmPasswordEnc đã lưu KHÔNG giải mã được nữa
+ * (decryptSecret ném lỗi do sai key/tag) — phải yêu cầu mọi user login lại.
+ * TODO: thêm keyVersion vào từng bản ghi + giữ khóa cũ để giải mã dần khi xoay khóa.
+ */
 export function encryptSecret(plain) {
   const key = crypto.createHash('sha256').update(appSecret()).digest();
   const iv = crypto.randomBytes(12);
@@ -68,6 +84,7 @@ function writeAll(data) {
   fs.renameSync(tmp, USERS_FILE);
 }
 
+/** Danh sách email admin — (S4) chỉ từ ADMIN_EMAILS (env), không hardcode. */
 export function adminEmails() {
   const fromEnv = String(process.env.ADMIN_EMAILS || '')
     .split(',')
@@ -181,7 +198,7 @@ export function getUserWpmCredentials(userId) {
  * Login tool = tk/mk WPM.
  * Lần đầu (email chưa có): tạo user + lưu password — không cần đăng ký trước.
  * Lần sau: đúng password thì vào; sai → báo lỗi.
- * Email admin (leo.vo@…) → role admin.
+ * Email có trong ADMIN_EMAILS → role admin.
  */
 export async function loginWithWpm(username, password) {
   const name = String(username || '').trim();

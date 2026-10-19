@@ -26,10 +26,9 @@ Kiểm tra: `npm test`.
 1. **Đăng nhập** bằng **email + password WPM** (cùng tk đăng nhập WPM).
 2. Lần đầu login → tool tự tạo user, lưu WPM (mã hóa) trên server (`data/users.json`).
 3. Vào **Run** — không cần nhập lại WPM; job dùng tk đang login.
-4. Tab **Backup files** cho mọi user đã login.
-5. Tab **Báo cáo** chỉ hiện với admin.
+4. Tab **Báo cáo** chỉ hiện với admin.
 
-**Admin:** email `leo.vo@macusaone.com` luôn là admin (có thể thêm email qua `ADMIN_EMAILS` trong `.env`).
+**Admin:** cấu hình qua `ADMIN_EMAILS` trong `.env` (phân cách bằng dấu phẩy).
 
 ## Bảo mật (deploy)
 
@@ -54,4 +53,3 @@ Chi tiết VPS / Docker / nginx: **[DEPLOY.md](DEPLOY.md)**.
 | `POST /api/login` | Login bằng email/password WPM |
 | `POST /api/run` | Chạy job (WPM lấy từ session) |
 | `GET /api/runs` | Báo cáo (admin) |
-| `GET /api/backups` | Danh sách backup trên server |

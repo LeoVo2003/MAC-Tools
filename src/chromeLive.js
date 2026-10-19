@@ -7,7 +7,7 @@ import fs from 'fs';
 import path from 'path';
 import express from 'express';
 import httpProxy from 'http-proxy';
-import { requireAuth } from './auth.js';
+import { requireAuth, verifySessionId, getSessionIdFromCookie } from './auth.js';
 import { acquireLiveVnc, releaseLiveVnc, probeLiveVnc, ensureLiveVnc } from './liveVnc.js';
 import { getLiveMode, isFrameLiveMode } from './liveSession.js';
 
@@ -303,14 +303,17 @@ export function mountChromeLiveRoutes(app) {
 export function attachChromeLiveWs(server) {
   if (!chromeLiveEnabled() || !liveProxy) return;
 
-  server.on('upgrade', (req, socket, head) => {
+  server.on('upgrade', async (req, socket, head) => {
     try {
       const raw = req.url || '';
       const pathname = (raw.split('?')[0] || '').replace(/\/+$/, '') || '/';
       if (!pathname.startsWith('/chrome-live')) return;
 
+      // (S6) Verify session THẬT trong store — không chỉ check cookie tồn tại
       const cookie = req.headers.cookie || '';
-      const ok = cookie.includes('fugt.sid') || sameOriginUpgrade(req);
+      const sid = getSessionIdFromCookie(cookie);
+      const sess = sid ? await verifySessionId(sid) : null;
+      const ok = !!sess || sameOriginUpgrade(req);
       if (!ok) {
         socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
         socket.destroy();
