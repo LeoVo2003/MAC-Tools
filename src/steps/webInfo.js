@@ -769,6 +769,25 @@ export async function pullWebInfoViaBrowser(page, log) {
  * 2.1: ưu tiên HTTP/DOM (Vue + AJAX), fail → Chrome cũ.
  */
 export async function pullWebInfoToDashboard(page, log) {
+  // Phase 1: thử REST trước
+  if (isHttpStepsEnabled()) {
+    try {
+      const { getRestAuth, callHelper } = await import('../http/helperClient.js');
+      const { originOf } = await import('../utils.js');
+      const base = originOf(page.url());
+      const auth = await getRestAuth(page, base);
+      log('Chuyển Web Info ra menu top-level qua REST...');
+      const res = await callHelper(base, auth, '/web-info/move-to-top');
+      if (res.moved) {
+        log('✓ Web Info đã chuyển ra menu top-level.');
+        return;
+      }
+      // Helper báo cần fallback (submenu của plugin khác)
+      log(`⚠ REST Web Info: ${res.reason || res.note || 'cần fallback'} — thử HTTP/DOM...`);
+    } catch (err) {
+      log(`⚠ REST Web Info thất bại (${(err?.message || '').slice(0, 120)}) — thử HTTP/DOM...`);
+    }
+  }
   if (isHttpStepsEnabled()) {
     try {
       await pullWebInfoViaHttp(page, log);

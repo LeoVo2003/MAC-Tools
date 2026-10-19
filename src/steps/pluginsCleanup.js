@@ -410,10 +410,29 @@ async function removeAmeCore(page, base, log, label) {
 /**
  * Trước bước Backup/Updraft: nếu có Admin Menu Editor → deactivate (nếu Active) rồi luôn Delete.
  * Fail → log cảnh báo, không chặn Backup.
+ *
+ * Phase 1: ưu tiên REST (helper plugin) → HTTP/DOM → browser.
  */
 export async function removeAdminMenuEditorIfPresent(page, log) {
   const base = originOf(page.url());
   if (!base) throw new Error('Không xác định origin WP để kiểm tra plugin.');
+
+  // Phase 1: thử REST trước
+  if (isHttpStepsEnabled()) {
+    try {
+      const { getRestAuth, callHelper } = await import('../http/helperClient.js');
+      const auth = await getRestAuth(page, base);
+      const res = await callHelper(base, auth, '/plugins/remove', { slugs: ['admin-menu-editor'] });
+      if (res.removed?.length) {
+        log(`✓ Đã gỡ plugin qua REST: ${res.removed.join(', ')}`);
+        return { removed: true, via: 'rest', slugs: res.removed };
+      }
+      log('Admin Menu Editor không có — bỏ qua.');
+      return { removed: false, skipped: true, via: 'rest' };
+    } catch (err) {
+      log(`⚠ REST gỡ plugin thất bại (${(err?.message || '').slice(0, 120)}) — thử HTTP/DOM...`);
+    }
+  }
 
   try {
     const via = isHttpStepsEnabled() ? 'http' : 'browser';

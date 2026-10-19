@@ -217,6 +217,22 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
     await dismissBlockingAlerts(wpPage, log);
     throwIfCancelled();
 
+    // Phase 1: cài helper plugin để các bước WP dùng REST thuần
+    let helperInstalled = false;
+    if (isHttpStepsEnabled()) {
+      try {
+        const { installHelper } = await import('./http/helperClient.js');
+        const { originOf } = await import('./utils.js');
+        const siteUrl = originOf(wpPage.url());
+        log('▶ Cài MAC Tools Helper plugin...');
+        await installHelper(wpPage, siteUrl);
+        helperInstalled = true;
+        log('✓ Helper đã cài — các bước WP sẽ dùng REST.');
+      } catch (err) {
+        log(`⚠ Không cài được helper (${(err?.message || '').slice(0, 120)}) — dùng HTTP/DOM như cũ.`);
+      }
+    }
+
     if (enabled.has('backup')) {
       currentStep = 'wp-backup';
       mark('backup', 'start');
@@ -377,6 +393,22 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
     }
 
     log('▶ Xong.');
+
+    // Phase 1: xóa helper plugin cuối job
+    if (helperInstalled) {
+      try {
+        const { removeHelper, getRestAuth } = await import('./http/helperClient.js');
+        const { originOf } = await import('./utils.js');
+        const siteUrl = originOf(wpPage.url());
+        const auth = await getRestAuth(wpPage, siteUrl);
+        log('▶ Xóa MAC Tools Helper plugin...');
+        const res = await removeHelper(siteUrl, auth);
+        log(res.removed ? '✓ Helper đã xóa.' : `⚠ Không xóa được helper: ${res.error || ''}`);
+      } catch (err) {
+        log(`⚠ Lỗi xóa helper: ${(err?.message || '').slice(0, 120)}`);
+      }
+    }
+
     if (process.env.HEADLESS === 'true') {
       await stopLiveSession(liveId).catch(() => {});
       log('→ Headless: đóng Chrome.');

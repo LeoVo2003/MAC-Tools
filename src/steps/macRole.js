@@ -1070,13 +1070,26 @@ export async function enableGrantWpCapabilitiesForAllowedUrls(page, log) {
  * Sau Create: bật Grant WordPress capabilities for allowed URLs.
  */
 export async function configureFPackageUser(page, packageTier = 'F', log) {
+  // Phase 1: thử REST trước
   if (isHttpStepsEnabled()) {
     try {
-      await configureFPackageUserViaHttp(page, packageTier, log);
+      const { getRestAuth, callHelper } = await import('../http/helperClient.js');
+      const base = originOf(page.url());
+      const auth = await getRestAuth(page, base);
+      log('Apply Mac Role template qua REST...');
+      const res = await callHelper(base, auth, '/mac-role/apply-template', {
+        template_id: `${packageTier.toLowerCase()}_package_user`,
+      });
+      log(`✓ Đã apply template "${res.template_id}" (${res.via || 'ok'})`);
     } catch (err) {
-      const msg = err?.message || String(err);
-      log(`⚠ HTTP Create F thất bại (${msg.slice(0, 160)}) — fallback Chrome...`);
-      await configureFPackageUserViaBrowser(page, packageTier, log);
+      log(`⚠ REST Mac Role thất bại (${(err?.message || '').slice(0, 120)}) — thử HTTP/DOM...`);
+      try {
+        await configureFPackageUserViaHttp(page, packageTier, log);
+      } catch (err2) {
+        const msg = err2?.message || String(err2);
+        log(`⚠ HTTP Create F thất bại (${msg.slice(0, 160)}) — fallback Chrome...`);
+        await configureFPackageUserViaBrowser(page, packageTier, log);
+      }
     }
   } else {
     await configureFPackageUserViaBrowser(page, packageTier, log);

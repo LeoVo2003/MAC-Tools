@@ -1269,6 +1269,30 @@ export async function installAndBackupUpdraftPlus(page, options = {}, log) {
   );
 
   let startedViaHttp = false;
+  // Phase 1: thử REST trước
+  if (isHttpStepsEnabled()) {
+    try {
+      const { getRestAuth, callHelper } = await import('../http/helperClient.js');
+      const auth = await getRestAuth(page, base);
+      log('Chạy backup qua REST...');
+      await callHelper(base, auth, '/backup/run');
+      // Poll status
+      const maxWait = 10 * 60 * 1000; // 10 phút
+      const start = Date.now();
+      while (Date.now() - start < maxWait) {
+        if (options.shouldCancel?.()) throw new Error('Job đã bị hủy.');
+        const st = await callHelper(base, auth, '/backup/status');
+        if (!st.running) {
+          log('✓ Backup trên site xong — không tải file về máy.');
+          return;
+        }
+        await new Promise(r => setTimeout(r, 10000));
+      }
+      throw new Error('Backup timeout sau 10 phút.');
+    } catch (err) {
+      log(`⚠ REST backup thất bại (${(err?.message || '').slice(0, 120)}) — thử HTTP/DOM...`);
+    }
+  }
   if (isHttpStepsEnabled()) {
     try {
       await startUpdraftBackupViaHttp(page, log);

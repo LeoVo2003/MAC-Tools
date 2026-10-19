@@ -758,12 +758,52 @@ export async function createCustomerAccountViaBrowser(page, customer, log) {
 }
 
 /**
+ * Tạo user qua Helper REST API (Phase 1) — không cần browser automation.
+ * @param {import('puppeteer').Page} page — đã login wp-admin (để lấy cookie/nonce)
+ */
+export async function createCustomerAccountViaRest(page, customer, log) {
+  const { getRestAuth, callHelper } = await import('../http/helperClient.js');
+  const { rawUser, emailClean, username: user0, password } = normalizeCustomer(customer);
+  const username = user0;
+
+  if (username !== String(rawUser).trim()) {
+    log(`Username format: "${rawUser}" → "${username}"`);
+  }
+
+  const siteUrl = originOf(page.url());
+  const auth = await getRestAuth(page, siteUrl);
+  log(`Tạo user qua REST: ${username} (${emailClean}) — role Editor...`);
+
+  const res = await callHelper(siteUrl, auth, '/users', {
+    username,
+    password,
+    email: emailClean,
+    role: 'editor',
+  });
+
+  if (res.skipped) {
+    log(`⏭ Email đã có tài khoản (${emailClean}) — bỏ qua.`);
+    return { username: res.username || username, password, email: emailClean, skipped: true, reason: res.reason, via: 'rest' };
+  }
+
+  log(`✓ Đã tạo user "${res.username}" (ID ${res.id})`);
+  return { username: res.username, password, email: res.email, id: res.id, via: 'rest' };
+}
+
+/**
  * Tạo user WP:
- * - 2.1: ưu tiên HTTP (USE_HTTP_STEPS), fail → fallback Chrome
+ * - Phase 1: ưu tiên REST (helper plugin), fail → HTTP/DOM → fallback Chrome
  * - Auto bỏ ' trong username/password
  * - Nếu email đã có → bỏ tạo + sync
  */
 export async function createCustomerAccount(page, customer, log) {
+  if (isHttpStepsEnabled()) {
+    try {
+      return await createCustomerAccountViaRest(page, customer, log);
+    } catch (err) {
+      log(`⚠ REST tạo user thất bại (${(err?.message || '').slice(0, 120)}) — thử HTTP/DOM...`);
+    }
+  }
   if (isHttpStepsEnabled()) {
     try {
       return await createCustomerAccountViaHttp(page, customer, log);
