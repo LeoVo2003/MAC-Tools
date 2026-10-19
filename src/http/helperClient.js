@@ -150,6 +150,11 @@ export async function installHelper(page, siteUrl) {
       return 'not_found';
     }, PLUGIN_FILE);
 
+    // 5. Ổn định page sau khi cài (tránh "Execution context was destroyed")
+    // Sau activate, page có thể đang navigate — về dashboard và đợi load xong
+    await page.goto(`${base}/wp-admin/`, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+    await page.waitForFunction(() => document.readyState === 'complete', { timeout: 15000 }).catch(() => {});
+
     return { installed: true, activate: activated };
   } finally {
     const { unlinkSync } = await import('fs');
@@ -164,8 +169,22 @@ export async function installHelper(page, siteUrl) {
  */
 export async function getRestAuth(page, siteUrl) {
   const base = siteUrl.replace(/\/+$/, '');
-  const cookies = await page.cookies(base);
-  const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+
+  // Retry nếu page đang navigate (Execution context was destroyed)
+  let cookies = null;
+  for (let i = 0; i < 3; i++) {
+    try {
+      cookies = await page.cookies(base);
+      break;
+    } catch (e) {
+      if (/destroyed|detached/i.test(e.message) && i < 2) {
+        await new Promise(r => setTimeout(r, 2000));
+        continue;
+      }
+      throw e;
+    }
+  }
+  const cookieHeader = (cookies || []).map(c => `${c.name}=${c.value}`).join('; ');
 
   // Lấy REST nonce từ wp-admin (cần cho cookie auth với POST)
   const nonce = await page.evaluate(() => {
