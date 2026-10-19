@@ -125,12 +125,47 @@ add_action('rest_api_init', function () {
 /* ================= Backup (UpdraftPlus) ================= */
 
 function mactools_backup_run() {
-    // Tạm thời: UpdraftPlus backup qua PHP trực tiếp gây critical error
-    // (backupnow cần context đầy đủ). Để HTTP/DOM xử lý.
+    // Trigger UpdraftPlus backup qua admin-ajax nội bộ (giống cách HTTP/DOM làm)
+    // Lấy nonce
+    $nonce = wp_create_nonce('updraftplus-backupnow-nonce');
+    // UpdraftPlus cần nonce từ trang settings — thử tạo backup qua AJAX nội bộ
+    $ajax_url = admin_url('admin-ajax.php');
+
+    $resp = wp_remote_post($ajax_url, [
+        'timeout' => 30,
+        'sslverify' => false,
+        'body' => [
+            'action' => 'updraft_ajax',
+            'subaction' => 'backupnow',
+            'nonce' => $nonce,
+            'backupnow_nodb' => '0',
+            'backupnow_nofiles' => '0',
+        ],
+        'cookies' => $_COOKIE,
+    ]);
+
+    if (is_wp_error($resp)) {
+        return new WP_Error('ajax_fail', 'Gọi backup AJAX thất bại: ' . $resp->get_error_message(), ['status' => 500]);
+    }
+
+    $body = wp_remote_retrieve_body($resp);
+    $data = json_decode($body, true);
+
+    // UpdraftPlus trả về job ID hoặc error
+    if (isset($data['job_id']) || (isset($data['m']) && stripos($data['m'], 'backup') !== false)) {
+        return [
+            'ok' => true,
+            'job_id' => $data['job_id'] ?? 'started',
+            'message' => 'Backup đã bắt đầu.',
+            'via' => 'ajax-internal',
+        ];
+    }
+
+    // Nếu AJAX cần nonce đúng, trả về để client thử cách khác
     return new WP_Error(
-        'not_implemented',
-        'Backup qua REST chưa hỗ trợ — dùng HTTP/DOM.',
-        ['status' => 501]
+        'ajax_nonce',
+        'Cần nonce từ trang UpdraftPlus. Response: ' . substr($body, 0, 200),
+        ['status' => 400]
     );
 }
 
@@ -359,42 +394,46 @@ function mactools_options_get(WP_REST_Request $req) {
 /* ================= Mac Role: Grant capabilities ================= */
 
 function mactools_macrole_grant_capabilities() {
-    // Tìm option của Mac Role chứa setting "grant wordpress capabilities"
-    // Thử các option name phổ biến
-    $candidates = [
-        'mac_role_settings',
-        'mac-role-settings',
-        'rud_settings',
-        'mac_role_options',
-    ];
-    foreach ($candidates as $opt) {
-        $val = get_option($opt);
+    // Tìm option của Mac Role — thử nhiều pattern
+    global $wpdb;
+
+    // Lấy tất cả options có tên liên quan đến mac-role hoặc role
+    $rows = $wpdb->get_results(
+        "SELECT option_name, option_value FROM {$wpdb->options}
+         WHERE option_name LIKE '%mac_role%' OR option_name LIKE '%mac-role%'
+            OR option_name LIKE '%rud_%'
+         LIMIT 50"
+    );
+
+    $tried = [];
+    foreach ($rows as $row) {
+        $tried[] = $row->option_name;
+        $val = maybe_unserialize($row->option_value);
         if (is_array($val)) {
-            // Tìm key liên quan đến grant/capabilities
             foreach ($val as $k => $v) {
-                if (stripos($k, 'grant') !== false || stripos($k, 'capabilit') !== false) {
+                if (stripos($k, 'grant') !== false) {
                     $val[$k] = 1;
-                    update_option($opt, $val);
-                    return ['ok' => true, 'option' => $opt, 'key' => $k, 'via' => 'option_update'];
+                    update_option($row->option_name, $val);
+                    return ['ok' => true, 'option' => $row->option_name, 'key' => $k, 'via' => 'option_update'];
+                }
+            }
+            // Nếu là array nhưng không có key grant, thử các key phổ biến
+            $grant_keys = ['grant_wp_capabilities', 'grant_capabilities', 'grant_wordpress_capabilities', 'allow_grant'];
+            foreach ($grant_keys as $gk) {
+                if (array_key_exists($gk, $val)) {
+                    $val[$gk] = 1;
+                    update_option($row->option_name, $val);
+                    return ['ok' => true, 'option' => $row->option_name, 'key' => $gk, 'via' => 'option_update'];
                 }
             }
         }
     }
-    // Fallback: thử tìm trong tất cả options có chứa 'mac_role' hoặc 'mac-role'
-    global $wpdb;
-    $rows = $wpdb->get_results(
-        "SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE '%mac_role%' OR option_name LIKE '%mac-role%' LIMIT 20"
-    );
-    $found = [];
-    foreach ($rows as $row) {
-        $found[] = $row->option_name;
-    }
+
     return [
         'ok' => false,
         'reason' => 'not_found',
-        'searched' => $candidates,
-        'mac_options_found' => $found,
-        'note' => 'Không tìm thấy option grant capabilities. Dùng /options/get để kiểm tra tay.',
+        'searched_options' => $tried,
+        'note' => 'Không tìm thấy option grant. Gửi danh sách này để debug.',
     ];
 }
 
