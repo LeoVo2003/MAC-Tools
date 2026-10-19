@@ -1052,6 +1052,23 @@ export async function enableGrantWpCapabilitiesForAllowedUrls(page, log) {
   const base = originOf(page.url());
   if (!base) throw new Error('Không xác định origin WP cho Mac Role Settings.');
 
+  // Phase 1: thử REST trước
+  if (isHttpStepsEnabled()) {
+    try {
+      const { getRestAuth, callHelper } = await import('../http/helperClient.js');
+      const auth = await getRestAuth(page, base);
+      log('Bật Grant WP capabilities qua REST...');
+      const res = await callHelper(base, auth, '/mac-role/grant-capabilities');
+      if (res.ok) {
+        log(`✓ Đã bật Grant WP capabilities (option ${res.option}, key ${res.key}).`);
+        return { via: 'rest', ...res };
+      }
+      log(`⚠ REST grant caps: ${res.reason || res.note} — thử HTTP/DOM...`);
+    } catch (err) {
+      log(`⚠ REST grant caps thất bại (${(err?.message || '').slice(0, 120)}) — thử HTTP/DOM...`);
+    }
+  }
+
   if (isHttpStepsEnabled()) {
     try {
       return await enableGrantWpCapabilitiesViaHttp(page, base, log);

@@ -18,6 +18,9 @@
  *   POST /mac/v1/plugins/remove           — gỡ plugins theo slugs
  *   POST /mac/v1/plugins/install          — cài plugin từ WordPress.org
  *   POST /mac/v1/plugins/activate         — activate plugin
+ *   POST /mac/v1/options/set               — set WordPress option
+ *   GET  /mac/v1/options/get               — get WordPress option
+ *   POST /mac/v1/mac-role/grant-capabilities — bật Grant WP capabilities
  *
  * Auth: Application Password (Basic Auth) của admin.
  */
@@ -81,6 +84,25 @@ add_action('rest_api_init', function () {
     register_rest_route('mac/v1', '/plugins/activate', [
         'methods' => 'POST',
         'callback' => 'mactools_plugins_activate',
+        'permission_callback' => $perm,
+    ]);
+
+    // --- Options (generic) ---
+    register_rest_route('mac/v1', '/options/set', [
+        'methods' => 'POST',
+        'callback' => 'mactools_options_set',
+        'permission_callback' => $perm,
+    ]);
+    register_rest_route('mac/v1', '/options/get', [
+        'methods' => 'GET',
+        'callback' => 'mactools_options_get',
+        'permission_callback' => $perm,
+    ]);
+
+    // --- Mac Role settings ---
+    register_rest_route('mac/v1', '/mac-role/grant-capabilities', [
+        'methods' => 'POST',
+        'callback' => 'mactools_macrole_grant_capabilities',
         'permission_callback' => $perm,
     ]);
 });
@@ -308,6 +330,73 @@ function mactools_plugins_activate(WP_REST_Request $req) {
     $res = activate_plugin($plugin_file);
     if (is_wp_error($res)) return $res;
     return ['active' => true, 'file' => $plugin_file];
+}
+
+/* ================= Options (generic) ================= */
+
+function mactools_options_set(WP_REST_Request $req) {
+    $key = sanitize_key($req->get_param('key'));
+    $value = $req->get_param('value');
+    if (!$key) {
+        return new WP_Error('missing_params', 'Thiếu key.', ['status' => 400]);
+    }
+    // Chỉ cho phép các option an toàn (không phải core sensitive)
+    $blocked = ['siteurl', 'home', 'admin_email', 'users_can_register'];
+    if (in_array($key, $blocked, true)) {
+        return new WP_Error('blocked', "Option '{$key}' bị chặn.", ['status' => 403]);
+    }
+    update_option($key, $value);
+    return ['ok' => true, 'key' => $key];
+}
+
+function mactools_options_get(WP_REST_Request $req) {
+    $key = sanitize_key($req->get_param('key'));
+    if (!$key) {
+        return new WP_Error('missing_params', 'Thiếu key.', ['status' => 400]);
+    }
+    return ['key' => $key, 'value' => get_option($key)];
+}
+
+/* ================= Mac Role: Grant capabilities ================= */
+
+function mactools_macrole_grant_capabilities() {
+    // Tìm option của Mac Role chứa setting "grant wordpress capabilities"
+    // Thử các option name phổ biến
+    $candidates = [
+        'mac_role_settings',
+        'mac-role-settings',
+        'rud_settings',
+        'mac_role_options',
+    ];
+    foreach ($candidates as $opt) {
+        $val = get_option($opt);
+        if (is_array($val)) {
+            // Tìm key liên quan đến grant/capabilities
+            foreach ($val as $k => $v) {
+                if (stripos($k, 'grant') !== false || stripos($k, 'capabilit') !== false) {
+                    $val[$k] = 1;
+                    update_option($opt, $val);
+                    return ['ok' => true, 'option' => $opt, 'key' => $k, 'via' => 'option_update'];
+                }
+            }
+        }
+    }
+    // Fallback: thử tìm trong tất cả options có chứa 'mac_role' hoặc 'mac-role'
+    global $wpdb;
+    $rows = $wpdb->get_results(
+        "SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE '%mac_role%' OR option_name LIKE '%mac-role%' LIMIT 20"
+    );
+    $found = [];
+    foreach ($rows as $row) {
+        $found[] = $row->option_name;
+    }
+    return [
+        'ok' => false,
+        'reason' => 'not_found',
+        'searched' => $candidates,
+        'mac_options_found' => $found,
+        'note' => 'Không tìm thấy option grant capabilities. Dùng /options/get để kiểm tra tay.',
+    ];
 }
 
 /* ================= Plugins cleanup ================= */
