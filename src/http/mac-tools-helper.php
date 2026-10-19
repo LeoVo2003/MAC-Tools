@@ -125,41 +125,13 @@ add_action('rest_api_init', function () {
 /* ================= Backup (UpdraftPlus) ================= */
 
 function mactools_backup_run() {
-    if (!class_exists('UpdraftPlus')) {
-        // Thử load UpdraftPlus
-        $updraft_file = WP_PLUGIN_DIR . '/updraftplus/updraftplus.php';
-        if (file_exists($updraft_file)) {
-            include_once $updraft_file;
-        }
-        if (!class_exists('UpdraftPlus')) {
-            return new WP_Error('no_updraft', 'UpdraftPlus chưa cài hoặc chưa active.', ['status' => 400]);
-        }
-    }
-    try {
-        global $updraftplus;
-        if (!$updraftplus) {
-            $updraftplus = new UpdraftPlus();
-        }
-        // Trigger backup: files + database
-        // UpdraftPlus dùng backupnow via AJAX — ở đây gọi trực tiếp
-        $options = [
-            'use_nonce' => false,
-        ];
-        // Tạo backup job
-        $backup = $updraftplus->backupnow(null, [], $options);
-        // backupnow trả về job ID hoặc WP_Error
-        if (is_wp_error($backup)) {
-            return $backup;
-        }
-        return [
-            'ok' => true,
-            'job_id' => is_string($backup) ? $backup : 'started',
-            'message' => 'Backup đã bắt đầu. Dùng /backup/status để poll.',
-            'via' => 'updraft-php',
-        ];
-    } catch (Exception $e) {
-        return new WP_Error('backup_fail', $e->getMessage(), ['status' => 500]);
-    }
+    // Tạm thời: UpdraftPlus backup qua PHP trực tiếp gây critical error
+    // (backupnow cần context đầy đủ). Để HTTP/DOM xử lý.
+    return new WP_Error(
+        'not_implemented',
+        'Backup qua REST chưa hỗ trợ — dùng HTTP/DOM.',
+        ['status' => 501]
+    );
 }
 
 function mactools_backup_status() {
