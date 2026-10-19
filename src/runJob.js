@@ -286,13 +286,8 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
       currentStep = 'wpm-sync-account';
       mark('syncWpm', 'start');
       log('▶ Sync tài khoản lên WPM...');
-      // Thử HTTP trước, fallback browser
-      try {
-        await syncAccountToWPMViaHttp(wpmPage, wpmProjectUrl, account, log, targetOpts);
-      } catch (err) {
-        log(`⚠ Sync WPM HTTP thất bại (${(err?.message || '').slice(0, 120)}) — dùng browser...`);
-        await syncAccountToWPM(wpmPage, wpmProjectUrl, account, log, targetOpts);
-      }
+      // WPM không có API public, webs không dùng form fields — phải dùng browser
+      await syncAccountToWPM(wpmPage, wpmProjectUrl, account, log, targetOpts);
       mark('syncWpm', 'done');
     } else if (enabled.has('syncWpm') && accountExistsOnWeb) {
       /* đã log ở trên */
