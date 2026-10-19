@@ -1774,7 +1774,7 @@ qrForm?.addEventListener('submit', async (e) => {
       if (data.code === 'SLUG_EXISTS') {
         qrLog(`Slug đã tồn tại. Bấm "Ghi đè" để update page cũ.`);
         setBadge(qrStatusBadge, 'warn', 'Slug trùng');
-        // Hiện nút ghi đè
+        // Hiện nút ghi đè (cạnh nút Tạo QR Page)
         if (!document.getElementById('qrForceBtn')) {
           const btn = document.createElement('button');
           btn.type = 'button';
@@ -1787,7 +1787,12 @@ qrForm?.addEventListener('submit', async (e) => {
             setBadge(qrStatusBadge, 'running', 'Đang ghi đè...');
             qrForm.dispatchEvent(new Event('submit', { cancelable: true }));
           };
-          qrForm.querySelector('.actions').appendChild(btn);
+          const runBtn = document.getElementById('qrRunBtn');
+          if (runBtn && runBtn.parentNode) {
+            runBtn.parentNode.insertBefore(btn, runBtn.nextSibling);
+          } else {
+            qrForm.appendChild(btn);
+          }
         }
       } else {
         throw new Error(data.error || 'Lỗi không xác định');
