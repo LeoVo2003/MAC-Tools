@@ -117,23 +117,35 @@ add_action('rest_api_init', function () {
 
 function mactools_backup_run() {
     if (!class_exists('UpdraftPlus')) {
-        return new WP_Error('no_updraft', 'UpdraftPlus chưa cài.', ['status' => 400]);
-    }
-    // Trigger backup via UpdraftPlus backupnow
-    // UpdraftPlus dùng AJAX action updraft_ajax subaction=backupnow
-    // Ở đây gọi trực tiếp qua option + cron
-    try {
-        // Đánh dấu backup thủ công
-        $updraft = new UpdraftPlus();
-        // UpdraftPlus_Backup object để chạy backup files + db
-        if (!class_exists('UpdraftPlus_Backup')) {
-            require_once WP_PLUGIN_DIR . '/updraftplus/backup.php';
+        // Thử load UpdraftPlus
+        $updraft_file = WP_PLUGIN_DIR . '/updraftplus/updraftplus.php';
+        if (file_exists($updraft_file)) {
+            include_once $updraft_file;
         }
-        // Dùng cách đơn giản: set transient để trigger backup via admin-ajax pattern
-        // Thực tế: gọi do_action mô phỏng
+        if (!class_exists('UpdraftPlus')) {
+            return new WP_Error('no_updraft', 'UpdraftPlus chưa cài hoặc chưa active.', ['status' => 400]);
+        }
+    }
+    try {
+        global $updraftplus;
+        if (!$updraftplus) {
+            $updraftplus = new UpdraftPlus();
+        }
+        // Trigger backup: files + database
+        // UpdraftPlus dùng backupnow via AJAX — ở đây gọi trực tiếp
+        $options = [
+            'use_nonce' => false,
+        ];
+        // Tạo backup job
+        $backup = $updraftplus->backupnow(null, [], $options);
+        // backupnow trả về job ID hoặc WP_Error
+        if (is_wp_error($backup)) {
+            return $backup;
+        }
         return [
             'ok' => true,
-            'message' => 'Backup đã được yêu cầu. Dùng /backup/status để poll.',
+            'job_id' => is_string($backup) ? $backup : 'started',
+            'message' => 'Backup đã bắt đầu. Dùng /backup/status để poll.',
             'via' => 'updraft-php',
         ];
     } catch (Exception $e) {
