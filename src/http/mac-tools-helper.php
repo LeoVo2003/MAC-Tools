@@ -125,48 +125,66 @@ add_action('rest_api_init', function () {
 /* ================= Backup (UpdraftPlus) ================= */
 
 function mactools_backup_run() {
-    // Trigger UpdraftPlus backup qua admin-ajax nội bộ (giống cách HTTP/DOM làm)
-    // Lấy nonce
-    $nonce = wp_create_nonce('updraftplus-backupnow-nonce');
-    // UpdraftPlus cần nonce từ trang settings — thử tạo backup qua AJAX nội bộ
-    $ajax_url = admin_url('admin-ajax.php');
+    // Lấy nonce thật từ trang UpdraftPlus
+    $page_url = admin_url('options-general.php?page=updraftplus');
+    $cookies = [];
+    foreach ($_COOKIE as $k => $v) {
+        $cookies[] = "$k=$v";
+    }
+    $page_resp = wp_remote_get($page_url, [
+        'timeout' => 15,
+        'sslverify' => false,
+        'headers' => ['Cookie' => implode('; ', $cookies)],
+    ]);
+    if (is_wp_error($page_resp)) {
+        return new WP_Error('page_fail', 'Không mở được trang UpdraftPlus.', ['status' => 500]);
+    }
+    $html = wp_remote_retrieve_body($page_resp);
 
+    // Tìm nonce cho backupnow — UpdraftPlus dùng nhiều nonce khác nhau
+    // Thử các pattern
+    $nonce = null;
+    if (preg_match('/updraftplus-backupnow-nonce["\']?\s*[:=]\s*["\']([a-f0-9]+)["\']/i', $html, $m)) {
+        $nonce = $m[1];
+    } elseif (preg_match('/name=["\']_wpnonce["\']\s+value=["\']([a-f0-9]+)["\']/i', $html, $m)) {
+        $nonce = $m[1];
+    } elseif (preg_match('/updraft_ajax_nonce["\']?\s*[:=]\s*["\']([^"\']+)["\']/i', $html, $m)) {
+        $nonce = $m[1];
+    }
+
+    if (!$nonce) {
+        return new WP_Error(
+            'no_nonce',
+            'Không tìm thấy nonce UpdraftPlus trong trang.',
+            ['status' => 400]
+        );
+    }
+
+    // Gọi backup via AJAX
+    $ajax_url = admin_url('admin-ajax.php');
     $resp = wp_remote_post($ajax_url, [
         'timeout' => 30,
         'sslverify' => false,
+        'headers' => ['Cookie' => implode('; ', $cookies)],
         'body' => [
             'action' => 'updraft_ajax',
             'subaction' => 'backupnow',
             'nonce' => $nonce,
-            'backupnow_nodb' => '0',
-            'backupnow_nofiles' => '0',
         ],
-        'cookies' => $_COOKIE,
     ]);
 
     if (is_wp_error($resp)) {
-        return new WP_Error('ajax_fail', 'Gọi backup AJAX thất bại: ' . $resp->get_error_message(), ['status' => 500]);
+        return new WP_Error('ajax_fail', $resp->get_error_message(), ['status' => 500]);
     }
 
     $body = wp_remote_retrieve_body($resp);
     $data = json_decode($body, true);
 
-    // UpdraftPlus trả về job ID hoặc error
-    if (isset($data['job_id']) || (isset($data['m']) && stripos($data['m'], 'backup') !== false)) {
-        return [
-            'ok' => true,
-            'job_id' => $data['job_id'] ?? 'started',
-            'message' => 'Backup đã bắt đầu.',
-            'via' => 'ajax-internal',
-        ];
+    if (isset($data['job_id'])) {
+        return ['ok' => true, 'job_id' => $data['job_id'], 'via' => 'ajax-internal'];
     }
 
-    // Nếu AJAX cần nonce đúng, trả về để client thử cách khác
-    return new WP_Error(
-        'ajax_nonce',
-        'Cần nonce từ trang UpdraftPlus. Response: ' . substr($body, 0, 200),
-        ['status' => 400]
-    );
+    return new WP_Error('backup_fail', 'Response: ' . substr($body, 0, 200), ['status' => 500]);
 }
 
 function mactools_backup_status() {

@@ -1843,6 +1843,9 @@ export async function syncAccountToWPMViaHttp(page, projectUrl, account, log, ta
     // Verify: kiểm tra username có trong response HTML không
     const usernameFound = respText.includes(acc.username);
 
+    // Debug: đếm số accounts trong response
+    const accCount = (respText.match(new RegExp(`webs\\[${targetWebIdx}\\]\\[login_endpoints\\]\\[${epIdx}\\]\\[accounts\\]`, 'g')) || []).length;
+
     return {
       ok: true,
       status: resp.status,
@@ -1852,6 +1855,13 @@ export async function syncAccountToWPMViaHttp(page, projectUrl, account, log, ta
       accIdx: nextAccIdx,
       verified: usernameFound,
       warning: usernameFound ? null : 'username_not_in_response',
+      debug: {
+        formAction: action,
+        totalFields: [...formData.keys()].length,
+        accountsInResponse: accCount,
+        targetUrl: prefUrl,
+        webUrlsFound: webUrls,
+      },
     };
   }, { username: account.username, password: account.password, role: account.role || 'editor', notes: account.notes || '' }, webTargetMode, preferUrl);
 
@@ -1860,7 +1870,9 @@ export async function syncAccountToWPMViaHttp(page, projectUrl, account, log, ta
   }
 
   if (result.warning === 'username_not_in_response') {
-    log(`⚠ POST thành công nhưng không thấy username "${account.username}" trong response — có thể sync nhầm web hoặc bị validation.`);
+    log(`⚠ POST thành công nhưng không thấy username "${account.username}" trong response.`);
+    log(`  Debug: action=${result.debug?.formAction}, fields=${result.debug?.totalFields}, accounts=${result.debug?.accountsInResponse}`);
+    log(`  Target URL: ${result.debug?.targetUrl}, webs found: ${JSON.stringify(result.debug?.webUrlsFound)}`);
   } else {
     log(`✓ Đã sync account "${account.username}" lên WPM (web ${result.webIdx}, endpoint ${result.epIdx}, account ${result.accIdx}).`);
   }
