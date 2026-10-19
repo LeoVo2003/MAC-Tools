@@ -233,7 +233,9 @@ export async function runJob(job, onLog = () => {}, onStep = () => {}, hooks = {
           throw new Error(`REST không hoạt động: ${chk.error}`);
         }
         helperInstalled = true;
-        log('✓ Helper đã cài + REST OK — các bước WP sẽ dùng REST.');
+        log(inst?.reused
+          ? '✓ Helper đã có sẵn + REST OK — dùng luôn, khỏi cài lại.'
+          : '✓ Helper đã cài + REST OK — các bước WP sẽ dùng REST.');
       } catch (err) {
         log(`⚠ Không cài được helper (${(err?.message || '').slice(0, 150)}) — dùng HTTP/DOM như cũ.`);
       }

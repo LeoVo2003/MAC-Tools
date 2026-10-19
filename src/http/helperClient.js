@@ -102,6 +102,16 @@ function crc32(buf) {
  */
 export async function installHelper(page, siteUrl) {
   const base = siteUrl.replace(/\/+$/, '');
+
+  // Check trước: helper đã cài và active chưa? Nếu rồi thì dùng luôn, khỏi cài lại
+  try {
+    const auth = await getRestAuth(page, base);
+    const check = await checkHelper(base, auth);
+    if (check.ok) {
+      return { ok: true, reused: true };
+    }
+  } catch {}
+
   const zipPath = await makeZip();
 
   try {
