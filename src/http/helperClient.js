@@ -108,12 +108,17 @@ export async function installHelper(page, siteUrl) {
     // 1. Mở trang upload plugin
     await page.goto(`${base}/wp-admin/plugin-install.php?tab=upload`, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-    // 2. Lấy nonce từ form upload
+    // 2. Lấy nonce từ form upload + set file vào input
     const nonce = await page.evaluate(() => {
       const el = document.querySelector('input[name="_wpnonce"]');
       return el ? el.value : null;
     });
     if (!nonce) throw new Error('Không lấy được nonce upload plugin.');
+
+    // Set file zip vào input[type=file]
+    const fileInput = await page.$('input[type="file"][name="pluginzip"]');
+    if (!fileInput) throw new Error('Không tìm thấy input upload plugin.');
+    await fileInput.uploadFile(zipPath);
 
     // 3. Upload zip qua fetch trong browser context (có cookie)
     const result = await page.evaluate(async (uploadUrl, wpnonce) => {
