@@ -31,7 +31,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # (S2) user không đặc quyền — container không chạy root
-RUN useradd -m -u 1000 app
+# Base image node:* đã có sẵn user "node" chiếm UID 1000 — phải xóa trước,
+# nếu không useradd báo "UID 1000 is not unique" và Docker build fail (đã dính từ 19/10).
+# Giữ UID 1000 cho "app" để khớp quyền sở hữu các volume cũ trên VPS.
+RUN (userdel -r node || true) && useradd -m -u 1000 app
 
 WORKDIR /app
 COPY package.json package-lock.json ./
