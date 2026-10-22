@@ -2,7 +2,7 @@
 
 ## Yêu cầu server
 
-- Node.js 20+
+- Node.js 22.23.4+ / 24.22.1+ / 26.12.1+ (bản vá CVE-2026-111497 — Brotli RCE; bản cũ hơn và Node 20 EOL đều dính)
 - Google Chrome **hoặc** Chromium
 - Ổ đĩa đủ chỗ nếu team tick tải backup UpdraftPlus
 - (Khuyến nghị) reverse proxy HTTPS (nginx)
