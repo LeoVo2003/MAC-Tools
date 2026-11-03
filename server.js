@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import { exec } from 'child_process';
 import { fileURLToPath } from 'url';
 import { runJob } from './src/runJob.js';
@@ -39,6 +40,8 @@ import {
   listUsersPublic,
   resetUserPassword,
   resetAllUserPasswords,
+  isAdminIdentity,
+  findUserByUsername,
 } from './src/userStore.js';
 import { sessionMiddleware, requireAuth, requireAdmin, currentPublicUser } from './src/auth.js';
 import { createJobQueue } from './src/jobQueue.js';
@@ -262,6 +265,64 @@ export function createApp() {
     } catch (err) {
       res.status(500).json({ error: err?.message || String(err) });
     }
+  });
+
+  function recoverySecretConfigured() {
+    const secret = String(process.env.ADMIN_RECOVERY_SECRET || '').trim();
+    if (!secret) return { ok: false, secret: '' };
+    if (process.env.NODE_ENV === 'production' && (secret.length < 32 || /change-me/i.test(secret))) {
+      return { ok: false, secret: '' };
+    }
+    return { ok: true, secret };
+  }
+
+  function secretsEqual(a, b) {
+    const ha = crypto.createHash('sha256').update(String(a || '')).digest();
+    const hb = crypto.createHash('sha256').update(String(b || '')).digest();
+    return crypto.timingSafeEqual(ha, hb);
+  }
+
+  /** Trang ẩn: không gắn menu. Admin quên mk → /recovery + ADMIN_RECOVERY_SECRET. */
+  const recoveryHitsByIp = new Map();
+  function recoveryRateLimit(req, res, next) {
+    const ip = req.ip || 'unknown';
+    const now = Date.now();
+    const windowMs = 15 * 60 * 1000;
+    const recent = (recoveryHitsByIp.get(ip) || []).filter((t) => now - t < windowMs);
+    if (recent.length >= 5) {
+      return res.status(429).json({ error: 'Thử quá nhiều lần. Đợi 15 phút.' });
+    }
+    recent.push(now);
+    recoveryHitsByIp.set(ip, recent);
+    next();
+  }
+
+  app.post('/api/admin-recovery', recoveryRateLimit, (req, res) => {
+    const cfg = recoverySecretConfigured();
+    if (!cfg.ok) {
+      return res.status(503).json({
+        error: 'Recovery chưa cấu hình. Đặt ADMIN_RECOVERY_SECRET (≥32 ký tự) trong .env rồi restart.',
+      });
+    }
+    const email = String(req.body?.email || '').trim();
+    const secret = String(req.body?.secret || '');
+    if (!email || !secret) {
+      return res.status(400).json({ error: 'Thiếu email hoặc recovery secret.' });
+    }
+    if (!secretsEqual(secret, cfg.secret)) {
+      return res.status(403).json({ error: 'Secret không đúng hoặc email không hợp lệ.' });
+    }
+    if (!isAdminIdentity(email)) {
+      return res.status(403).json({ error: 'Secret không đúng hoặc email không hợp lệ.' });
+    }
+    const user = findUserByUsername(email);
+    if (user) {
+      resetUserPassword(user.id);
+    }
+    res.json({
+      ok: true,
+      message: 'Đã mở khóa. Vào trang đăng nhập, dùng email admin + mật khẩu WPM hiện tại.',
+    });
   });
 
   app.get('/api/users', requireAuth, requireAdmin, (_req, res) => {

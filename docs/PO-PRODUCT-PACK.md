@@ -123,7 +123,8 @@ Copy Output → dán Task / gửi khách (hoặc AM tự lấy nếu Task không
 ### FR-Admin
 - FR-AD1: Dashboard runs, CSV export/import, clear.  
 - FR-AD2: Target subdomain test.  
-- FR-AD3: Health / purge backup API.
+- FR-AD3: Health / purge backup API.  
+- FR-AD4: Trang ẩn `/recovery` + `ADMIN_RECOVERY_SECRET` để admin tự gỡ mk đã lưu khi quên.
 
 ---
 

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex,nofollow" />
+  <meta name="theme-color" content="#F5F5F7" />
+  <title>MAC Tools — Recovery</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/style.css?v=20261103d" />
+</head>
+<body>
+  <main class="main">
+    <div class="login-screen">
+      <form class="login-card" id="recoveryForm" novalidate>
+        <div class="login-brand">
+          <span class="logo-text"><span class="logo-name logo-name-lg">MAC<i>.</i></span><span class="logo-sub">Web Tools</span></span>
+        </div>
+        <h1>Admin recovery</h1>
+        <p class="muted">Gỡ mật khẩu đã lưu cho email admin. Sau đó đăng nhập lại bằng mật khẩu WPM hiện tại.</p>
+        <label class="field">
+          <span>Email admin</span>
+          <input id="recEmail" type="email" required autocomplete="username" placeholder="you@macusaone.com" />
+        </label>
+        <label class="field">
+          <span>Recovery secret</span>
+          <input id="recSecret" type="password" required autocomplete="off" placeholder="ADMIN_RECOVERY_SECRET" />
+        </label>
+        <p id="recError" class="error-text" role="alert"></p>
+        <p id="recOk" class="hint hint--ok" hidden></p>
+        <button type="submit" id="recBtn" class="btn btn-primary btn-lg btn-block">Mở khóa đăng nhập</button>
+        <p class="muted small"><a href="/">← Về đăng nhập</a></p>
+      </form>
+    </div>
+  </main>
+  <script>
+    const form = document.getElementById('recoveryForm');
+    const err = document.getElementById('recError');
+    const ok = document.getElementById('recOk');
+    const btn = document.getElementById('recBtn');
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      err.textContent = '';
+      ok.hidden = true;
+      btn.disabled = true;
+      try {
+        const res = await fetch('/api/admin-recovery', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({
+            email: document.getElementById('recEmail').value.trim(),
+            secret: document.getElementById('recSecret').value,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Thất bại.');
+        ok.hidden = false;
+        ok.textContent = data.message || 'Đã mở khóa. Đăng nhập bằng mật khẩu WPM mới.';
+        document.getElementById('recSecret').value = '';
+      } catch (ex) {
+        err.textContent = ex.message || String(ex);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
