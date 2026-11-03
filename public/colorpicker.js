@@ -457,6 +457,7 @@
     line.setAttribute('x1', g.pStart.x + '%'); line.setAttribute('y1', g.pStart.y + '%');
     line.setAttribute('x2', g.pEnd.x + '%'); line.setAttribute('y2', g.pEnd.y + '%');
     $('g-type').value = g.type;
+    $('g-angle').disabled = g.type === 'radial';
     if (document.activeElement !== $('g-angle')) $('g-angle').value = g.angle + '°';
     $('g-bar-f').style.background = `linear-gradient(90deg, ${stopsCss()})`;
     renderHandles();

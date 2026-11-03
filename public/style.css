@@ -575,7 +575,8 @@ input.field-warn {
   flex: 1;
   min-width: 0;
   font-family: var(--font-mono);
-  text-transform: uppercase;
+  font-size: 13px;
+  text-overflow: ellipsis;
 }
 .color-field input[type="color"] {
   flex: none;
@@ -2242,6 +2243,8 @@ details.qr-section:not([open]) > .qr-section-head::before { transform: rotate(0d
   width: 100%; height: 100%; padding: 0 6px; border: 0; outline: 0; background: transparent;
   font-weight: 500; font-size: 12.5px; font-family: inherit; color: #101828; text-align: center; min-width: 0;
 }
+.cp-cell:has(input:disabled) { opacity: .5; background: #F9FAFB; }
+.cp-cell:has(input:disabled) { opacity: .5; background: #F9FAFB; }
 .cp-cell input.is-left { text-align: left; padding-left: 4px; }
 .cp-cell input.cp-mono { text-transform: uppercase; }
 .cp-dot {
