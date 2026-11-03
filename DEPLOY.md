@@ -33,7 +33,7 @@ Admin: cấu hình qua `ADMIN_EMAILS` (thêm email: `ADMIN_EMAILS=a@x.com,b@y.co
 | `OPEN_BROWSER=false` | Không tự mở browser trên server |
 | `SESSION_SECRET` / `APP_SECRET` | Session + mã hóa WPM password |
 | `ADMIN_EMAILS` | Danh sách email admin (comma-separated) |
-| `ADMIN_RECOVERY_SECRET` | Secret trang ẩn `/recovery` (chuỗi ≥ 32). Admin quên mk tool → mở khóa rồi login lại bằng mk WPM mới |
+| `ADMIN_RECOVERY_SECRET` | Secret trang ẩn `/recovery` (tối thiểu 6 ký tự). Admin quên mk tool → mở khóa rồi login lại bằng mk WPM mới |
 | `CHROME_PATH` | Path Chrome/Chromium nếu không tự tìm |
 | `DOWNLOAD_DIR` | Thư mục lưu file backup |
 | `MAX_CONCURRENT_JOBS` | `0` (mặc định) = không giới hạn job đồng thời; số nguyên dương = giới hạn do admin chọn |

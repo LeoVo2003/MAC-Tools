@@ -269,10 +269,7 @@ export function createApp() {
 
   function recoverySecretConfigured() {
     const secret = String(process.env.ADMIN_RECOVERY_SECRET || '').trim();
-    if (!secret) return { ok: false, secret: '' };
-    if (process.env.NODE_ENV === 'production' && (secret.length < 32 || /change-me/i.test(secret))) {
-      return { ok: false, secret: '' };
-    }
+    if (!secret || secret.length < 6) return { ok: false, secret: '' };
     return { ok: true, secret };
   }
 
@@ -301,7 +298,7 @@ export function createApp() {
     const cfg = recoverySecretConfigured();
     if (!cfg.ok) {
       return res.status(503).json({
-        error: 'Recovery chưa cấu hình. Đặt ADMIN_RECOVERY_SECRET (≥32 ký tự) trong .env rồi restart.',
+        error: 'Recovery chưa cấu hình. Đặt ADMIN_RECOVERY_SECRET (≥6 ký tự) trong .env rồi restart.',
       });
     }
     const email = String(req.body?.email || '').trim();
