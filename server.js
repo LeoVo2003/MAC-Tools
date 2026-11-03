@@ -277,10 +277,33 @@ export function createApp() {
     }
   });
 
-  app.post('/api/logout', (req, res) => {
-    req.session.destroy(() => {
-      res.json({ ok: true });
+  function clearSessionCookie(res) {
+    res.clearCookie('fugt.sid', {
+      path: '/',
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.COOKIE_SECURE === 'true' || process.env.COOKIE_SECURE === '1',
     });
+  }
+
+  function destroySession(req, res, then) {
+    if (!req.session) {
+      clearSessionCookie(res);
+      return then();
+    }
+    req.session.destroy(() => {
+      clearSessionCookie(res);
+      then();
+    });
+  }
+
+  app.post('/api/logout', (req, res) => {
+    destroySession(req, res, () => res.json({ ok: true }));
+  });
+
+  /** Mở /logout trên trình duyệt cũng đăng xuất được (không chỉ nút UI). */
+  app.get('/logout', (req, res) => {
+    destroySession(req, res, () => res.redirect(302, '/'));
   });
 
   /** Review Link: proxy sang Cloudflare Worker (tránh CORS browser). */

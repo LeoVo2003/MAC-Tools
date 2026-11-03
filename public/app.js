@@ -326,8 +326,13 @@ loginForm.addEventListener('submit', async (e) => {
   }
 });
 
-logoutBtn.addEventListener('click', async () => {
-  await fetch('/api/logout', { method: 'POST' });
+logoutBtn?.addEventListener('click', async () => {
+  try {
+    await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' });
+  } catch {
+    /* vẫn về màn login */
+  }
+  disconnectSocket();
   showLoggedOut();
 });
 
@@ -2083,13 +2088,7 @@ document.getElementById('qrFillBtn')?.addEventListener('click', async () => {
       document.getElementById('qrSocialYoutubeRow').hidden = false;
       document.getElementById('qrEditYoutube').value = social.youtube;
     }
-    // (5.1#6) Prefill Homepage link từ websiteUrl của WPM
-    const homeInput = document.getElementById('qrHomeLink');
-    const siteUrl = data.websiteUrl || data.website || '';
-    if (homeInput && siteUrl && !homeInput.value.trim()) {
-      homeInput.value = siteUrl;
-      qrLog(`Homepage: tự điền từ WPM (${siteUrl})`);
-    }
+    // Homepage / Menu link: user tự điền, không prefill từ WPM.
     // Cập nhật tóm tắt social
     const sumEl = document.getElementById('qrSocialSummary');
     if (sumEl) {
