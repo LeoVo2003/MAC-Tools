@@ -2220,5 +2220,3 @@ document.getElementById('qrFillBtn')?.addEventListener('click', async () => {
   }
 });
 
-/* ============ Untitled UI-style Color Picker (vanilla) ============ */
-

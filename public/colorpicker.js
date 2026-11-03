@@ -1,784 +1,849 @@
-/* QR Color Picker — Untitled UI style (Solid + Gradient), dialog dùng chung.
- * Mở khi click vào ô input hoặc swatch. Không dùng Tailwind. */
+/* QR Color Picker — Untitled UI style (Solid + Gradient).
+ * Popup nhỏ dưới ô màu, áp dụng trực tiếp khi chỉnh. Output luôn là #RRGGBB(AA) hoặc *-gradient(... #hex %). */
 (function () {
   'use strict';
 
-  /* ================= Color math (HSB) + vector 2D ================= */
-  const CM = {
-    clamp(v, min, max) { return Math.min(max, Math.max(min, v)); },
-    lerp(a, b, t) { return a + (b - a) * t; },
-    lerpPoint(p1, p2, t) {
-      return { x: this.lerp(p1.x, p2.x, t), y: this.lerp(p1.y, p2.y, t) };
-    },
-    // Kéo dài đường thẳng qua p1→p2 ra tới biên [0,100]² (port từ bản gốc)
-    extendLineToEdges(p1, p2) {
-      let dx = p2.x - p1.x, dy = p2.y - p1.y;
-      if (Math.hypot(dx, dy) < 0.001) { dx = 1; dy = 1; }
-      let tMin = -Infinity, tMax = Infinity;
-      if (Math.abs(dx) > 1e-6) {
-        const tx0 = (0 - p1.x) / dx, tx1 = (100 - p1.x) / dx;
-        tMin = Math.max(tMin, Math.min(tx0, tx1));
-        tMax = Math.min(tMax, Math.max(tx0, tx1));
-      }
-      if (Math.abs(dy) > 1e-6) {
-        const ty0 = (0 - p1.y) / dy, ty1 = (100 - p1.y) / dy;
-        tMin = Math.max(tMin, Math.min(ty0, ty1));
-        tMax = Math.min(tMax, Math.max(ty0, ty1));
-      }
-      return {
-        start: { x: this.clamp(p1.x + tMin * dx, 0, 100), y: this.clamp(p1.y + tMin * dy, 0, 100) },
-        end: { x: this.clamp(p1.x + tMax * dx, 0, 100), y: this.clamp(p1.y + tMax * dy, 0, 100) },
-      };
-    },
-    projectPointOntoLine(pt, start, end) {
-      const dx = end.x - start.x, dy = end.y - start.y;
-      const lenSq = dx * dx + dy * dy;
-      if (lenSq < 1e-6) return 0;
-      return this.clamp(((pt.x - start.x) * dx + (pt.y - start.y) * dy) / lenSq, 0, 1);
-    },
-    hsbToRgb(h, s, b) {
-      h = ((h % 360) + 360) % 360;
-      s = this.clamp(s, 0, 100) / 100;
-      b = this.clamp(b, 0, 100) / 100;
-      const k = (n) => (n + h / 60) % 6;
-      const f = (n) => b * (1 - s * Math.max(0, Math.min(k(n), 4 - k(n), 1)));
-      return {
-        r: Math.round(255 * f(5)),
-        g: Math.round(255 * f(3)),
-        b: Math.round(255 * f(1)),
-      };
-    },
-    rgbToHsb(r, g, b) {
-      r = this.clamp(r, 0, 255) / 255;
-      g = this.clamp(g, 0, 255) / 255;
-      b = this.clamp(b, 0, 255) / 255;
-      const max = Math.max(r, g, b), min = Math.min(r, g, b);
-      const d = max - min;
-      let h = 0;
-      const sv = max === 0 ? 0 : d / max;
-      const vv = max;
-      if (d !== 0) {
-        if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) * 60;
-        else if (max === g) h = ((b - r) / d + 2) * 60;
-        else h = ((r - g) / d + 4) * 60;
-      }
-      return { h: Math.round(h), s: Math.round(sv * 100), b: Math.round(vv * 100) };
-    },
-    rgbToHex(r, g, b) {
-      const hx = (n) => this.clamp(Math.round(n), 0, 255).toString(16).padStart(2, '0').toUpperCase();
-      return '#' + hx(r) + hx(g) + hx(b);
-    },
-    hsbaToHex(h, s, b, a) {
-      const { r, g, b: bb } = this.hsbToRgb(h, s, b);
-      let hex = this.rgbToHex(r, g, bb);
-      if (a < 1) hex += Math.round(a * 255).toString(16).padStart(2, '0').toUpperCase();
-      return hex;
-    },
-    hsbaToCss(h, s, b, a) {
-      const { r, g, b: bb } = this.hsbToRgb(h, s, b);
-      return a >= 1 ? `rgb(${r},${g},${bb})` : `rgba(${r},${g},${bb},${+a.toFixed(2)})`;
-    },
-    parseHex8(str) {
-      const m = /^#?([0-9a-fA-F]{6})([0-9a-fA-F]{2})?$/.exec(String(str || '').trim());
-      if (!m) return null;
-      const r = parseInt(m[1].slice(0, 2), 16);
-      const g = parseInt(m[1].slice(2, 4), 16);
-      const b = parseInt(m[1].slice(4, 6), 16);
-      const hsb = this.rgbToHsb(r, g, b);
-      hsb.a = m[2] ? parseInt(m[2], 16) / 255 : 1;
-      return hsb;
-    },
-    parseGradient(str) {
-      // linear/radial/conic-gradient(...) — stops dạng #RRGGBB(AA) + %
-      const m = String(str).match(/(linear|radial|conic)-gradient\((.*)\)\s*$/s);
-      if (!m) return null;
-      let type = m[1] === 'conic' ? 'angular' : m[1];
-      const inner = m[2];
-      const parts = [];
-      let depth = 0, cur = '';
-      for (const ch of inner) {
-        if (ch === '(') depth++;
-        if (ch === ')') depth--;
-        if (ch === ',' && depth === 0) { parts.push(cur.trim()); cur = ''; }
-        else cur += ch;
-      }
-      if (cur.trim()) parts.push(cur.trim());
-      let angle = 135, startIdx = 0;
-      const degM = parts[0] && parts[0].match(/(\d+)\s*deg/);
-      if (degM) { angle = +degM[1]; startIdx = 1; }
-      else if (parts[0] && /circle|ellipse|at\s|from\s/i.test(parts[0])) {
-        startIdx = 1;
-        // conic at X% Y% (không phải 50% 50%) → diamond
-        if (type === 'angular') {
-          const atM = parts[0].match(/at\s+(\d+)%\s+(\d+)%/i);
-          if (atM && (+atM[1] !== 50 || +atM[2] !== 50)) type = 'diamond';
-        }
-      }
-      const stops = [];
-      for (let i = startIdx; i < parts.length; i++) {
-        const pm = parts[i].match(/(#[0-9a-fA-F]{6,8}|rgba?\([^)]+\))\s*(\d+(?:\.\d+)?)?\s*%?/);
-        if (!pm) continue;
-        const color = pm[1];
-        const pos = pm[2] !== undefined && pm[2] !== '' ? +pm[2] : (i === startIdx ? 0 : 100);
-        let hsb = { h: 0, s: 0, b: 0, a: 1 };
-        if (color[0] === '#') {
-          const p = this.parseHex8(color);
-          if (p) hsb = p;
-        } else {
-          const cm = color.match(/rgba?\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\)/);
-          if (cm) {
-            const h = this.rgbToHsb(+cm[1], +cm[2], +cm[3]);
-            hsb = { h: h.h, s: h.s, b: h.b, a: cm[4] !== undefined ? +cm[4] : 1 };
-          }
-        }
-        stops.push({ pos, h: hsb.h, s: hsb.s, b: hsb.b, a: hsb.a });
-      }
-      if (stops.length < 2) return null;
-      stops.sort((x, y) => x.pos - y.pos);
-      return { type, angle, stops };
-    },
-  };
+  /* ================= Color math ================= */
+  const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const lerpPt = (p, q, t) => ({ x: lerp(p.x, q.x, t), y: lerp(p.y, q.y, t) });
+
+  function hsbToRgb(h, s, b) {
+    h = ((h % 360) + 360) % 360;
+    s = clamp(s, 0, 100) / 100; b = clamp(b, 0, 100) / 100;
+    const k = (n) => (n + h / 60) % 6;
+    const f = (n) => b * (1 - s * Math.max(0, Math.min(k(n), 4 - k(n), 1)));
+    return { r: Math.round(255 * f(5)), g: Math.round(255 * f(3)), b: Math.round(255 * f(1)) };
+  }
+  function rgbToHsb(r, g, b) {
+    r = clamp(r, 0, 255) / 255; g = clamp(g, 0, 255) / 255; b = clamp(b, 0, 255) / 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+    let h = 0;
+    if (d !== 0) {
+      if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) * 60;
+      else if (max === g) h = ((b - r) / d + 2) * 60;
+      else h = ((r - g) / d + 4) * 60;
+    }
+    return { h, s: max === 0 ? 0 : (d / max) * 100, b: max * 100 };
+  }
+  function hsbToHsl(h, s, b) {
+    s /= 100; b /= 100;
+    const l = b * (1 - s / 2);
+    const sl = l === 0 || l === 1 ? 0 : (b - l) / Math.min(l, 1 - l);
+    return { h, s: sl * 100, l: l * 100 };
+  }
+  function hslToHsb(h, s, l) {
+    s /= 100; l /= 100;
+    const v = l + s * Math.min(l, 1 - l);
+    return { h, s: v === 0 ? 0 : 2 * (1 - l / v) * 100, b: v * 100 };
+  }
+  const hx = (n) => clamp(Math.round(n), 0, 255).toString(16).padStart(2, '0').toUpperCase();
+  function toHex(c) {
+    const { r, g, b } = hsbToRgb(c.h, c.s, c.b);
+    return '#' + hx(r) + hx(g) + hx(b) + (c.a < 1 ? hx(c.a * 255) : '');
+  }
+  function toCss(c) {
+    const { r, g, b } = hsbToRgb(c.h, c.s, c.b);
+    return c.a >= 1 ? `rgb(${r},${g},${b})` : `rgba(${r},${g},${b},${+c.a.toFixed(2)})`;
+  }
+  function parseColor(str) {
+    const s = String(str || '').trim();
+    let m = /^#?([0-9a-f]{3})$/i.exec(s);
+    const full = m ? m[1].split('').map((c) => c + c).join('') : null;
+    m = /^#?([0-9a-f]{6})([0-9a-f]{2})?$/i.exec(full || s);
+    if (m) {
+      const n = parseInt(m[1], 16);
+      return { ...rgbToHsb(n >> 16, (n >> 8) & 255, n & 255), a: m[2] ? parseInt(m[2], 16) / 255 : 1 };
+    }
+    m = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)$/i.exec(s);
+    if (m) return { ...rgbToHsb(+m[1], +m[2], +m[3]), a: m[4] !== undefined ? clamp(+m[4], 0, 1) : 1 };
+    return null;
+  }
+
+  /* ================= Gradient geometry ================= */
+  function extendLine(p1, p2) {
+    let dx = p2.x - p1.x, dy = p2.y - p1.y;
+    if (Math.hypot(dx, dy) < 0.001) { dx = 1; dy = 1; }
+    let tMin = -Infinity, tMax = Infinity;
+    if (Math.abs(dx) > 1e-6) {
+      const a = -p1.x / dx, b = (100 - p1.x) / dx;
+      tMin = Math.max(tMin, Math.min(a, b)); tMax = Math.min(tMax, Math.max(a, b));
+    }
+    if (Math.abs(dy) > 1e-6) {
+      const a = -p1.y / dy, b = (100 - p1.y) / dy;
+      tMin = Math.max(tMin, Math.min(a, b)); tMax = Math.min(tMax, Math.max(a, b));
+    }
+    return {
+      start: { x: clamp(p1.x + tMin * dx, 0, 100), y: clamp(p1.y + tMin * dy, 0, 100) },
+      end: { x: clamp(p1.x + tMax * dx, 0, 100), y: clamp(p1.y + tMax * dy, 0, 100) },
+    };
+  }
+  function project(pt, a, b) {
+    const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy;
+    return l2 < 1e-6 ? 0 : clamp(((pt.x - a.x) * dx + (pt.y - a.y) * dy) / l2, 0, 1);
+  }
+  const angleOf = (a, b) => (((Math.round((Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI + 90)) % 360) + 360) % 360;
+  // Đường qua tâm theo góc, kéo ra tới biên; điểm đầu/cuối nằm ở 12% và 88% của đường đó
+  function endpointsFromAngle(angle) {
+    const rad = ((angle - 90) * Math.PI) / 180;
+    const ext = extendLine({ x: 50, y: 50 }, { x: 50 + Math.cos(rad) * 10, y: 50 + Math.sin(rad) * 10 });
+    return { a: lerpPt(ext.start, ext.end, 0.12), b: lerpPt(ext.start, ext.end, 0.88) };
+  }
 
   /* ================= State ================= */
-  const S = {
-    target: null, // { input, swatch, onChange }
-    mode: 'solid',
-    solid: { h: 0, s: 100, b: 100, a: 1 },
-    grad: {
-      type: 'linear', angle: 135, active: 0,
-      pStart: { x: 12, y: 12 },
-      pEnd: { x: 88, y: 88 },
+  let uid = 0;
+  const newStop = (pos, c) => ({ id: ++uid, pos, h: c.h, s: c.s, b: c.b, a: c.a });
+  const BRAND = parseColor('#E31E24');
+  const DEFAULT_SOLID = () => ({ ...BRAND });
+  function defaultGrad() {
+    const g = {
+      type: 'linear', angle: 135, activeId: 0,
+      pStart: { x: 12, y: 12 }, pEnd: { x: 88, y: 88 },
       line: { start: { x: 0, y: 0 }, end: { x: 100, y: 100 } },
-      stops: [
-        { pos: 0, h: 0, s: 100, b: 100, a: 1 },
-        { pos: 100, h: 0, s: 100, b: 60, a: 1 },
-      ],
-    },
+      stops: [newStop(12, BRAND), newStop(88, { ...BRAND, b: BRAND.b * 0.5 })],
+    };
+    g.activeId = g.stops[0].id;
+    return g;
+  }
+  const S = {
+    target: null, mode: 'solid', format: 'hex', dirty: false,
+    solid: DEFAULT_SOLID(), grad: defaultGrad(),
   };
 
-  /* 2D helpers cho gradient (port từ bản gốc) */
-  function endpointsToAngle(start, end) {
-    const dx = end.x - start.x, dy = end.y - start.y;
-    const deg = Math.round((Math.atan2(dy, dx) * 180) / Math.PI + 90);
-    return ((deg % 360) + 360) % 360;
+  const SAVED_KEY = 'qrCpSaved.v1';
+  const SAVED_DEFAULT = {
+    solid: ['#E31E24', '#F79009', '#12B76A', '#1877F2', '#7F56D9', '#EE46BC', '#101828', '#FFFFFF'],
+    grad: [
+      'linear-gradient(135deg, #E31E24 0%, #7A0F14 100%)',
+      'linear-gradient(135deg, #F79009 0%, #E31E24 100%)',
+      'linear-gradient(135deg, #1877F2 0%, #7F56D9 100%)',
+      'linear-gradient(135deg, #12B76A 0%, #1877F2 100%)',
+      'linear-gradient(135deg, #101828 0%, #475467 100%)',
+    ],
+  };
+  function loadSaved() {
+    try {
+      const v = JSON.parse(localStorage.getItem(SAVED_KEY));
+      if (v && Array.isArray(v.solid) && Array.isArray(v.grad)) return v;
+    } catch { /* ignore */ }
+    return { solid: [...SAVED_DEFAULT.solid], grad: [...SAVED_DEFAULT.grad] };
   }
-  function getStop2DPoint(index) {
+  const saved = loadSaved();
+  const persistSaved = () => { try { localStorage.setItem(SAVED_KEY, JSON.stringify(saved)); } catch { /* ignore */ } };
+
+  const sortedStops = () => [...S.grad.stops].sort((a, b) => a.pos - b.pos);
+  const activeStop = () => S.grad.stops.find((s) => s.id === S.grad.activeId) || S.grad.stops[0];
+
+  function sortStopsInPlace() { S.grad.stops.sort((a, b) => a.pos - b.pos); }
+  // Sau khi đổi pos của stop đầu/cuối: đưa pStart/pEnd về đúng vị trí trên line
+  function syncEndpointsFromPos() {
     const g = S.grad, all = g.stops;
-    if (index === 0) return { ...g.pStart };
-    if (index === all.length - 1) return { ...g.pEnd };
-    const firstPos = all[0].pos, lastPos = all[all.length - 1].pos;
-    const span = Math.max(1, lastPos - firstPos);
-    const relT = CM.clamp((all[index].pos - firstPos) / span, 0, 1);
-    return CM.lerpPoint(g.pStart, g.pEnd, relT);
+    sortStopsInPlace();
+    g.pStart = lerpPt(g.line.start, g.line.end, all[0].pos / 100);
+    g.pEnd = lerpPt(g.line.start, g.line.end, all[all.length - 1].pos / 100);
   }
-  function syncLineFromEndpoints(newPStart, newPEnd) {
+  function stop2D(index) {
     const g = S.grad, all = g.stops;
-    const oldSpan = Math.max(1, all[all.length - 1].pos - all[0].pos);
-    const innerFractions = all.map((st, idx) => {
-      if (idx === 0) return 0;
-      if (idx === all.length - 1) return 1;
-      return CM.clamp((st.pos - all[0].pos) / oldSpan, 0.02, 0.98);
-    });
-    g.pStart = { x: CM.clamp(newPStart.x, 0, 100), y: CM.clamp(newPStart.y, 0, 100) };
-    g.pEnd = { x: CM.clamp(newPEnd.x, 0, 100), y: CM.clamp(newPEnd.y, 0, 100) };
-    const ext = CM.extendLineToEdges(g.pStart, g.pEnd);
-    g.line.start = ext.start; g.line.end = ext.end;
-    g.angle = endpointsToAngle(g.pStart, g.pEnd);
-    const t0 = CM.projectPointOntoLine(g.pStart, g.line.start, g.line.end);
-    const t1 = CM.projectPointOntoLine(g.pEnd, g.line.start, g.line.end);
-    all[0].pos = Math.round(t0 * 100);
-    all[all.length - 1].pos = Math.max(all[0].pos + 1, Math.round(t1 * 100));
-    const newSpan = Math.max(1, all[all.length - 1].pos - all[0].pos);
-    all.forEach((st, idx) => {
-      if (idx > 0 && idx < all.length - 1) {
-        st.pos = CM.clamp(
-          Math.round(all[0].pos + innerFractions[idx] * newSpan),
-          all[0].pos + 1, all[all.length - 1].pos - 1);
+    if (index === 0) return g.pStart;
+    if (index === all.length - 1) return g.pEnd;
+    const span = Math.max(1, all[all.length - 1].pos - all[0].pos);
+    return lerpPt(g.pStart, g.pEnd, clamp((all[index].pos - all[0].pos) / span, 0, 1));
+  }
+  function syncLineFromEndpoints(pS, pE) {
+    const g = S.grad, all = g.stops;
+    sortStopsInPlace();
+    const span0 = Math.max(1, all[all.length - 1].pos - all[0].pos);
+    const frac = all.map((st, i) => (i === 0 ? 0 : i === all.length - 1 ? 1 : clamp((st.pos - all[0].pos) / span0, 0.02, 0.98)));
+    g.pStart = { x: clamp(pS.x, 0, 100), y: clamp(pS.y, 0, 100) };
+    g.pEnd = { x: clamp(pE.x, 0, 100), y: clamp(pE.y, 0, 100) };
+    const ext = extendLine(g.pStart, g.pEnd);
+    g.line = { start: ext.start, end: ext.end };
+    g.angle = angleOf(g.pStart, g.pEnd);
+    all[0].pos = Math.round(project(g.pStart, ext.start, ext.end) * 100);
+    all[all.length - 1].pos = Math.max(all[0].pos + 1, Math.round(project(g.pEnd, ext.start, ext.end) * 100));
+    const span = Math.max(1, all[all.length - 1].pos - all[0].pos);
+    all.forEach((st, i) => {
+      if (i > 0 && i < all.length - 1) {
+        st.pos = clamp(Math.round(all[0].pos + frac[i] * span), all[0].pos + 1, all[all.length - 1].pos - 1);
       }
     });
   }
+  function setAngle(angle) {
+    const p = endpointsFromAngle(angle);
+    syncLineFromEndpoints(p.a, p.b);
+    S.grad.angle = ((Math.round(angle) % 360) + 360) % 360;
+  }
+  function interpolateAt(pos) {
+    const all = sortedStops();
+    if (pos <= all[0].pos) return { ...all[0] };
+    if (pos >= all[all.length - 1].pos) return { ...all[all.length - 1] };
+    for (let i = 0; i < all.length - 1; i++) {
+      const a = all[i], b = all[i + 1];
+      if (pos >= a.pos && pos <= b.pos) {
+        const t = (pos - a.pos) / Math.max(1, b.pos - a.pos);
+        const ra = hsbToRgb(a.h, a.s, a.b), rb = hsbToRgb(b.h, b.s, b.b);
+        const hsb = rgbToHsb(lerp(ra.r, rb.r, t), lerp(ra.g, rb.g, t), lerp(ra.b, rb.b, t));
+        return { ...hsb, a: lerp(a.a, b.a, t) };
+      }
+    }
+    return { ...all[0] };
+  }
 
-  /* ================= DOM (build 1 lần) ================= */
-  // Popup nhỏ absolute dưới ô màu — KHÔNG dùng backdrop fullscreen
+  /* ================= CSS output / parse ================= */
+  function stopsCss() { return sortedStops().map((st) => `${toHex(st)} ${Math.round(st.pos)}%`).join(', '); }
+  function gradientCss() {
+    const g = S.grad, parts = stopsCss();
+    if (g.type === 'radial') return `radial-gradient(circle at 50% 50%, ${parts})`;
+    if (g.type === 'angular') return `conic-gradient(from ${g.angle}deg at 50% 50%, ${parts})`;
+    if (g.type === 'diamond') return `conic-gradient(from ${g.angle}deg at ${Math.round(g.pStart.x)}% ${Math.round(g.pStart.y)}%, ${parts})`;
+    return `linear-gradient(${g.angle}deg, ${parts})`;
+  }
+  const currentValue = () => (S.mode === 'solid' ? toHex(S.solid) : gradientCss());
+
+  function parseGradient(str) {
+    const m = String(str).match(/(linear|radial|conic)-gradient\((.*)\)\s*$/is);
+    if (!m) return null;
+    let type = m[1] === 'conic' ? 'angular' : m[1];
+    const parts = [];
+    let depth = 0, cur = '';
+    for (const ch of m[2]) {
+      if (ch === '(') depth++;
+      if (ch === ')') depth--;
+      if (ch === ',' && depth === 0) { parts.push(cur.trim()); cur = ''; } else cur += ch;
+    }
+    if (cur.trim()) parts.push(cur.trim());
+    let angle = 135, from = 0;
+    const deg = parts[0] && parts[0].match(/(-?\d+(?:\.\d+)?)\s*deg/);
+    if (deg) { angle = ((Math.round(+deg[1]) % 360) + 360) % 360; from = 1; }
+    else if (parts[0] && /circle|ellipse|at\s|from\s/i.test(parts[0])) from = 1;
+    if (from && type === 'angular') {
+      const at = parts[0].match(/at\s+(\d+)%\s+(\d+)%/i);
+      if (at && (+at[1] !== 50 || +at[2] !== 50)) type = 'diamond';
+    }
+    const stops = [];
+    for (let i = from; i < parts.length; i++) {
+      const pm = parts[i].match(/(#[0-9a-fA-F]{3,8}|rgba?\([^)]+\))\s*(\d+(?:\.\d+)?)?\s*%?/);
+      if (!pm) continue;
+      const c = parseColor(pm[1]);
+      if (!c) continue;
+      stops.push(newStop(pm[2] !== undefined ? clamp(+pm[2], 0, 100) : (i === from ? 0 : 100), c));
+    }
+    if (stops.length < 2) return null;
+    stops.sort((a, b) => a.pos - b.pos);
+    return { type, angle, stops };
+  }
+  function applyGradientValue(str) {
+    const p = parseGradient(str);
+    if (!p) return false;
+    const g = S.grad;
+    g.type = p.type; g.stops = p.stops; g.activeId = p.stops[0].id;
+    const e = endpointsFromAngle(p.angle);
+    const first = p.stops[0].pos, last = p.stops[p.stops.length - 1].pos;
+    g.pStart = e.a; g.pEnd = e.b;
+    const ext = extendLine(e.a, e.b);
+    g.line = { start: ext.start, end: ext.end };
+    g.angle = p.angle;
+    // đặt pos stop đầu/cuối theo pos đã lưu (không nén lại 0-100)
+    g.pStart = lerpPt(ext.start, ext.end, first / 100);
+    g.pEnd = lerpPt(ext.start, ext.end, last / 100);
+    return true;
+  }
+
+  /* ================= DOM ================= */
+  const ICON = {
+    eye: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2 22 1-1h3l9-9"/><path d="M3 21v-3l9-9"/><path d="m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8a2.1 2.1 0 1 1 3-3l.4.4Z"/></svg>',
+    swap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>',
+    plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+    minus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12h14"/></svg>',
+  };
+  const HAS_EYEDROPPER = typeof window.EyeDropper === 'function';
+  const eyeBtn = (id) => `<button type="button" id="${id}" class="cp-icon-btn" title="Lấy màu từ màn hình" aria-label="Lấy màu từ màn hình" ${HAS_EYEDROPPER ? '' : 'hidden'}>${ICON.eye}</button>`;
+
   const pop = document.createElement('div');
   pop.className = 'qr-cp-pop';
   pop.hidden = true;
   pop.innerHTML = `
-    <div class="uui-cp-dialog" role="dialog" aria-label="Chọn màu">
-      <div class="uui-tabs-list" role="tablist" aria-label="Kiểu màu">
-        <button type="button" class="uui-tab-trigger" data-mode="solid" data-active="true" role="tab" aria-selected="true">Solid</button>
-        <button type="button" class="uui-tab-trigger" data-mode="gradient" data-active="false" role="tab" aria-selected="false">Gradient</button>
+    <div class="cp-dialog" role="dialog" aria-label="Chọn màu">
+      <div class="cp-tabs" role="tablist">
+        <button type="button" class="cp-tab" data-mode="solid" role="tab">Solid</button>
+        <button type="button" class="cp-tab" data-mode="gradient" role="tab">Gradient</button>
       </div>
 
-      <!-- SOLID -->
-      <div id="qr-cp-pane-solid">
-        <div id="qr-cp-solid-area" class="uui-cp-area" tabindex="0" role="slider" aria-label="Độ bão hòa và độ sáng">
-          <div class="uui-cp-area-white"></div>
-          <div class="uui-cp-area-black"></div>
-          <div id="qr-cp-solid-thumb" class="uui-cp-thumb"></div>
+      <div class="cp-pane" data-pane="solid">
+        <div id="s-area" class="cp-area" tabindex="0" role="slider" aria-label="Độ bão hòa và độ sáng">
+          <div class="cp-area-white"></div><div class="cp-area-black"></div>
+          <div id="s-thumb" class="cp-thumb"></div>
         </div>
-        <div class="qr-cp-sliders">
-          <div id="qr-cp-solid-hue" class="uui-cp-slider uui-cp-hue-track" tabindex="0" role="slider" aria-label="Hue">
-            <div id="qr-cp-solid-hue-thumb" class="uui-cp-slider-thumb"></div>
+        <div class="cp-row">
+          ${eyeBtn('s-eye')}
+          <div class="cp-sliders">
+            <div id="s-hue" class="cp-slider cp-hue" tabindex="0" role="slider" aria-label="Hue"><div id="s-hue-t" class="cp-slider-thumb"></div></div>
+            <div id="s-alpha" class="cp-slider cp-check" tabindex="0" role="slider" aria-label="Độ trong suốt">
+              <div class="cp-slider-clip"><div id="s-alpha-f" class="cp-slider-fill"></div></div>
+              <div id="s-alpha-t" class="cp-slider-thumb"></div>
+            </div>
           </div>
-          <div id="qr-cp-solid-alpha" class="uui-cp-slider uui-checkerboard" tabindex="0" role="slider" aria-label="Độ trong suốt">
-            <div id="qr-cp-solid-alpha-grad" class="qr-cp-abs-fill"></div>
-            <div id="qr-cp-solid-alpha-thumb" class="uui-cp-slider-thumb"></div>
-          </div>
         </div>
-        <div class="uui-input-group">
-          <div class="uui-input-cell" data-position="first"><input id="qr-cp-solid-hex" class="qr-cp-mono" spellcheck="false" aria-label="Mã hex" placeholder="#E31E24"></div>
-          <div class="uui-input-cell" data-position="last"><input id="qr-cp-solid-alpha-inp" aria-label="Độ đục %" placeholder="100%"></div>
-        </div>
-        <div class="qr-cp-preview">
-          <span id="qr-cp-solid-preview" class="qr-cp-preview-dot uui-checkerboard"></span>
-          <code id="qr-cp-solid-code" class="qr-cp-mono"></code>
-        </div>
-      </div>
-
-      <!-- GRADIENT (giống bản gốc: 2D vector + type + slider + stops) -->
-      <div id="qr-cp-pane-gradient" hidden>
-        <div id="qr-cp-grad-2d" class="uui-cp-area uui-checkerboard qr-cp-grad-2d" role="group" aria-label="Hướng gradient và các điểm màu">
-          <div id="qr-cp-grad-2d-fill" class="qr-cp-grad-2d-fill"></div>
-          <svg id="qr-cp-grad-2d-svg" class="qr-cp-grad-2d-svg" aria-hidden="true">
-            <line id="qr-cp-grad-vector" x1="12%" y1="12%" x2="88%" y2="88%"
-              stroke="rgba(255,255,255,0.65)" stroke-width="2"
-              stroke-dasharray="3 5" stroke-linecap="round" />
-          </svg>
-          <div id="qr-cp-grad-2d-handles" class="qr-cp-grad-2d-handles"></div>
-        </div>
-        <div class="qr-cp-row">
-          <select id="qr-cp-grad-type" class="uui-select" aria-label="Kiểu gradient">
-            <option value="linear">Linear</option>
-            <option value="radial">Radial</option>
-            <option value="angular">Angular</option>
-            <option value="diamond">Diamond</option>
+        <div class="cp-row">
+          <select id="s-format" class="cp-select" aria-label="Định dạng màu">
+            <option value="hex">Hex</option><option value="rgb">RGB</option><option value="hsl">HSL</option>
           </select>
-          <div class="uui-input-cell" data-position="only" id="qr-cp-grad-angle-wrap" title="Góc (độ)">
-            <input id="qr-cp-grad-angle" inputmode="numeric" aria-label="Góc gradient">
-          </div>
-          <button type="button" id="qr-cp-grad-reverse" class="qr-cp-mini-btn" title="Đảo ngược gradient" aria-label="Đảo ngược gradient">⇄</button>
-          <button type="button" id="qr-cp-grad-add" class="qr-cp-mini-btn">+ Thêm</button>
+          <div id="s-inputs" class="cp-group"></div>
         </div>
-        <div id="qr-cp-grad-bar" class="uui-cp-slider uui-checkerboard" role="slider" aria-label="Vị trí các điểm màu">
-          <div id="qr-cp-grad-bar-fill" class="qr-cp-abs-fill"></div>
-          <div id="qr-cp-grad-handles"></div>
-        </div>
-        <div id="qr-cp-grad-stops"></div>
-        <div class="qr-cp-stop-editor">
-          <div class="qr-cp-stop-editor-head"><span id="qr-cp-grad-active-label">Điểm 1</span></div>
-          <div id="qr-cp-grad-area" class="uui-cp-area uui-cp-area-sm" tabindex="0" role="slider" aria-label="Màu điểm đang chọn">
-            <div class="uui-cp-area-white"></div>
-            <div class="uui-cp-area-black"></div>
-            <div id="qr-cp-grad-thumb" class="uui-cp-thumb"></div>
-          </div>
-          <div class="qr-cp-sliders">
-            <div id="qr-cp-grad-hue" class="uui-cp-slider uui-cp-hue-track" tabindex="0" role="slider" aria-label="Hue điểm đang chọn">
-              <div id="qr-cp-grad-hue-thumb" class="uui-cp-slider-thumb"></div>
-            </div>
-            <div id="qr-cp-grad-alpha" class="uui-cp-slider uui-checkerboard" tabindex="0" role="slider" aria-label="Độ trong suốt điểm đang chọn">
-              <div id="qr-cp-grad-alpha-grad" class="qr-cp-abs-fill"></div>
-              <div id="qr-cp-grad-alpha-thumb" class="uui-cp-slider-thumb"></div>
-            </div>
-          </div>
+        <div class="cp-section">
+          <div class="cp-section-head"><span>Đã lưu</span><button type="button" id="s-save" class="cp-add">${ICON.plus}<span>Thêm</span></button></div>
+          <div id="s-saved" class="cp-swatches"></div>
         </div>
       </div>
 
-      <div class="qr-cp-actions">
-        <button type="button" id="qr-cp-clear" class="qr-cp-btn qr-cp-btn-ghost">Xóa</button>
-        <span class="qr-cp-spacer"></span>
-        <button type="button" id="qr-cp-cancel" class="qr-cp-btn qr-cp-btn-ghost">Hủy</button>
-        <button type="button" id="qr-cp-apply" class="qr-cp-btn qr-cp-btn-primary">Chọn</button>
+      <div class="cp-pane" data-pane="gradient" hidden>
+        <div id="g-area" class="cp-area cp-grad-area cp-check" role="group" aria-label="Hướng gradient và các điểm màu">
+          <div id="g-fill" class="cp-grad-fill"></div>
+          <svg class="cp-grad-svg" aria-hidden="true">
+            <line id="g-line" stroke="rgba(255,255,255,.7)" stroke-width="2" stroke-dasharray="3 5" stroke-linecap="round"/>
+          </svg>
+          <div id="g-handles" class="cp-grad-handles"></div>
+        </div>
+        <div class="cp-row">
+          <select id="g-type" class="cp-select is-grow" aria-label="Kiểu gradient">
+            <option value="linear">Linear</option><option value="radial">Radial</option>
+            <option value="angular">Angular</option><option value="diamond">Diamond</option>
+          </select>
+          <div class="cp-cell is-solo" title="Góc (độ)"><input id="g-angle" inputmode="numeric" aria-label="Góc gradient"></div>
+          <button type="button" id="g-reverse" class="cp-icon-btn" title="Đảo ngược" aria-label="Đảo ngược gradient">${ICON.swap}</button>
+        </div>
+        <div id="g-bar" class="cp-slider cp-bar cp-check" role="group" aria-label="Vị trí các điểm màu (bấm để thêm)">
+          <div class="cp-slider-clip"><div id="g-bar-f" class="cp-slider-fill"></div></div>
+          <div id="g-bar-h"></div>
+        </div>
+        <div class="cp-stop-panel">
+          <div class="cp-stop-head">
+            <span id="g-stop-title" class="cp-stop-title">Stop #1</span>
+            <button type="button" id="g-eye" class="cp-link" ${HAS_EYEDROPPER ? '' : 'hidden'}>${ICON.eye}<span>Lấy màu</span></button>
+          </div>
+          <div id="g-hue" class="cp-slider cp-hue" tabindex="0" role="slider" aria-label="Hue điểm màu"><div id="g-hue-t" class="cp-slider-thumb"></div></div>
+          <div id="g-alpha" class="cp-slider cp-check" tabindex="0" role="slider" aria-label="Độ trong suốt điểm màu">
+            <div class="cp-slider-clip"><div id="g-alpha-f" class="cp-slider-fill"></div></div>
+            <div id="g-alpha-t" class="cp-slider-thumb"></div>
+          </div>
+        </div>
+        <div class="cp-section">
+          <div class="cp-section-head"><span>Điểm màu</span><button type="button" id="g-add" class="cp-add">${ICON.plus}<span>Thêm</span></button></div>
+          <div id="g-stops" class="cp-stops"></div>
+        </div>
+        <div class="cp-section">
+          <div class="cp-section-head"><span>Đã lưu</span><button type="button" id="g-save" class="cp-add">${ICON.plus}<span>Thêm</span></button></div>
+          <div id="g-saved" class="cp-swatches"></div>
+        </div>
+      </div>
+
+      <div class="cp-foot">
+        <button type="button" id="cp-clear" class="cp-btn cp-btn-ghost">Xóa màu</button>
+        <button type="button" id="cp-done" class="cp-btn cp-btn-primary">Xong</button>
       </div>
     </div>`;
   const $ = (id) => pop.querySelector('#' + id);
-  const dlg = pop.querySelector('.uui-cp-dialog');
-
-  /* ================= Helpers ================= */
-  function gradientCss() {
-    const g = S.grad;
-    const sorted = [...g.stops].sort((a, b) => a.pos - b.pos);
-    // Backend gradientStops() chỉ match #RRGGBB — dùng hex, không dùng rgb()
-    const parts = sorted.map((st) => `${CM.hsbaToHex(st.h, st.s, st.b, st.a)} ${Math.round(st.pos)}%`);
-    const cx = Math.round(g.pStart.x), cy = Math.round(g.pStart.y);
-    if (g.type === 'radial') return `radial-gradient(circle at 50% 50%, ${parts.join(', ')})`;
-    if (g.type === 'angular') return `conic-gradient(from ${g.angle}deg at 50% 50%, ${parts.join(', ')})`;
-    if (g.type === 'diamond') return `conic-gradient(from ${g.angle}deg at ${cx}% ${cy}%, ${parts.join(', ')})`;
-    return `linear-gradient(${g.angle}deg, ${parts.join(', ')})`;
-  }
-  function currentValue() {
-    const sl = S.solid;
-    return S.mode === 'solid' ? CM.hsbaToHex(sl.h, sl.s, sl.b, sl.a) : gradientCss();
-  }
-  function paintSwatch(swatchEl, val) {
-    if (!swatchEl) return;
-    swatchEl.classList.toggle('qr-cp-empty', !val);
-    swatchEl.style.background = val || '';
-  }
+  const MAX_STOPS = 6;
 
   /* ================= Render ================= */
-  function renderTabs() {
-    pop.querySelectorAll('.uui-tab-trigger').forEach((b) => {
-      const on = b.dataset.mode === S.mode;
-      b.dataset.active = on ? 'true' : 'false';
-      b.setAttribute('aria-selected', on ? 'true' : 'false');
-    });
-    $('qr-cp-pane-solid').hidden = S.mode !== 'solid';
-    $('qr-cp-pane-gradient').hidden = S.mode !== 'gradient';
+  const aGrad = (c) => {
+    const { r, g, b } = hsbToRgb(c.h, c.s, c.b);
+    return `linear-gradient(to right, rgba(${r},${g},${b},0), rgb(${r},${g},${b}))`;
+  };
+  function placeSliders(prefix, c) {
+    $(prefix + '-hue-t').style.left = (c.h / 360) * 100 + '%';
+    $(prefix + '-hue-t').style.background = `hsl(${c.h},100%,50%)`;
+    $(prefix + '-alpha-f').style.background = aGrad(c);
+    $(prefix + '-alpha-t').style.left = c.a * 100 + '%';
+    $(prefix + '-alpha-t').style.background = toCss(c);
   }
 
   function renderSolid() {
-    const sl = S.solid;
-    const hex = CM.hsbaToHex(sl.h, sl.s, sl.b, sl.a);
-    const rgb = CM.hsbToRgb(sl.h, sl.s, sl.b);
-    const area = $('qr-cp-solid-area'), thumb = $('qr-cp-solid-thumb');
-    area.style.backgroundColor = `hsl(${sl.h},100%,50%)`;
-    thumb.style.left = sl.s + '%';
-    thumb.style.top = (100 - sl.b) + '%';
-    thumb.style.backgroundColor = CM.rgbToHex(rgb.r, rgb.g, rgb.b);
-    const hueThumb = $('qr-cp-solid-hue-thumb');
-    hueThumb.style.left = (sl.h / 360 * 100) + '%';
-    hueThumb.style.backgroundColor = `hsl(${sl.h},100%,50%)`;
-    $('qr-cp-solid-alpha-grad').style.background =
-      `linear-gradient(to right, rgba(${rgb.r},${rgb.g},${rgb.b},0), rgba(${rgb.r},${rgb.g},${rgb.b},1))`;
-    const aThumb = $('qr-cp-solid-alpha-thumb');
-    aThumb.style.left = (sl.a * 100) + '%';
-    aThumb.style.backgroundColor = CM.hsbaToCss(sl.h, sl.s, sl.b, sl.a);
-    const hexInp = $('qr-cp-solid-hex'), aInp = $('qr-cp-solid-alpha-inp');
-    if (document.activeElement !== hexInp) hexInp.value = hex;
-    if (document.activeElement !== aInp) aInp.value = Math.round(sl.a * 100) + '%';
-    $('qr-cp-solid-preview').style.background = CM.hsbaToCss(sl.h, sl.s, sl.b, sl.a);
-    $('qr-cp-solid-code').textContent = hex;
+    const c = S.solid;
+    $('s-area').style.backgroundColor = `hsl(${c.h},100%,50%)`;
+    $('s-thumb').style.left = c.s + '%';
+    $('s-thumb').style.top = 100 - c.b + '%';
+    $('s-thumb').style.background = toCss({ ...c, a: 1 });
+    placeSliders('s', c);
+    $('s-format').value = S.format;
+    renderSolidInputs();
+    renderSwatches('solid');
   }
 
-  function renderGradient() {
-    const g = S.grad;
-    const css = gradientCss();
-    $('qr-cp-grad-type').value = g.type;
-    const angleInp = $('qr-cp-grad-angle');
-    if (document.activeElement !== angleInp) angleInp.value = g.angle + '°';
-    // Bar ngang luôn hiện linear 90deg để dễ kéo stops
-    const sorted = [...g.stops].sort((a, b) => a.pos - b.pos);
-    $('qr-cp-grad-bar-fill').style.background =
-      `linear-gradient(90deg, ${sorted.map((st) => `${CM.hsbaToHex(st.h, st.s, st.b, st.a)} ${Math.round(st.pos)}%`).join(', ')})`;
-    renderGrad2D(css);
-    renderGradHandles();
-    renderGradStops();
-    renderGradEditor();
+  // Ô nhập theo định dạng: Hex | RGB | HSL (+ alpha %)
+  function solidFieldValues() {
+    const c = S.solid, rgb = hsbToRgb(c.h, c.s, c.b), hsl = hsbToHsl(c.h, c.s, c.b);
+    const a = Math.round(c.a * 100) + '%';
+    if (S.format === 'rgb') return [rgb.r, rgb.g, rgb.b, a];
+    if (S.format === 'hsl') return [Math.round(hsl.h), Math.round(hsl.s), Math.round(hsl.l), a];
+    return [toHex({ ...c, a: 1 }), a];
   }
-
-  // 2D vector area: fill gradient + đường dashed nối pStart→pEnd + handles kéo 2D
-  function renderGrad2D(css) {
-    const g = S.grad;
-    $('qr-cp-grad-2d-fill').style.background = css;
-    const line = $('qr-cp-grad-vector');
-    line.setAttribute('x1', g.pStart.x + '%');
-    line.setAttribute('y1', g.pStart.y + '%');
-    line.setAttribute('x2', g.pEnd.x + '%');
-    line.setAttribute('y2', g.pEnd.y + '%');
-    const wrap = $('qr-cp-grad-2d-handles');
-    wrap.innerHTML = '';
-    g.stops.forEach((st, idx) => {
-      const pt = getStop2DPoint(idx);
-      const h = document.createElement('button');
-      h.type = 'button';
-      h.className = 'uui-grad-handle';
-      h.style.left = pt.x + '%';
-      h.style.top = pt.y + '%';
-      h.style.background = CM.hsbaToCss(st.h, st.s, st.b, st.a);
-      h.dataset.active = idx === g.active ? 'true' : 'false';
-      h.setAttribute('aria-label', `Điểm màu ${idx + 1} (${Math.round(st.pos)}%)`);
-      h.addEventListener('pointerdown', (e) => start2DStopDrag(e, idx, h));
-      wrap.appendChild(h);
-    });
-  }
-
-  // Kéo handle trên mặt phẳng 2D (port từ bản gốc)
-  function start2DStopDrag(e, idx, handleEl) {
-    e.stopPropagation();
-    e.preventDefault();
-    const g = S.grad;
-    g.active = idx;
-    handleEl.dataset.dragging = 'true';
-    const areaEl = $('qr-cp-grad-2d');
-    const isFirst = idx === 0, isLast = idx === g.stops.length - 1;
-    const endSnapshot = { ...g.pEnd };
-    const startSnapshot = { ...g.pStart };
-    renderGradient();
-    const move = (ev) => {
-      const rect = areaEl.getBoundingClientRect();
-      if (!rect.width || !rect.height) return;
-      const px = CM.clamp(((ev.clientX - rect.left) / rect.width) * 100, 0, 100);
-      const py = CM.clamp(((ev.clientY - rect.top) / rect.height) * 100, 0, 100);
-      if (isFirst) {
-        if (Math.hypot(px - endSnapshot.x, py - endSnapshot.y) < 3) return;
-        syncLineFromEndpoints({ x: px, y: py }, endSnapshot);
-      } else if (isLast) {
-        if (Math.hypot(px - startSnapshot.x, py - startSnapshot.y) < 3) return;
-        syncLineFromEndpoints(startSnapshot, { x: px, y: py });
-      } else {
-        // Điểm giữa: trượt % dọc vector + tịnh tiến vector theo chuột
-        const t = CM.projectPointOntoLine({ x: px, y: py }, g.line.start, g.line.end);
-        const sorted = [...g.stops].sort((a, b) => a.pos - b.pos);
-        const firstPos = sorted[0].pos, lastPos = sorted[sorted.length - 1].pos;
-        g.stops[idx].pos = CM.clamp(Math.round(firstPos + t * (lastPos - firstPos)), firstPos + 1, lastPos - 1);
-      }
-      renderGradient();
-    };
-    const up = () => {
-      handleEl.dataset.dragging = 'false';
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-      window.removeEventListener('pointercancel', up);
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-    window.addEventListener('pointercancel', up);
-  }
-
-  function renderGradHandles() {
-    const g = S.grad;
-    const wrap = $('qr-cp-grad-handles');
-    wrap.innerHTML = '';
-    const sorted = [...g.stops].sort((a, b) => a.pos - b.pos);
-    sorted.forEach((st) => {
-      const idx = g.stops.indexOf(st);
-      const h = document.createElement('button');
-      h.type = 'button';
-      h.className = 'uui-grad-handle';
-      h.style.left = st.pos + '%';
-      h.style.top = '50%';
-      h.style.background = CM.hsbaToCss(st.h, st.s, st.b, st.a);
-      h.dataset.active = idx === g.active ? 'true' : 'false';
-      h.setAttribute('aria-label', `Điểm màu ${Math.round(st.pos)}%`);
-      h.addEventListener('pointerdown', (e) => {
-        e.stopPropagation();
-        e.preventDefault();
-        g.active = idx;
-        renderGradient();
-        const bar = $('qr-cp-grad-bar');
-        const move = (ev) => {
-          const rect = bar.getBoundingClientRect();
-          st.pos = CM.clamp(((ev.clientX - rect.left) / rect.width) * 100, 0, 100);
-          renderGradient();
-        };
-        const up = () => {
-          window.removeEventListener('pointermove', move);
-          window.removeEventListener('pointerup', up);
-          window.removeEventListener('pointercancel', up);
-        };
-        window.addEventListener('pointermove', move);
-        window.addEventListener('pointerup', up);
-        window.addEventListener('pointercancel', up);
+  let builtFormat = '';
+  function renderSolidInputs() {
+    const box = $('s-inputs');
+    const vals = solidFieldValues();
+    if (builtFormat !== S.format) {
+      builtFormat = S.format;
+      box.innerHTML = '';
+      vals.forEach((_, i) => {
+        const last = i === vals.length - 1;
+        const cell = document.createElement('div');
+        cell.className = 'cp-cell' + (last ? ' is-alpha' : '') + (S.format === 'hex' && i === 0 ? ' is-wide' : '');
+        const inp = document.createElement('input');
+        inp.setAttribute('aria-label', last ? 'Độ đục %' : ['Giá trị 1', 'Giá trị 2', 'Giá trị 3'][i]);
+        if (S.format === 'hex' && i === 0) { inp.className = 'cp-mono'; inp.spellcheck = false; }
+        inp.addEventListener('change', onSolidInput);
+        cell.appendChild(inp);
+        box.appendChild(cell);
       });
-      wrap.appendChild(h);
-    });
+    }
+    box.querySelectorAll('input').forEach((inp, i) => { if (document.activeElement !== inp) inp.value = vals[i]; });
+  }
+  function onSolidInput() {
+    const ins = [...$('s-inputs').querySelectorAll('input')].map((i) => i.value.trim());
+    const num = (v) => parseFloat(String(v).replace(/[^0-9.-]/g, ''));
+    const al = num(ins[ins.length - 1]);
+    const a = Number.isFinite(al) ? clamp(al, 0, 100) / 100 : S.solid.a;
+    if (S.format === 'hex') {
+      const p = parseColor(ins[0]);
+      if (p) S.solid = { h: p.h, s: p.s, b: p.b, a };
+    } else if (S.format === 'rgb') {
+      const [r, g, b] = ins.slice(0, 3).map(num);
+      if ([r, g, b].every(Number.isFinite)) S.solid = { ...rgbToHsb(r, g, b), a };
+    } else {
+      const [h, s, l] = ins.slice(0, 3).map(num);
+      if ([h, s, l].every(Number.isFinite)) S.solid = { ...hslToHsb(((h % 360) + 360) % 360, clamp(s, 0, 100), clamp(l, 0, 100)), a };
+    }
+    update();
   }
 
-  function renderGradStops() {
-    const g = S.grad;
-    const box = $('qr-cp-grad-stops');
+  function renderSwatches(kind) {
+    const box = $(kind === 'solid' ? 's-saved' : 'g-saved');
     box.innerHTML = '';
-    const sorted = [...g.stops].sort((a, b) => a.pos - b.pos);
-    sorted.forEach((st) => {
-      const idx = g.stops.indexOf(st);
-      const row = document.createElement('div');
-      row.className = 'qr-cp-stop-row' + (idx === g.active ? ' on' : '');
-      row.innerHTML =
-        `<span class="qr-cp-stop-dot" style="background:${CM.hsbaToCss(st.h, st.s, st.b, st.a)}"></span>` +
-        `<span class="qr-cp-mono">${Math.round(st.pos)}%</span>` +
-        (g.stops.length > 2 ? `<button type="button" class="qr-cp-stop-del" aria-label="Xóa điểm">×</button>` : `<span></span>`);
-      row.querySelector('.qr-cp-stop-dot').addEventListener('click', () => { g.active = idx; renderGradient(); });
-      const del = row.querySelector('.qr-cp-stop-del');
-      if (del) del.addEventListener('click', (e) => {
-        e.stopPropagation();
-        g.stops.splice(idx, 1);
-        g.active = Math.min(g.active, g.stops.length - 1);
-        renderGradient();
+    const cur = currentValue().toUpperCase();
+    if (!saved[kind].length) {
+      box.innerHTML = '<span class="cp-hint">Chưa có màu nào — bấm Thêm để lưu.</span>';
+      return;
+    }
+    saved[kind].forEach((val, idx) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'cp-swatch' + (S.mode === kind && val.toUpperCase() === cur ? ' on' : '');
+      b.style.background = val;
+      b.title = val + ' — chuột phải để xóa';
+      b.setAttribute('aria-label', 'Màu đã lưu ' + val);
+      b.addEventListener('click', () => {
+        if (kind === 'solid') {
+          const p = parseColor(val);
+          if (p) S.solid = p;
+        } else if (!applyGradientValue(val)) return;
+        update();
       });
+      b.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        saved[kind].splice(idx, 1);
+        persistSaved();
+        renderSwatches(kind);
+      });
+      box.appendChild(b);
+    });
+  }
+
+  function renderGradient(skipList) {
+    const g = S.grad;
+    sortStopsInPlace();
+    $('g-fill').style.background = gradientCss();
+    const line = $('g-line');
+    line.setAttribute('x1', g.pStart.x + '%'); line.setAttribute('y1', g.pStart.y + '%');
+    line.setAttribute('x2', g.pEnd.x + '%'); line.setAttribute('y2', g.pEnd.y + '%');
+    $('g-type').value = g.type;
+    if (document.activeElement !== $('g-angle')) $('g-angle').value = g.angle + '°';
+    $('g-bar-f').style.background = `linear-gradient(90deg, ${stopsCss()})`;
+    renderHandles();
+    if (skipList) {
+      $('g-stops').querySelectorAll('.cp-stop-row').forEach((r) => r.classList.toggle('on', +r.dataset.id === g.activeId));
+    } else renderStopList();
+    const st = activeStop();
+    const idx = g.stops.indexOf(st) + 1;
+    $('g-stop-title').textContent = `Stop #${idx} (${Math.round(st.pos)}%)`;
+    placeSliders('g', st);
+    $('g-add').disabled = g.stops.length >= MAX_STOPS;
+    renderSwatches('grad');
+  }
+
+  function renderHandles() {
+    const g = S.grad;
+    const areaBox = $('g-handles'), barBox = $('g-bar-h');
+    areaBox.innerHTML = ''; barBox.innerHTML = '';
+    g.stops.forEach((st, i) => {
+      const color = toCss(st), on = st.id === g.activeId ? 'true' : 'false';
+      const pt = stop2D(i);
+      const mk = (left, top, drag) => {
+        const h = document.createElement('button');
+        h.type = 'button'; h.className = 'cp-handle';
+        h.style.left = left + '%'; if (top != null) h.style.top = top + '%';
+        h.style.background = color; h.dataset.active = on;
+        h.setAttribute('aria-label', `Điểm màu ${Math.round(st.pos)}%`);
+        h.addEventListener('pointerdown', (e) => drag(e, st, h));
+        return h;
+      };
+      areaBox.appendChild(mk(pt.x, pt.y, dragStop2D));
+      barBox.appendChild(mk(st.pos, null, dragStopBar));
+    });
+  }
+
+  function renderStopList() {
+    const g = S.grad, box = $('g-stops');
+    box.innerHTML = '';
+    g.stops.forEach((st) => {
+      const row = document.createElement('div');
+      row.className = 'cp-stop-row' + (st.id === g.activeId ? ' on' : '');
+      row.dataset.id = st.id;
+      const mkCell = (cls, aria, val, onChange) => {
+        const cell = document.createElement('div'); cell.className = 'cp-cell ' + cls;
+        const inp = document.createElement('input'); inp.value = val; inp.setAttribute('aria-label', aria);
+        inp.addEventListener('focus', () => { if (g.activeId !== st.id) { g.activeId = st.id; renderGradient(true); } });
+        inp.addEventListener('change', () => onChange(inp.value));
+        cell.appendChild(inp);
+        return { cell, inp };
+      };
+      const pos = mkCell('is-solo is-pos', 'Vị trí %', Math.round(st.pos) + '%', (v) => {
+        const n = parseInt(String(v).replace(/[^0-9]/g, ''), 10);
+        if (!Number.isNaN(n)) { st.pos = clamp(n, 0, 100); syncEndpointsFromPos(); }
+        update();
+      });
+      const group = document.createElement('div'); group.className = 'cp-group';
+      const hex = mkCell('is-wide is-hex', 'Màu hex', toHex({ ...st, a: 1 }), (v) => {
+        const p = parseColor(v);
+        if (p) { st.h = p.h; st.s = p.s; st.b = p.b; }
+        update();
+      });
+      hex.inp.className = 'cp-mono is-left';
+      const dot = document.createElement('button');
+      dot.type = 'button'; dot.className = 'cp-dot'; dot.style.background = toCss({ ...st, a: 1 }); dot.title = 'Chọn điểm màu này';
+      dot.addEventListener('click', () => { g.activeId = st.id; renderGradient(); });
+      hex.cell.insertBefore(dot, hex.inp);
+      const al = mkCell('is-alpha', 'Độ đục %', Math.round(st.a * 100) + '%', (v) => {
+        const n = parseFloat(String(v).replace(/[^0-9.]/g, ''));
+        if (Number.isFinite(n)) st.a = clamp(n, 0, 100) / 100;
+        update();
+      });
+      group.append(hex.cell, al.cell);
+      const del = document.createElement('button');
+      del.type = 'button'; del.className = 'cp-stop-del'; del.innerHTML = ICON.minus;
+      del.setAttribute('aria-label', 'Xóa điểm màu'); del.disabled = g.stops.length <= 2;
+      del.addEventListener('click', () => {
+        if (g.stops.length <= 2) return;
+        g.stops = g.stops.filter((s) => s.id !== st.id);
+        if (g.activeId === st.id) g.activeId = g.stops[0].id;
+        syncEndpointsFromPos();
+        update();
+      });
+      row.append(pos.cell, group, del);
       box.appendChild(row);
     });
   }
 
-  function renderGradEditor() {
-    const g = S.grad;
-    const st = g.stops[g.active] || g.stops[0];
-    if (!st) return;
-    $('qr-cp-grad-active-label').textContent = `Điểm ${g.active + 1} (${Math.round(st.pos)}%)`;
-    const rgb = CM.hsbToRgb(st.h, st.s, st.b);
-    const area = $('qr-cp-grad-area'), thumb = $('qr-cp-grad-thumb');
-    area.style.backgroundColor = `hsl(${st.h},100%,50%)`;
-    thumb.style.left = st.s + '%';
-    thumb.style.top = (100 - st.b) + '%';
-    thumb.style.backgroundColor = CM.rgbToHex(rgb.r, rgb.g, rgb.b);
-    const hueThumb = $('qr-cp-grad-hue-thumb');
-    hueThumb.style.left = (st.h / 360 * 100) + '%';
-    hueThumb.style.backgroundColor = `hsl(${st.h},100%,50%)`;
-    $('qr-cp-grad-alpha-grad').style.background =
-      `linear-gradient(to right, rgba(${rgb.r},${rgb.g},${rgb.b},0), rgba(${rgb.r},${rgb.g},${rgb.b},1))`;
-    const aThumb = $('qr-cp-grad-alpha-thumb');
-    aThumb.style.left = (st.a * 100) + '%';
-    aThumb.style.backgroundColor = CM.hsbaToCss(st.h, st.s, st.b, st.a);
+  function renderTabs() {
+    pop.querySelectorAll('.cp-tab').forEach((b) => {
+      const on = b.dataset.mode === S.mode;
+      b.dataset.active = on ? 'true' : 'false';
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    pop.querySelectorAll('.cp-pane').forEach((p) => { p.hidden = p.dataset.pane !== S.mode; });
   }
-
   function render() {
     renderTabs();
-    if (S.mode === 'solid') renderSolid();
-    else renderGradient();
+    if (S.mode === 'solid') renderSolid(); else renderGradient();
   }
 
-  /* ================= Drag helper ================= */
+  /* ================= Apply (live) ================= */
+  function paintSwatch(el, val) {
+    if (!el) return;
+    el.classList.toggle('qr-cp-empty', !val);
+    el.style.background = val || '';
+  }
+  function writeValue(val) {
+    const t = S.target;
+    if (!t) return;
+    S.dirty = true;
+    t.input.value = val;
+    paintSwatch(t.swatch, val);
+    t.input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  // render + áp dụng ngay vào input
+  function update() { render(); writeValue(currentValue()); }
+
+  /* ================= Drag helpers ================= */
+  function dragWindow(onMove, onEnd) {
+    const up = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      if (onEnd) onEnd();
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+  }
   function dragXY(el, fn) {
     el.addEventListener('pointerdown', (e) => {
       if (e.button !== 0 && e.pointerType === 'mouse') return;
       e.preventDefault();
       el.focus?.();
       const move = (ev) => {
-        const rect = el.getBoundingClientRect();
-        const x = CM.clamp((ev.clientX - rect.left) / rect.width, 0, 1);
-        const y = CM.clamp((ev.clientY - rect.top) / rect.height, 0, 1);
-        fn(x, y);
-        render();
+        const r = el.getBoundingClientRect();
+        if (!r.width || !r.height) return;
+        fn(clamp((ev.clientX - r.left) / r.width, 0, 1), clamp((ev.clientY - r.top) / r.height, 0, 1));
+        update();
       };
       move(e);
-      const up = () => {
-        window.removeEventListener('pointermove', move);
-        window.removeEventListener('pointerup', up);
-        window.removeEventListener('pointercancel', up);
-      };
-      window.addEventListener('pointermove', move, { passive: true });
-      window.addEventListener('pointerup', up);
-      window.addEventListener('pointercancel', up);
+      dragWindow(move);
     });
   }
-
-  /* Solid bindings */
-  dragXY($('qr-cp-solid-area'), (x, y) => {
-    S.solid.s = Math.round(x * 100);
-    S.solid.b = Math.round((1 - y) * 100);
-  });
-  dragXY($('qr-cp-solid-hue'), (x) => { S.solid.h = Math.round(x * 360); });
-  dragXY($('qr-cp-solid-alpha'), (x) => { S.solid.a = +x.toFixed(2); });
-
-  /* Gradient editor bindings */
-  dragXY($('qr-cp-grad-area'), (x, y) => {
-    const st = S.grad.stops[S.grad.active];
-    if (st) { st.s = Math.round(x * 100); st.b = Math.round((1 - y) * 100); }
-  });
-  dragXY($('qr-cp-grad-hue'), (x) => {
-    const st = S.grad.stops[S.grad.active];
-    if (st) st.h = Math.round(x * 360);
-  });
-  dragXY($('qr-cp-grad-alpha'), (x) => {
-    const st = S.grad.stops[S.grad.active];
-    if (st) st.a = +x.toFixed(2);
+  const arrowKeys = (el, get, set, fn) => el.addEventListener('keydown', (e) => {
+    const step = e.shiftKey ? 10 : 2;
+    const d = { ArrowRight: [1, 0], ArrowLeft: [-1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] }[e.key];
+    if (!d) return;
+    e.preventDefault();
+    const c = get();
+    fn(c, d, step);
+    set(c);
+    update();
   });
 
-  /* Keyboard cho 2D areas */
-  function bindAreaKeys(el, get, set) {
-    el.addEventListener('keydown', (e) => {
-      const step = e.shiftKey ? 10 : 2;
-      const c = get();
-      let used = true;
-      if (e.key === 'ArrowRight') c.s = CM.clamp(c.s + step, 0, 100);
-      else if (e.key === 'ArrowLeft') c.s = CM.clamp(c.s - step, 0, 100);
-      else if (e.key === 'ArrowUp') c.b = CM.clamp(c.b + step, 0, 100);
-      else if (e.key === 'ArrowDown') c.b = CM.clamp(c.b - step, 0, 100);
-      else used = false;
-      if (used) { e.preventDefault(); set(c); render(); }
+  function dragStop2D(e, st, handleEl) {
+    e.stopPropagation(); e.preventDefault();
+    const g = S.grad;
+    g.activeId = st.id;
+    const idx = g.stops.indexOf(st);
+    const isFirst = idx === 0, isLast = idx === g.stops.length - 1;
+    const sS = { ...g.pStart }, sE = { ...g.pEnd };
+    handleEl.dataset.dragging = 'true';
+    const area = $('g-area');
+    renderGradient();
+    dragWindow((ev) => {
+      const r = area.getBoundingClientRect();
+      if (!r.width || !r.height) return;
+      const p = { x: clamp(((ev.clientX - r.left) / r.width) * 100, 0, 100), y: clamp(((ev.clientY - r.top) / r.height) * 100, 0, 100) };
+      if (isFirst) {
+        if (Math.hypot(p.x - sE.x, p.y - sE.y) < 3) return;
+        syncLineFromEndpoints(p, sE);
+      } else if (isLast) {
+        if (Math.hypot(p.x - sS.x, p.y - sS.y) < 3) return;
+        syncLineFromEndpoints(sS, p);
+      } else {
+        const dx = sE.x - sS.x, dy = sE.y - sS.y, l2 = dx * dx + dy * dy || 1;
+        const t = clamp(((p.x - sS.x) * dx + (p.y - sS.y) * dy) / l2, 0.04, 0.96);
+        const on = lerpPt(sS, sE, t);
+        const ox = p.x - on.x, oy = p.y - on.y;
+        syncLineFromEndpoints(
+          { x: clamp(sS.x + ox, 0, 100), y: clamp(sS.y + oy, 0, 100) },
+          { x: clamp(sE.x + ox, 0, 100), y: clamp(sE.y + oy, 0, 100) });
+        const first = g.stops[0].pos, last = g.stops[g.stops.length - 1].pos;
+        st.pos = clamp(Math.round(first + t * (last - first)), first + 1, last - 1);
+      }
+      render(); writeValue(currentValue());
     });
   }
-  bindAreaKeys($('qr-cp-solid-area'), () => ({ ...S.solid }), (c) => Object.assign(S.solid, c));
-  bindAreaKeys($('qr-cp-grad-area'),
-    () => ({ ...(S.grad.stops[S.grad.active] || {}) }),
-    (c) => Object.assign(S.grad.stops[S.grad.active] || {}, c));
-
-  /* Hex input (solid) */
-  $('qr-cp-solid-hex').addEventListener('change', (e) => {
-    const p = CM.parseHex8(e.target.value);
-    if (p) Object.assign(S.solid, { h: p.h, s: p.s, b: p.b, a: p.a });
-    render();
-  });
-  $('qr-cp-solid-alpha-inp').addEventListener('change', (e) => {
-    const v = parseInt(String(e.target.value).replace(/[^0-9]/g, ''), 10);
-    if (!isNaN(v)) S.solid.a = CM.clamp(v, 0, 100) / 100;
-    render();
-  });
-
-  /* Tabs */
-  pop.querySelectorAll('.uui-tab-trigger').forEach((b) => {
-    b.addEventListener('click', () => { S.mode = b.dataset.mode; render(); });
-  });
-
-  /* Gradient controls */
-  $('qr-cp-grad-type').addEventListener('change', (e) => {
-    S.grad.type = e.target.value;
-    render();
-  });
-  $('qr-cp-grad-angle').addEventListener('change', (e) => {
-    const v = parseInt(String(e.target.value).replace(/[^0-9]/g, ''), 10);
-    if (isNaN(v)) { render(); return; }
+  function dragStopBar(e, st) {
+    e.stopPropagation(); e.preventDefault();
     const g = S.grad;
-    g.angle = CM.clamp(v, 0, 360);
-    // Xoay vector 2D theo góc (cho linear)
-    if (g.type === 'linear') {
-      const rad = ((g.angle - 90) * Math.PI) / 180;
-      const cx = 50, cy = 50, r = 38;
-      g.pStart = { x: CM.clamp(cx - Math.cos(rad) * r, 0, 100), y: CM.clamp(cy - Math.sin(rad) * r, 0, 100) };
-      g.pEnd = { x: CM.clamp(cx + Math.cos(rad) * r, 0, 100), y: CM.clamp(cy + Math.sin(rad) * r, 0, 100) };
-      const ext = CM.extendLineToEdges(g.pStart, g.pEnd);
-      g.line.start = ext.start; g.line.end = ext.end;
-    }
-    render();
-  });
-  $('qr-cp-grad-add').addEventListener('click', () => {
+    g.activeId = st.id;
+    const bar = $('g-bar');
+    const move = (ev) => {
+      const r = bar.getBoundingClientRect();
+      if (!r.width) return;
+      st.pos = clamp(Math.round(((ev.clientX - r.left) / r.width) * 100), 0, 100);
+      syncEndpointsFromPos();
+      update();
+    };
+    move(e);
+    dragWindow(move);
+  }
+  // Bấm vào chỗ trống trên thanh → thêm stop tại đó rồi kéo luôn
+  function onBarDown(e) {
+    if (e.target.closest('.cp-handle')) return;
     const g = S.grad;
-    if (g.stops.length >= 5) return;
-    const src = g.stops[g.active] || g.stops[0];
-    g.stops.push({ pos: 50, h: src.h, s: src.s, b: src.b, a: src.a });
-    g.active = g.stops.length - 1;
-    render();
+    if (g.stops.length >= MAX_STOPS) return;
+    const r = $('g-bar').getBoundingClientRect();
+    const pos = clamp(Math.round(((e.clientX - r.left) / r.width) * 100), 1, 99);
+    const st = newStop(pos, interpolateAt(pos));
+    g.stops.push(st);
+    g.activeId = st.id;
+    syncEndpointsFromPos();
+    dragStopBar(e, st);
+  }
+
+  /* ================= Bindings ================= */
+  // Solid
+  dragXY($('s-area'), (x, y) => { S.solid.s = x * 100; S.solid.b = (1 - y) * 100; });
+  dragXY($('s-hue'), (x) => { S.solid.h = Math.min(359.99, x * 360); });
+  dragXY($('s-alpha'), (x) => { S.solid.a = +x.toFixed(2); });
+  arrowKeys($('s-area'), () => S.solid, (c) => { S.solid = c; }, (c, d, step) => {
+    c.s = clamp(c.s + d[0] * step, 0, 100); c.b = clamp(c.b + d[1] * step, 0, 100);
   });
-  // Đảo ngược gradient: đảo thứ tự stops + hoán đổi pStart/pEnd
-  $('qr-cp-grad-reverse').addEventListener('click', () => {
+  $('s-format').addEventListener('change', (e) => { S.format = e.target.value; renderSolid(); });
+  $('s-save').addEventListener('click', () => {
+    const v = toHex(S.solid);
+    if (!saved.solid.some((x) => x.toUpperCase() === v.toUpperCase())) { saved.solid.push(v); persistSaved(); }
+    renderSwatches('solid');
+  });
+  // Gradient: kéo trên vùng 2D → nắm handle gần nhất
+  $('g-area').addEventListener('pointerdown', (e) => {
+    if (e.target.closest('.cp-handle')) return;
+    const r = $('g-area').getBoundingClientRect();
+    if (!r.width) return;
+    const p = { x: ((e.clientX - r.left) / r.width) * 100, y: ((e.clientY - r.top) / r.height) * 100 };
+    let best = 0, dist = Infinity;
+    S.grad.stops.forEach((_, i) => {
+      const q = stop2D(i), d = Math.hypot(p.x - q.x, p.y - q.y);
+      if (d < dist) { dist = d; best = i; }
+    });
+    const st = S.grad.stops[best];
+    const handle = $('g-handles').children[best];
+    if (handle) dragStop2D(e, st, handle);
+  });
+  $('g-bar').addEventListener('pointerdown', onBarDown);
+  $('g-type').addEventListener('change', (e) => { S.grad.type = e.target.value; update(); });
+  $('g-angle').addEventListener('change', (e) => {
+    const n = parseInt(String(e.target.value).replace(/[^0-9-]/g, ''), 10);
+    if (Number.isNaN(n)) { render(); return; }
+    setAngle(n);
+    update();
+  });
+  $('g-reverse').addEventListener('click', () => {
     const g = S.grad;
-    g.stops.reverse();
     g.stops.forEach((st) => { st.pos = 100 - st.pos; });
-    g.stops.sort((a, b) => a.pos - b.pos);
-    const tmp = g.pStart; g.pStart = g.pEnd; g.pEnd = tmp;
-    const ext = CM.extendLineToEdges(g.pStart, g.pEnd);
-    g.line.start = ext.start; g.line.end = ext.end;
-    g.angle = endpointsToAngle(g.pStart, g.pEnd);
-    g.active = 0;
-    render();
+    sortStopsInPlace();
+    const t = g.pStart; g.pStart = g.pEnd; g.pEnd = t;
+    g.pStart = lerpPt(g.line.start, g.line.end, g.stops[0].pos / 100);
+    g.pEnd = lerpPt(g.line.start, g.line.end, g.stops[g.stops.length - 1].pos / 100);
+    update();
+  });
+  $('g-add').addEventListener('click', () => {
+    const g = S.grad;
+    if (g.stops.length >= MAX_STOPS) return;
+    const all = sortedStops();
+    let bi = 0, bg = -1;
+    for (let i = 0; i < all.length - 1; i++) { const gap = all[i + 1].pos - all[i].pos; if (gap > bg) { bg = gap; bi = i; } }
+    const pos = clamp(Math.round((all[bi].pos + all[bi + 1].pos) / 2), 1, 99);
+    const st = newStop(pos, interpolateAt(pos));
+    g.stops.push(st);
+    g.activeId = st.id;
+    syncEndpointsFromPos();
+    update();
+  });
+  const withActive = (fn) => (x) => { fn(activeStop(), x); };
+  dragXY($('g-hue'), withActive((st, x) => {
+    st.h = Math.min(359.99, x * 360);
+    if (st.s === 0) st.s = 75;
+    if (st.b === 0) st.b = 85;
+  }));
+  dragXY($('g-alpha'), withActive((st, x) => { st.a = +x.toFixed(2); }));
+  $('g-save').addEventListener('click', () => {
+    const v = gradientCss();
+    if (!saved.grad.includes(v)) { saved.grad.push(v); persistSaved(); }
+    renderSwatches('grad');
   });
 
-  /* ================= Open / Close / Commit ================= */
+  // EyeDropper (nếu trình duyệt hỗ trợ)
+  async function sample(cb) {
+    if (!HAS_EYEDROPPER) return;
+    try {
+      const r = await new window.EyeDropper().open();
+      const p = parseColor(r.sRGBHex);
+      if (p) cb(p);
+    } catch { /* user hủy */ }
+  }
+  $('s-eye').addEventListener('click', () => sample((p) => { S.solid = { ...p, a: S.solid.a }; update(); }));
+  $('g-eye').addEventListener('click', () => sample((p) => {
+    const st = activeStop(); st.h = p.h; st.s = p.s; st.b = p.b; update();
+  }));
+
+  // Tabs (đổi tab chỉ xem; áp dụng khi chỉnh)
+  pop.querySelectorAll('.cp-tab').forEach((b) => b.addEventListener('click', () => { S.mode = b.dataset.mode; render(); }));
+  $('cp-done').addEventListener('click', () => close());
+  $('cp-clear').addEventListener('click', () => { writeValue(''); close(); });
+
+  /* ================= Open / Close ================= */
   function loadFromValue(val) {
     val = String(val || '').trim();
-    // reset về mặc định mỗi lần mở
-    S.mode = 'solid';
-    S.solid = { h: 0, s: 100, b: 100, a: 1 };
-    S.grad = {
-      type: 'linear', angle: 135, active: 0,
-      pStart: { x: 12, y: 12 },
-      pEnd: { x: 88, y: 88 },
-      line: { start: { x: 0, y: 0 }, end: { x: 100, y: 100 } },
-      stops: [
-        { pos: 0, h: 0, s: 100, b: 100, a: 1 },
-        { pos: 100, h: 0, s: 100, b: 60, a: 1 },
-      ],
-    };
+    S.mode = 'solid'; S.solid = DEFAULT_SOLID(); S.grad = defaultGrad(); S.dirty = false;
     if (!val) return;
-    if (/^(linear|radial|conic)-gradient/i.test(val)) {
-      const g = CM.parseGradient(val);
-      if (g) {
+    if (/gradient\(/i.test(val)) {
+      if (applyGradientValue(val)) {
         S.mode = 'gradient';
-        S.grad.type = g.type;
-        S.grad.angle = g.angle;
-        S.grad.stops = g.stops;
-        S.grad.active = 0;
-        // Dựng lại pStart/pEnd từ angle cho linear
-        if (g.type === 'linear') {
-          const rad = ((g.angle - 90) * Math.PI) / 180;
-          const cx = 50, cy = 50, r = 38;
-          S.grad.pStart = { x: CM.clamp(cx - Math.cos(rad) * r, 0, 100), y: CM.clamp(cy - Math.sin(rad) * r, 0, 100) };
-          S.grad.pEnd = { x: CM.clamp(cx + Math.cos(rad) * r, 0, 100), y: CM.clamp(cy + Math.sin(rad) * r, 0, 100) };
-          const ext = CM.extendLineToEdges(S.grad.pStart, S.grad.pEnd);
-          S.grad.line.start = ext.start; S.grad.line.end = ext.end;
-        }
-        const st = g.stops[0];
+        const st = S.grad.stops[0];
         S.solid = { h: st.h, s: st.s, b: st.b, a: st.a };
       }
     } else {
-      const p = CM.parseHex8(val);
-      if (p) S.solid = { h: p.h, s: p.s, b: p.b, a: p.a };
+      const p = parseColor(val);
+      if (p) S.solid = p;
     }
   }
-
   function open(target) {
-    console.log('[QR-CP] open() called, input:', target.input.id);
+    if (S.target && S.target !== target) close();
     S.target = target;
     loadFromValue(target.input.value);
-    render();
-    // Popup absolute trong .color-field bọc quanh input+swatch (không fullscreen)
     const wrap = target.input.closest('.color-field');
-    console.log('[QR-CP] wrap found:', !!wrap);
     if (wrap && pop.parentElement !== wrap) wrap.appendChild(pop);
+    builtFormat = '';
+    render();
     pop.hidden = false;
-    console.log('[QR-CP] popup shown, hidden =', pop.hidden);
   }
-  function close() {
+  async function close() {
+    const t = S.target, dirty = S.dirty;
     pop.hidden = true;
-    S.target = null;
-  }
-  async function commit(val) {
-    const t = S.target;
-    if (!t) { close(); return; }
-    const isPrimary = t.input.id === 'qrPrimary';
-    t.input.value = val;
-    paintSwatch(t.swatch, val);
-    t.input.dispatchEvent(new Event('input', { bubbles: true }));
-    if (typeof t.onChange === 'function') { try { t.onChange(val); } catch {} }
-    close();
-    // Auto-suggest màu phụ khi vừa chọn màu chính mà ô phụ đang trống
-    if (isPrimary && val) {
-      const secInput = document.getElementById('qrSecondary');
-      if (secInput && !secInput.value.trim()) {
+    S.target = null; S.dirty = false;
+    if (!t) return;
+    if (typeof t.onChange === 'function' && dirty) { try { t.onChange(t.input.value); } catch { /* ignore */ } }
+    // Chọn màu chính xong mà màu phụ trống → gợi ý màu phụ
+    if (dirty && t.input.id === 'qrPrimary' && t.input.value) {
+      const sec = document.getElementById('qrSecondary');
+      if (sec && !sec.value.trim()) {
         try {
-          const r = await fetch(`/api/qr/palette?primary=${encodeURIComponent(val)}`, { credentials: 'same-origin' });
+          const r = await fetch(`/api/qr/palette?primary=${encodeURIComponent(t.input.value)}`, { credentials: 'same-origin' });
           const d = await r.json();
           const sug = d && d.ok && d.vars && d.vars['--qr-secondary'];
           if (sug) {
-            secInput.value = sug;
+            sec.value = sug;
             paintSwatch(document.getElementById('qrSecondarySwatch'), sug);
-            secInput.dispatchEvent(new Event('input', { bubbles: true }));
+            sec.dispatchEvent(new Event('input', { bubbles: true }));
           }
         } catch { /* bỏ qua */ }
       }
     }
   }
 
-  $('qr-cp-apply').addEventListener('click', () => commit(currentValue()));
-  $('qr-cp-clear').addEventListener('click', () => commit(''));
-  $('qr-cp-cancel').addEventListener('click', close);
-  // Click outside popup → đóng (không chặn thao tác khác trên page)
   document.addEventListener('mousedown', (e) => {
     if (pop.hidden || !S.target) return;
     const t = S.target;
-    if (pop.contains(e.target)) return;
-    if (t.input.contains(e.target) || (t.swatch && t.swatch.contains(e.target))) return;
+    if (pop.contains(e.target) || t.input.contains(e.target) || (t.swatch && t.swatch.contains(e.target))) return;
     close();
   });
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !pop.hidden) close();
-  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !pop.hidden) close(); });
 
   /* ================= Public API ================= */
   window.QrColorPicker = {
     attach(inputId, swatchId, opts = {}) {
-      console.log('[QR-CP] attach called:', inputId, swatchId);
       const input = document.getElementById(inputId);
       const swatch = document.getElementById(swatchId);
-      console.log('[QR-CP] input found:', !!input, 'swatch found:', !!swatch);
       if (!input || !swatch) return null;
       const target = { input, swatch, onChange: opts.onChange };
-      // Vẽ swatch theo giá trị hiện tại (trống → checkerboard)
       paintSwatch(swatch, input.value.trim());
       swatch.style.cursor = 'pointer';
       swatch.setAttribute('role', 'button');
       swatch.setAttribute('tabindex', '0');
       swatch.setAttribute('aria-label', 'Mở bảng chọn màu');
-      const doOpen = (e) => { e.preventDefault(); console.log('[QR-CP] swatch clicked:', swatch.id); open(target); };
-      swatch.addEventListener('click', doOpen);
-      swatch.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') doOpen(e);
+      const toggle = (e) => { e.preventDefault(); if (!pop.hidden && S.target === target) close(); else open(target); };
+      swatch.addEventListener('click', toggle);
+      swatch.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') toggle(e); });
+      input.addEventListener('click', () => { if (pop.hidden || S.target !== target) open(target); });
+      // Gõ tay → cập nhật swatch (và picker nếu đang mở)
+      input.addEventListener('input', () => {
+        paintSwatch(swatch, input.value.trim());
       });
-      // Click vào input cũng mở picker (thay vì gõ tay); vẫn cho phép gõ tay bằng cách focus rồi gõ?
-      // → Mở picker khi click, user vẫn gõ được khi picker đóng vì input không readonly.
-      input.addEventListener('click', () => { console.log('[QR-CP] input clicked:', input.id); open(target); });
-      // Gõ tay → cập nhật swatch
-      input.addEventListener('input', () => paintSwatch(swatch, input.value.trim()));
       return {
         set(val) { input.value = val; paintSwatch(swatch, val); },
         get() { return input.value; },
