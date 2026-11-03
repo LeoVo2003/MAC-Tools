@@ -1651,14 +1651,31 @@ td.mono {
   font-size: var(--text-xs);
 }
 
-/* Lỗi + Hệ thống */
+/* Lỗi + Hệ thống — align top, không kéo card thấp bằng card lỗi */
 .dash-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1.4fr) minmax(260px, 0.8fr);
   gap: var(--space-5);
+  align-items: start;
 }
 .dash-grid .block {
   min-width: 0;
+  height: auto;
+  align-self: start;
+}
+#dashErrors {
+  max-height: 280px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: var(--space-1);
+  margin-right: calc(var(--space-1) * -1);
+}
+#dashErrors::-webkit-scrollbar {
+  width: 6px;
+}
+#dashErrors::-webkit-scrollbar-thumb {
+  border-radius: var(--radius-pill);
+  background: var(--border-btn);
 }
 
 .err-row {
