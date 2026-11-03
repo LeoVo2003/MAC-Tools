@@ -158,25 +158,55 @@ function normalizeErrorKey(msg) {
     .slice(0, 200);
 }
 
-/** Gom lỗi gần đây theo nội dung: [{ error, count, lastAt, lastRunId, tool }] */
-export function recentErrors({ limit = 1000, top = 10 } = {}) {
-  const rows = listRuns({ limit }).filter((r) => r.status === 'error' && r.error);
+/**
+ * Gom lỗi gần đây theo tool + nội dung.
+ * @param {{ limit?: number, top?: number, tool?: string }} [opts]
+ * @returns {Array<{ error, errorKey, count, lastAt, lastRunId, tool }>}
+ */
+export function recentErrors({ limit = 1000, top = 30, tool = '' } = {}) {
+  const toolQ = String(tool || '').trim().toLowerCase();
+  let rows = listRuns({ limit }).filter((r) => r.status === 'error' && r.error);
+  if (toolQ) rows = rows.filter((r) => normalizeTool(r) === toolQ);
+
   const map = new Map();
   for (const r of rows) {
-    const key = normalizeErrorKey(r.error);
-    if (!key) continue;
-    if (!map.has(key)) map.set(key, { error: r.error, errorKey: key, count: 0, lastAt: null, lastRunId: null, tool: normalizeTool(r) });
+    const toolName = normalizeTool(r);
+    const msgKey = normalizeErrorKey(r.error);
+    if (!msgKey) continue;
+    // Tách theo tool: cùng message ở 2 tool = 2 dòng
+    const key = `${toolName}::${msgKey}`;
+    if (!map.has(key)) {
+      map.set(key, {
+        error: r.error,
+        errorKey: msgKey,
+        count: 0,
+        lastAt: null,
+        lastRunId: null,
+        tool: toolName,
+      });
+    }
     const e = map.get(key);
     e.count += 1;
     const t = r.startedAt ? Date.parse(r.startedAt) : NaN;
     if (Number.isFinite(t) && (!e.lastAt || t > Date.parse(e.lastAt))) {
       e.lastAt = r.startedAt;
       e.lastRunId = r.id;
-      e.tool = normalizeTool(r);
-      e.error = r.error; // giữ message gốc mới nhất để hiển thị
+      e.error = r.error;
     }
   }
-  return [...map.values()].sort((a, b) => b.count - a.count).slice(0, top);
+
+  const toolRank = { 'f-package': 0, qr: 1, 'review-link': 2 };
+  return [...map.values()]
+    .sort((a, b) => {
+      if (!toolQ) {
+        const ra = toolRank[a.tool] ?? 50;
+        const rb = toolRank[b.tool] ?? 50;
+        if (ra !== rb) return ra - rb;
+      }
+      if (b.count !== a.count) return b.count - a.count;
+      return String(b.lastAt || '').localeCompare(String(a.lastAt || ''));
+    })
+    .slice(0, Math.max(1, Number(top) || 30));
 }
 
 export function runsStats(rowsInput) {

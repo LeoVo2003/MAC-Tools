@@ -992,10 +992,11 @@ export function createApp() {
     res.json(out);
   });
 
-  /** Lỗi gần đây. Đặt trước /:id để "errors" không bị coi là id. */
+  /** Lỗi gần đây. Đặt trước /:id để "errors" không bị coi là id. ?tool= lọc theo tool. */
   app.get('/api/runs/errors', requireAuth, requireAdmin, (req, res) => {
-    const top = Math.min(20, Math.max(1, Number(req.query.top) || 10));
-    res.json({ errors: recentErrors({ top }) });
+    const tool = String(req.query.tool || '').trim();
+    const top = Math.min(50, Math.max(1, Number(req.query.top) || (tool ? 20 : 30)));
+    res.json({ errors: recentErrors({ top, tool }), tool: tool || null });
   });
 
   /** Chi tiết 1 run (cho drawer) */

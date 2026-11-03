@@ -1765,13 +1765,11 @@ function fmtTime(iso) {
 async function loadDashboard() {
   const { from, to } = dashRangeDates();
   try {
-    const [statsRes, errRes, queueRes] = await Promise.all([
+    const [statsRes, queueRes] = await Promise.all([
       fetch(`/api/runs/stats?from=${from}&to=${to}&groupBy=tool`, { credentials: 'same-origin' }),
-      fetch('/api/runs/errors?top=8', { credentials: 'same-origin' }),
       fetch('/api/queue', { credentials: 'same-origin' }).catch(() => null),
     ]);
     const stats = await statsRes.json();
-    const errData = await errRes.json();
     let queued = 0;
     try { const q = await queueRes?.json(); queued = q?.pendingCount ?? 0; } catch {}
 
@@ -1802,21 +1800,77 @@ async function loadDashboard() {
       }).join('');
     }
 
-    // Errors
-    const errBox = document.getElementById('dashErrors');
-    const errors = errData.errors || [];
-    errBox.innerHTML = errors.length
-      ? errors.map((e) => `<div class="err-row">
-          <span class="err-count">${e.count}×</span>
-          <div><p class="err-msg">${escapeHtml(e.error)}</p>
-          <p class="muted small">${toolLabel(e.tool)} · ${fmtTime(e.lastAt)}</p></div>
-        </div>`).join('')
-      : '<p class="empty">Không có lỗi nào. Sạch!</p>';
-
-    loadDashTable();
-    loadDashHealth();
+    await Promise.all([loadDashErrors(), loadDashTable(), loadDashHealth()]);
   } catch (err) {
     document.getElementById('dashTools').innerHTML = `<p class="empty">Lỗi tải dashboard: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+function renderDashErrors(errors, scopedTool) {
+  const errBox = document.getElementById('dashErrors');
+  const scope = document.getElementById('dashErrorsScope');
+  if (scope) {
+    scope.textContent = scopedTool
+      ? `${toolLabel(scopedTool)} · bấm lại card để xem tất cả`
+      : 'Tất cả tool · bấm card để lọc';
+  }
+  if (!errBox) return;
+  if (!errors.length) {
+    errBox.innerHTML = scopedTool
+      ? `<p class="empty">Không có lỗi ${escapeHtml(toolLabel(scopedTool))}.</p>`
+      : '<p class="empty">Không có lỗi nào. Sạch!</p>';
+    return;
+  }
+
+  if (scopedTool) {
+    errBox.innerHTML = errors.map((e) => `<div class="err-row">
+        <span class="err-count">${e.count}×</span>
+        <div><p class="err-msg">${escapeHtml(e.error)}</p>
+        <p class="muted small">${fmtTime(e.lastAt)}</p></div>
+      </div>`).join('');
+    return;
+  }
+
+  // Tất cả: nhóm theo tool (ưu tiên F Package → QR → Review Link)
+  const order = ['f-package', 'qr', 'review-link'];
+  const groups = new Map();
+  for (const e of errors) {
+    const t = e.tool || 'f-package';
+    if (!groups.has(t)) groups.set(t, []);
+    groups.get(t).push(e);
+  }
+  const keys = [...groups.keys()].sort((a, b) => {
+    const ia = order.indexOf(a);
+    const ib = order.indexOf(b);
+    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+  });
+  errBox.innerHTML = keys.map((t) => {
+    const rows = groups.get(t) || [];
+    const body = rows.map((e) => `<div class="err-row">
+        <span class="err-count">${e.count}×</span>
+        <div><p class="err-msg">${escapeHtml(e.error)}</p>
+        <p class="muted small">${fmtTime(e.lastAt)}</p></div>
+      </div>`).join('');
+    return `<div class="err-group">
+      <div class="err-group-head">${toolIcon(t)}<span>${toolLabel(t)}</span><span class="muted small">${rows.length} loại</span></div>
+      ${body}
+    </div>`;
+  }).join('');
+}
+
+async function loadDashErrors() {
+  const errBox = document.getElementById('dashErrors');
+  if (!errBox) return;
+  errBox.innerHTML = '<p class="empty">Đang tải…</p>';
+  try {
+    const params = new URLSearchParams({ top: dashState.tool ? '20' : '30' });
+    if (dashState.tool) params.set('tool', dashState.tool);
+    const res = await fetch(`/api/runs/errors?${params}`, { credentials: 'same-origin' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || res.statusText);
+    renderDashErrors(data.errors || [], dashState.tool || '');
+  } catch (err) {
+    errBox.innerHTML = `<p class="empty">Lỗi tải: ${escapeHtml(err.message)}</p>`;
   }
 }
 
@@ -1950,13 +2004,13 @@ document.getElementById('dashTools')?.addEventListener('click', (e) => {
   loadDashboard();
 });
 ['dashFilterTool', 'dashFilterUser', 'dashFilterStatus'].forEach((id) => {
-  document.getElementById(id)?.addEventListener('change', (e) => {
+  document.getElementById(id)?.addEventListener('change', () => {
     dashState.tool = document.getElementById('dashFilterTool').value;
     dashState.user = document.getElementById('dashFilterUser').value.trim();
     dashState.status = document.getElementById('dashFilterStatus').value;
     dashState.page = 1;
     loadDashTable();
-    // sync tool cards highlight
+    loadDashErrors();
     document.querySelectorAll('.tool-card').forEach((c) => c.classList.toggle('is-active', c.dataset.tool === dashState.tool));
   });
 });
