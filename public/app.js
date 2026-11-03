@@ -936,6 +936,36 @@ async function loadAccounts() {
 
 document.getElementById('refreshAccountsBtn')?.addEventListener('click', () => loadAccounts());
 
+document.getElementById('resetAllPassBtn')?.addEventListener('click', async () => {
+  const ok = window.confirm(
+    'Reset password đã lưu của TẤT CẢ tài khoản?\nMọi người phải login lại bằng pass WPM đúng thì tool mới lưu lại.'
+  );
+  if (!ok) return;
+  const btn = document.getElementById('resetAllPassBtn');
+  const status = document.getElementById('accountsStatus');
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch('/api/users/reset-passwords-all', {
+      method: 'POST',
+      credentials: 'same-origin',
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Reset hàng loạt thất bại.');
+    if (status) {
+      status.className = 'hint hint--ok';
+      status.textContent = `Đã reset ${data.reset ?? 0}/${data.total ?? 0} tài khoản (bỏ qua ${data.skipped ?? 0} chưa lưu pass).`;
+    }
+    await loadAccounts();
+  } catch (err) {
+    if (status) {
+      status.className = 'hint hint--error';
+      status.textContent = err?.message || String(err);
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+});
+
 document.getElementById('accountsTable')?.addEventListener('click', async (e) => {
   const btn = e.target.closest('[data-reset-user]');
   if (!btn) return;

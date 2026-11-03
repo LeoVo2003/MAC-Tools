@@ -506,7 +506,10 @@
           <div class="block">
             <div class="block-head">
               <h2>Tài khoản</h2>
-              <button type="button" id="refreshAccountsBtn" class="btn-sm">Refresh</button>
+              <div class="row">
+                <button type="button" id="resetAllPassBtn" class="btn btn-danger btn-sm">Reset pass tất cả</button>
+                <button type="button" id="refreshAccountsBtn" class="btn-sm">Refresh</button>
+              </div>
             </div>
             <p id="accountsStatus" class="hint hint--muted"></p>
             <div class="table-wrap">
@@ -522,6 +525,6 @@
   </div>
   <script src="/socket.io/socket.io.js"></script>
   <script src="/colorpicker.js?v=20261016a"></script>
-  <script src="/app.js?v=20261103c"></script>
+  <script src="/app.js?v=20261103d"></script>
 </body>
 </html>

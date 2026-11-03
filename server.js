@@ -38,6 +38,7 @@ import {
   getUserWpmCredentials,
   listUsersPublic,
   resetUserPassword,
+  resetAllUserPasswords,
 } from './src/userStore.js';
 import { sessionMiddleware, requireAuth, requireAdmin, currentPublicUser } from './src/auth.js';
 import { createJobQueue } from './src/jobQueue.js';
@@ -265,6 +266,16 @@ export function createApp() {
 
   app.get('/api/users', requireAuth, requireAdmin, (_req, res) => {
     res.json({ users: listUsersPublic() });
+  });
+
+  /** Gỡ password đã lưu của mọi user — đặt trước /:id. */
+  app.post('/api/users/reset-passwords-all', requireAuth, requireAdmin, (_req, res) => {
+    try {
+      const result = resetAllUserPasswords();
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      res.status(500).json({ error: err?.message || String(err) });
+    }
   });
 
   /** Gỡ password đã lưu — user login lại bằng pass WPM đúng thì tool lưu lại. */

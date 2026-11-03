@@ -196,6 +196,27 @@ export function resetUserPassword(userId) {
   return findUserById(userId);
 }
 
+/** Gỡ password đã lưu của mọi user (admin hàng loạt). Giống Reset pass từng người. */
+export function resetAllUserPasswords() {
+  const rows = stmtList.all();
+  let reset = 0;
+  let skipped = 0;
+  for (const r of rows) {
+    const full = stmtFindById.get(String(r.id));
+    if (!full) {
+      skipped++;
+      continue;
+    }
+    if (!String(full.wpm_password_enc || '') && !String(full.password_hash || '')) {
+      skipped++;
+      continue;
+    }
+    stmtResetCreds.run(nowIso(), String(r.id));
+    reset++;
+  }
+  return { reset, skipped, total: rows.length };
+}
+
 export async function createUser({ username, password, role = 'user' }) {
   const name = String(username || '').trim();
   const pass = String(password || '');
