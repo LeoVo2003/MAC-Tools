@@ -375,6 +375,11 @@ export function createApp() {
     destroySession(req, res, () => res.redirect(302, '/'));
   });
 
+  /** Trang ẩn recovery — /recovery (không chỉ /recovery.html). */
+  app.get('/recovery', (_req, res) => {
+    res.sendFile(path.join(getPublicDir(), 'recovery.html'));
+  });
+
   /** Review Link: proxy sang Cloudflare Worker (tránh CORS browser). */
   app.get('/api/review-link', requireAuth, async (req, res) => {
     const url = String(req.query.url || '').trim();
