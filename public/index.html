@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/style.css?v=20261103a" />
+  <link rel="stylesheet" href="/style.css?v=20261103b" />
 </head>
 <body>
   <a class="skip-link" href="#content">Bỏ qua điều hướng</a>
@@ -170,6 +170,22 @@
                   <button type="button" id="dashPurge" class="btn btn-ghost btn-sm">Dọn lỗi &amp; hủy</button>
                 </span>
               </div>
+            </div>
+            <div class="dash-import" data-admin-only hidden>
+              <label class="field grow">
+                <span>Import CSV tool cũ</span>
+                <input id="dashImportFile" type="file" accept=".csv,text/csv" />
+              </label>
+              <label class="field">
+                <span>Loại</span>
+                <select id="dashImportKind">
+                  <option value="auto">Tự nhận</option>
+                  <option value="f-package">User Guide / F Package</option>
+                  <option value="review-link">Review Link</option>
+                </select>
+              </label>
+              <button type="button" id="dashImportBtn" class="btn btn-primary self-end">Import</button>
+              <p id="dashImportHint" class="hint hint--muted">Nhận CSV export từ User Guide cũ hoặc Review Link cũ. Dòng trùng sẽ bỏ qua.</p>
             </div>
             <div class="filters">
               <label><span>Tool</span>
@@ -506,6 +522,6 @@
   </div>
   <script src="/socket.io/socket.io.js"></script>
   <script src="/colorpicker.js?v=20261016a"></script>
-  <script src="/app.js?v=20261103a"></script>
+  <script src="/app.js?v=20261103b"></script>
 </body>
 </html>

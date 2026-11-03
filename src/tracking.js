@@ -229,6 +229,214 @@ export function runsToCsv(rows) {
   return `${lines.join('\n')}\n`;
 }
 
+/** Parse CSV đơn giản (hỗ trợ dấu ngoặc kép). */
+export function parseCsvText(text) {
+  const raw = String(text || '').replace(/^\uFEFF/, '');
+  const rows = [];
+  let row = [];
+  let cell = '';
+  let inQuotes = false;
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    const next = raw[i + 1];
+    if (inQuotes) {
+      if (ch === '"' && next === '"') {
+        cell += '"';
+        i++;
+      } else if (ch === '"') {
+        inQuotes = false;
+      } else {
+        cell += ch;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inQuotes = true;
+      continue;
+    }
+    if (ch === ',') {
+      row.push(cell);
+      cell = '';
+      continue;
+    }
+    if (ch === '\n') {
+      row.push(cell);
+      if (row.some((v) => String(v).trim() !== '')) rows.push(row);
+      row = [];
+      cell = '';
+      continue;
+    }
+    if (ch === '\r') continue;
+    cell += ch;
+  }
+  if (cell.length || row.length) {
+    row.push(cell);
+    if (row.some((v) => String(v).trim() !== '')) rows.push(row);
+  }
+  if (!rows.length) return { headers: [], records: [] };
+  const headers = rows[0].map((h) => String(h || '').trim());
+  const records = rows.slice(1).map((cols) => {
+    const obj = {};
+    headers.forEach((h, idx) => {
+      obj[h] = cols[idx] ?? '';
+    });
+    return obj;
+  });
+  return { headers, records };
+}
+
+function normHeaderMap(headers) {
+  const map = {};
+  for (const h of headers) {
+    map[String(h || '').trim().toLowerCase()] = h;
+  }
+  return map;
+}
+
+function pick(rec, headerMap, names) {
+  for (const name of names) {
+    const key = headerMap[name.toLowerCase()];
+    if (key != null && rec[key] != null && String(rec[key]).trim() !== '') {
+      return String(rec[key]).trim();
+    }
+  }
+  return '';
+}
+
+function detectImportKind(headers) {
+  const lower = headers.map((h) => String(h || '').trim().toLowerCase());
+  if (lower.includes('review url') || (lower.includes('platform') && lower.includes('input url'))) {
+    return 'review-link';
+  }
+  if (lower.includes('startedat') || lower.includes('websiteurl') || lower.includes('tooluser')) {
+    return 'f-package';
+  }
+  return '';
+}
+
+function importKeyFor(kind, fields) {
+  if (kind === 'review-link') {
+    return `rl:${fields.startedAt}|${fields.reviewUrl}|${fields.placeId}`;
+  }
+  return `fp:${fields.startedAt}|${fields.toolUser}|${fields.websiteUrl}|${fields.username}|${fields.status}`;
+}
+
+/**
+ * Import lịch sử từ CSV tool cũ (admin).
+ * @param {string} csvText
+ * @param {{ kind?: 'f-package'|'review-link'|'auto', importedBy?: string }} [opts]
+ */
+export function importRunsFromCsv(csvText, { kind = 'auto', importedBy = '' } = {}) {
+  const { headers, records } = parseCsvText(csvText);
+  if (!headers.length) throw new Error('CSV trống hoặc không đọc được.');
+  const detected = kind === 'auto' ? detectImportKind(headers) : kind;
+  if (detected !== 'f-package' && detected !== 'review-link') {
+    throw new Error('Không nhận ra loại CSV. Chọn User Guide hoặc Review Link.');
+  }
+  const headerMap = normHeaderMap(headers);
+  const existingKeys = new Set();
+  for (const r of readAllRuns()) {
+    if (r.importKey) existingKeys.add(String(r.importKey));
+  }
+
+  let inserted = 0;
+  let skipped = 0;
+  let invalid = 0;
+  const insertMany = db.transaction((rows) => {
+    for (const rec of rows) {
+      let fields;
+      if (detected === 'review-link') {
+        const startedAt = pick(rec, headerMap, ['Time', 'startedAt', 'started_at']);
+        const reviewUrl = pick(rec, headerMap, ['Review URL', 'reviewUrl', 'review_url']);
+        const inputUrl = pick(rec, headerMap, ['Input URL', 'inputUrl', 'websiteUrl']);
+        const platform = pick(rec, headerMap, ['Platform', 'platform']);
+        const placeId = pick(rec, headerMap, ['ID', 'id', 'placeId']);
+        if (!startedAt || !reviewUrl) {
+          invalid++;
+          continue;
+        }
+        fields = {
+          startedAt,
+          finishedAt: startedAt,
+          durationMs: 0,
+          tool: 'review-link',
+          toolUser: importedBy || 'import',
+          websiteUrl: inputUrl || reviewUrl,
+          status: 'success',
+          username: '',
+          error: null,
+          reviewUrl,
+          placeId,
+          platform,
+        };
+      } else {
+        const startedAt = pick(rec, headerMap, ['startedAt', 'started_at', 'Time']);
+        const finishedAt = pick(rec, headerMap, ['finishedAt', 'finished_at']) || startedAt;
+        const toolUser = pick(rec, headerMap, ['toolUser', 'tool_user', 'user']);
+        const websiteUrl = pick(rec, headerMap, ['websiteUrl', 'website_url', 'Website']);
+        const status = (pick(rec, headerMap, ['status']) || 'success').toLowerCase();
+        const username = pick(rec, headerMap, ['username', 'user name']);
+        const error = pick(rec, headerMap, ['error']) || null;
+        const durationRaw = pick(rec, headerMap, ['durationMs', 'duration_ms']);
+        const durationMs = Number(durationRaw);
+        if (!startedAt) {
+          invalid++;
+          continue;
+        }
+        fields = {
+          startedAt,
+          finishedAt,
+          durationMs: Number.isFinite(durationMs) ? durationMs : durationOf({ startedAt, finishedAt }),
+          tool: pick(rec, headerMap, ['tool']) || 'f-package',
+          toolUser: toolUser || importedBy || 'import',
+          websiteUrl,
+          status,
+          username,
+          error,
+        };
+      }
+      const importKey = importKeyFor(detected, fields);
+      if (existingKeys.has(importKey)) {
+        skipped++;
+        continue;
+      }
+      existingKeys.add(importKey);
+      const id = newId();
+      const meta = {
+        userId: null,
+        tool: fields.tool,
+        toolUser: fields.toolUser,
+        websiteUrl: fields.websiteUrl || '',
+        username: fields.username || '',
+        error: fields.error || null,
+        durationMs: fields.durationMs,
+        imported: true,
+        importKey,
+        importSource: detected,
+        importedBy: importedBy || '',
+        importedAt: new Date().toISOString(),
+        resultSummary: {
+          project: fields.platform || '',
+          loginUrl: fields.reviewUrl || '',
+          username: fields.username || '',
+          accountExists: false,
+        },
+      };
+      stmtInsertRun.run({
+        id,
+        user_id: null,
+        status: fields.status || 'success',
+        started_at: fields.startedAt,
+        finished_at: fields.finishedAt || fields.startedAt,
+        meta: JSON.stringify(meta),
+      });
+      inserted++;
+    }
+  });
+  insertMany(records);
+  return { ok: true, kind: detected, inserted, skipped, invalid, total: records.length };
+}
+
 /** Xóa toàn bộ lịch sử báo cáo (admin). */
 export function clearRuns() {
   const before = stmtCountRuns.get().c;

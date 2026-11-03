@@ -1023,11 +1023,15 @@ function renderQueue(q) {
     const statusLabel = item.status === 'running' ? '▶ Running' : `#${item.position || '?'} Waiting`;
     const statusClass = item.status === 'running' ? 'is-running' : 'is-waiting';
     const metaBits = [short ? `${short}…` : '', when].filter(Boolean).join(' · ');
+    const canCancel =
+      currentUser?.role === 'admin' ||
+      String(item.userId || '') === String(currentUser?.id || '') ||
+      String(item.user || '') === String(currentUser?.username || '');
     row.innerHTML = `
       <div class="queue-main">
         <div class="queue-top">
           <span class="queue-status ${statusClass}">${statusLabel}</span>
-          <button type="button" class="btn btn-light btn-sm queue-cancel" data-id="${item.id}">Hủy</button>
+          ${canCancel ? `<button type="button" class="btn btn-light btn-sm queue-cancel" data-id="${item.id}">Hủy</button>` : ''}
         </div>
         <div class="queue-user" title="${who}">${who}</div>
         <div class="meta">${metaBits}</div>
@@ -1935,6 +1939,37 @@ document.getElementById('dashExportCsv')?.addEventListener('click', () => {
   const { from, to } = dashRangeDates();
   const params = new URLSearchParams({ limit: 2000, tool: dashState.tool, user: dashState.user, status: dashState.status, from, to });
   window.open(`/api/runs.csv?${params}`, '_blank');
+});
+document.getElementById('dashImportBtn')?.addEventListener('click', async () => {
+  const fileInput = document.getElementById('dashImportFile');
+  const kind = document.getElementById('dashImportKind')?.value || 'auto';
+  const hint = document.getElementById('dashImportHint');
+  const btn = document.getElementById('dashImportBtn');
+  const file = fileInput?.files?.[0];
+  if (!file) {
+    if (hint) { hint.textContent = 'Chọn file CSV trước.'; hint.className = 'hint hint--error'; }
+    return;
+  }
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('kind', kind);
+  if (btn) btn.disabled = true;
+  if (hint) { hint.textContent = 'Đang import…'; hint.className = 'hint hint--muted'; }
+  try {
+    const res = await fetch('/api/runs/import', { method: 'POST', body: fd, credentials: 'same-origin' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) throw new Error(data.error || res.statusText);
+    if (hint) {
+      hint.textContent = `Xong (${data.kind}): thêm ${data.inserted}, bỏ trùng ${data.skipped}, lỗi dòng ${data.invalid}/${data.total}.`;
+      hint.className = 'hint hint--ok';
+    }
+    if (fileInput) fileInput.value = '';
+    loadDashboard();
+  } catch (err) {
+    if (hint) { hint.textContent = err.message || 'Import thất bại.'; hint.className = 'hint hint--error'; }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 });
 document.getElementById('dashTable')?.addEventListener('click', (e) => {
   const btn = e.target.closest('.dash-detail');

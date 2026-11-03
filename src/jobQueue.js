@@ -42,24 +42,13 @@ export function createJobQueue({ onLog, onChange, maxConcurrent = 0 } = {}) {
     };
   }
 
-  /** Mỗi user chỉ thấy job của mình (admin thấy hết). */
-  function snapshotForUser(userId, { admin = false } = {}) {
-    const full = snapshot();
-    if (admin) return full;
-    const uid = String(userId || '');
-    const mine = full.queue.filter((j) => String(j.userId || '') === uid);
-    const runningMine = mine.filter((j) => j.status === 'running');
-    const pendingMine = mine
-      .filter((j) => j.status === 'pending')
-      .map((j, i) => ({ ...j, position: i + 1 }));
-    return {
-      ...full,
-      runningCount: runningMine.length,
-      pendingCount: pendingMine.length,
-      activeJobId: runningMine[0]?.id || null,
-      queue: [...runningMine, ...pendingMine],
-      scoped: true,
-    };
+  /**
+   * Snapshot hàng đợi cho UI.
+   * Team cần thấy hết ai đang chạy/chờ — không lọc theo user.
+   * (Hủy job vẫn chỉ owner/admin ở API cancel.)
+   */
+  function snapshotForUser(_userId, { admin: _admin = false } = {}) {
+    return { ...snapshot(), scoped: false };
   }
 
   function remember(job) {

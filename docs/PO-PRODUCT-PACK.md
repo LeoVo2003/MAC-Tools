@@ -91,8 +91,8 @@ Copy Output → dán Task / gửi khách (hoặc AM tự lấy nếu Task không
 
 | Role | Gán | Quyền |
 |---|---|---|
-| **user** | Mọi email WPM login lần đầu (không nằm admin list) | Fill, Run/Resume/Hủy **job mình**, Log/Output/Live, queue mình. Target = Main Web. Không Dashboard / không API admin. |
-| **admin** | `leo.vo@macusaone.com` + `ADMIN_EMAILS` | Thêm: Target web (Main / khớp Website), Dashboard, thấy/hủy mọi job, API admin (runs, purge…). |
+| **user** | Mọi email WPM login lần đầu (không nằm admin list) | Fill, Run/Resume/Hủy **job mình**, Log/Output/Live, **thấy hàng đợi mọi người**. Target = Main Web. Không Dashboard / không API admin. |
+| **admin** | `leo.vo@macusaone.com` + `ADMIN_EMAILS` | Thêm: Target web (Main / khớp Website), Dashboard, hủy mọi job, import CSV lịch sử, API admin (runs, purge…). |
 
 ---
 
@@ -121,7 +121,7 @@ Copy Output → dán Task / gửi khách (hoặc AM tự lấy nếu Task không
 - FR-R8: Output Login URL, Guide, User, Password; có Task URL thì điền field nếu tồn tại, không thì bỏ qua.
 
 ### FR-Admin
-- FR-AD1: Dashboard runs, CSV, clear.  
+- FR-AD1: Dashboard runs, CSV export/import, clear.  
 - FR-AD2: Target subdomain test.  
 - FR-AD3: Health / purge backup API.
 

@@ -1524,6 +1524,25 @@ td.mono {
   gap: var(--space-3);
 }
 
+.dash-import {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  padding: var(--space-4);
+  border: 1px dashed var(--border-btn);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+.dash-import .field {
+  min-width: 180px;
+}
+.dash-import .hint {
+  flex: 1 1 100%;
+  margin: 0;
+}
+
 /* Segmented range picker */
 .seg {
   display: inline-flex;

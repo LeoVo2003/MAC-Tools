@@ -27,6 +27,7 @@ import {
   deleteRunsByIds,
   deleteRunsByStatuses,
   closeInterruptedRuns,
+  importRunsFromCsv,
 } from './src/tracking.js';
 import { pruneRuns } from './src/db.js';
 import {
@@ -56,6 +57,11 @@ const qrUpload = multer({
     if (file.mimetype.startsWith('image/')) cb(null, true);
     else cb(new Error('Chỉ chấp nhận file ảnh'));
   },
+});
+
+const csvUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024, files: 1 },
 });
 
 dotenv.config({ path: getEnvPath() });
@@ -927,6 +933,28 @@ export function createApp() {
       return res.status(400).json({ error: 'Thiếu ids hoặc statuses.' });
     } catch (err) {
       res.status(500).json({ error: err?.message || String(err) });
+    }
+  });
+
+  /** Import CSV lịch sử từ User Guide / Review Link cũ (admin). */
+  app.post('/api/runs/import', requireAuth, requireAdmin, csvUpload.single('file'), (req, res) => {
+    try {
+      if (!req.file?.buffer) {
+        return res.status(400).json({ ok: false, error: 'Thiếu file CSV.' });
+      }
+      const kindRaw = String(req.body?.kind || 'auto').trim().toLowerCase();
+      const kind =
+        kindRaw === 'f-package' || kindRaw === 'review-link' || kindRaw === 'auto'
+          ? kindRaw
+          : 'auto';
+      const text = req.file.buffer.toString('utf8');
+      const result = importRunsFromCsv(text, {
+        kind,
+        importedBy: req.user.username,
+      });
+      res.json(result);
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err?.message || String(err) });
     }
   });
 
