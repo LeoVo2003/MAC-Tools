@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/style.css?v=20261103f" />
+  <link rel="stylesheet" href="/style.css?v=20261103h" />
 </head>
 <body>
   <a class="skip-link" href="#content">Bỏ qua điều hướng</a>
@@ -110,12 +110,16 @@
         <section id="tab-dashboard" data-admin-only hidden>
           <div class="dash-toolbar">
             <div class="seg" role="group" aria-label="Khoảng thời gian">
+              <button type="button" class="seg-btn is-active" data-range="all">Tất cả</button>
               <button type="button" class="seg-btn" data-range="today">Hôm nay</button>
               <button type="button" class="seg-btn" data-range="7d">7 ngày</button>
-              <button type="button" class="seg-btn is-active" data-range="30d">30 ngày</button>
+              <button type="button" class="seg-btn" data-range="30d">30 ngày</button>
             </div>
             <button type="button" id="dashRefresh" class="btn btn-ghost btn-sm">Refresh</button>
           </div>
+
+          <h2 class="dash-h">Theo tool</h2>
+          <div class="tool-cards" id="dashTools"><p class="empty">Đang tải…</p></div>
 
           <div class="kpis" id="dashKpis" aria-label="Chỉ số tổng quan">
             <div class="kpi">
@@ -139,9 +143,6 @@
               <div><p class="kpi-label">Thời gian TB</p><p class="kpi-value" id="dashAvg">—</p></div>
             </div>
           </div>
-
-          <h2 class="dash-h">Theo tool</h2>
-          <div class="tool-cards" id="dashTools"><p class="empty">Đang tải…</p></div>
 
           <div class="dash-grid">
             <section class="block">
@@ -525,6 +526,6 @@
   </div>
   <script src="/socket.io/socket.io.js"></script>
   <script src="/colorpicker.js?v=20261016a"></script>
-  <script src="/app.js?v=20261103f"></script>
+  <script src="/app.js?v=20261103h"></script>
 </body>
 </html>

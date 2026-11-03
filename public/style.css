@@ -1523,6 +1523,14 @@ td.mono {
   justify-content: space-between;
   gap: var(--space-3);
 }
+#tab-dashboard > .dash-h {
+  margin-top: var(--space-2);
+}
+#dashKpis[data-tool]:not([data-tool=""]) .kpi-label::after {
+  content: " · đang lọc tool";
+  color: var(--text-3);
+  font-weight: 500;
+}
 
 .dash-import {
   display: flex;

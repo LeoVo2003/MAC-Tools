@@ -1723,10 +1723,11 @@ function toolIcon(t) {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
 }
 
-const dashState = { range: '30d', page: 1, perPage: 20, tool: '', user: '', status: '', totalPages: 1 };
+const dashState = { range: 'all', page: 1, perPage: 20, tool: '', user: '', status: '', totalPages: 1 };
 
 function dashRangeDates() {
-  // Dùng giờ VN, không phải UTC
+  // Dùng giờ VN, không phải UTC. range=all → không lọc ngày.
+  if (dashState.range === 'all') return { from: '', to: '' };
   const fmtVN = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
   const now = new Date();
   const to = fmtVN(now);
@@ -1773,16 +1774,7 @@ async function loadDashboard() {
     let queued = 0;
     try { const q = await queueRes?.json(); queued = q?.pendingCount ?? 0; } catch {}
 
-    // KPIs
-    const s = stats.stats || {};
-    document.getElementById('dashTotal').textContent = s.total ?? 0;
-    const rate = s.total ? Math.round((s.success / s.total) * 100) : 0;
-    document.getElementById('dashSuccessRate').textContent = `${rate}%`;
-    document.getElementById('dashRunning').textContent = s.running ?? 0;
-    document.getElementById('dashQueued').textContent = queued;
-    document.getElementById('dashAvg').textContent = fmtDur(s.avgDurationMs);
-
-    // Tool cards — chỉ 3 category chính
+    // Tool cards — luôn hiện đủ 3 tool trong khoảng ngày (không phụ thuộc card đang chọn)
     const toolsBox = document.getElementById('dashTools');
     const byTool = (stats.byTool || []).filter((t) => ['f-package', 'qr', 'review-link'].includes(t.tool));
     if (!byTool.length) {
@@ -1799,6 +1791,21 @@ async function loadDashboard() {
         </button>`;
       }).join('');
     }
+
+    // KPIs: không chọn tool = tổng; chọn tool = chỉ số của tool đó
+    const s = dashState.tool
+      ? (byTool.find((t) => t.tool === dashState.tool) || {
+          total: 0, success: 0, error: 0, running: 0, avgDurationMs: null,
+        })
+      : (stats.stats || {});
+    document.getElementById('dashTotal').textContent = s.total ?? 0;
+    const rate = s.total ? Math.round((s.success / s.total) * 100) : 0;
+    document.getElementById('dashSuccessRate').textContent = `${rate}%`;
+    document.getElementById('dashRunning').textContent = s.running ?? 0;
+    document.getElementById('dashQueued').textContent = queued;
+    document.getElementById('dashAvg').textContent = fmtDur(s.avgDurationMs);
+    const kpis = document.getElementById('dashKpis');
+    if (kpis) kpis.dataset.tool = dashState.tool || '';
 
     await Promise.all([loadDashErrors(), loadDashTable(), loadDashHealth()]);
   } catch (err) {
@@ -2049,7 +2056,9 @@ document.getElementById('dashImportBtn')?.addEventListener('click', async () => 
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.ok) throw new Error(data.error || res.statusText);
     if (hint) {
-      hint.textContent = `Xong (${data.kind}): thêm ${data.inserted}, bỏ trùng ${data.skipped}, lỗi dòng ${data.invalid}/${data.total}.`;
+      hint.textContent =
+        `Xong (${data.kind}): thêm ${data.inserted}, bỏ trùng ${data.skipped}, lỗi dòng ${data.invalid}/${data.total}. ` +
+        `KPI/lịch sử đang theo khoảng ngày phía trên — chọn “Tất cả” để xem cả bản ghi cũ.`;
       hint.className = 'hint hint--ok';
     }
     if (fileInput) fileInput.value = '';
