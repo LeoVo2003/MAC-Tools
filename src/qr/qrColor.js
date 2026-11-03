@@ -119,21 +119,53 @@ export function baseColor(primary) {
 }
 
 /**
- * Màu phụ tự sinh: cùng hue, lệch lightness vừa đủ (CR>=1.8) để phân biệt với primary.
- * Ngoại lệ: primary vàng/cam sáng → bản "đậm" của nó là olive/nâu bùn, nên dùng neutral đậm ám hue.
+ * Màu phụ tự sinh: cùng họ màu (hue ±18..36°), lightness khác rõ primary,
+ * chroma hơi hạ để không “bẩn” / không đụng primary. CR vs primary >= 1.8, chữ AA.
+ * Chỉ khi analogous thất bại mới thử hue xa hơn. Vàng/cam sáng → neutral đậm ám hue.
  */
 export function deriveSecondary(primary) {
   const p = baseColor(primary); if (!p) return null;
   const primHex = isGradient(primary) ? oklchToHex(p) : primary.slice(0, 7).toUpperCase();
   const warmBright = p.L > 0.78 && p.C > 0.12 && p.h >= 60 && p.h <= 110;
   if (warmBright) return oklchToHex({ L: 0.32, C: 0.045, h: p.h });
-  const dir = p.L >= 0.55 ? -1 : +1;
-  let best = null;
-  for (let d = 0.14; d <= 0.40; d += 0.02) {
-    best = oklchToHex({ L: clamp(p.L + dir * d, 0.18, 0.88), C: p.C * 0.92, h: p.h });
-    if (contrast(primHex, best) >= 1.8) break;
+
+  const wrap = (h) => ((h % 360) + 360) % 360;
+  const hueDelta = (a, b) => { const d = Math.abs(wrap(a) - wrap(b)); return Math.min(d, 360 - d); };
+  // Primary tối → phụ sáng vừa; primary sáng/trung → phụ đậm hơn (nút phụ vẫn “đậm”, không hồng nhạt)
+  const Ltargets = p.L >= 0.52
+    ? [0.36, 0.30, 0.42, 0.24]
+    : [0.56, 0.62, 0.48, 0.68];
+  const tryHues = [
+    wrap(p.h + 22), wrap(p.h - 22), wrap(p.h + 34), wrap(p.h - 34), wrap(p.h),
+    wrap(p.h + 150), wrap(p.h - 150), // fallback xa hue
+  ];
+
+  let best = null, bestScore = -Infinity;
+  for (const h of tryHues) {
+    const near = hueDelta(h, p.h) <= 40;
+    for (const L of Ltargets) {
+      for (const cMul of [0.78, 0.62, 0.9]) {
+        const C = Math.min(Math.max(p.C * cMul, 0.05), near ? 0.15 : 0.12);
+        const hex = oklchToHex({ L, C, h });
+        const vsP = contrast(primHex, hex);
+        if (vsP < 1.8) continue;
+        const textOk = Math.max(contrast(hex, '#FFFFFF'), contrast(hex, '#141414'));
+        if (textOk < 4.5) continue;
+        // Ưu tiên cùng họ màu; tránh xám và tránh sát primary
+        const score = (near ? 12 : 0) + vsP * 2.2 + textOk + C * 6
+          - Math.abs(L - (p.L >= 0.52 ? 0.34 : 0.58)) * 1.5;
+        if (score > bestScore) { bestScore = score; best = hex; }
+      }
+    }
   }
-  return best;
+  if (best) return best;
+
+  const dir = p.L >= 0.55 ? -1 : +1;
+  for (let d = 0.18; d <= 0.45; d += 0.02) {
+    const hex = oklchToHex({ L: clamp(p.L + dir * d, 0.2, 0.85), C: Math.min(p.C * 0.8, 0.12), h: wrap(p.h + 18) });
+    if (contrast(primHex, hex) >= 1.8) return hex;
+  }
+  return oklchToHex({ L: clamp(p.L + dir * 0.3, 0.2, 0.85), C: Math.min(p.C * 0.75, 0.12), h: wrap(p.h + 22) });
 }
 
 /**

@@ -1430,9 +1430,14 @@ function renderPalettePreview(palette) {
     el.style.background = bg;
     el.style.color = fg;
   };
-  // Nền nút = --qr-primary-bg (giữ gradient); --qr-primary chỉ là màu đặc cho chữ/viền
+  // Nút chính: nền --qr-primary-bg (giữ gradient). Nút phụ trên web = viền secondary + nền soft (không tô đặc bẩn).
   setBg('ppBtnPrimary', vars['--qr-primary-bg'] || vars['--qr-primary'], vars['--qr-text-on-primary']);
-  setBg('ppBtnSecondary', vars['--qr-secondary'], vars['--qr-text-on-secondary']);
+  const secBtn = document.getElementById('ppBtnSecondary');
+  if (secBtn) {
+    secBtn.style.background = vars['--qr-primary-soft'] || '#fff';
+    secBtn.style.color = vars['--qr-accent-ink'] || vars['--qr-text-on-soft'];
+    secBtn.style.boxShadow = `inset 0 0 0 2px ${vars['--qr-secondary']}`;
+  }
   const soft = document.getElementById('ppSoftBox');
   if (soft) {
     soft.style.background = vars['--qr-primary-soft'];
@@ -1446,7 +1451,8 @@ function renderPalettePreview(palette) {
     el.classList.toggle('bad', !ok);
   };
   chip('ppChipPrimary', report.onPrimary);
-  chip('ppChipSecondary', report.onSecondary);
+  // Nút phụ = viền + chữ accent trên nền soft (không tô đặc secondary)
+  chip('ppChipSecondary', report.accentInkOnSoft ?? report.onSoft);
   const warnBox = document.getElementById('ppWarnings');
   if (warnBox) {
     if (report.warnings && report.warnings.length) {
