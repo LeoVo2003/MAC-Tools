@@ -235,10 +235,21 @@ export function replaceThemeCssImages(elements, bg2Media) {
  */
 export function patchButtonWeight(elements, weight = 600) {
   let patched = false;
-  // (Review 2 - 1.2) TẤT CẢ nút trong template đều có background = var(--qr-primary)
-  // (secondary chỉ là viền), nên chữ/icon LUÔN dùng --qr-text-on-primary.
-  // Patch cũ dùng on-secondary cho .btn-s/social → vàng/cam/nâu chỉ 1.4-3.1:1.
-  const override = `\n/* TOOL PATCH: nút có font-weight + màu chữ đúng contrast */\n.btn-m a, .btn-s a, .btn-l a, .btn-s .wpcf7-submit { font-weight: ${weight} !important; }\n.btn-m a, .btn-s a, .btn-l a, .btn-s .wpcf7-submit, .elementor-button-link { color: var(--qr-text-on-primary, #141414) !important; }\n/* Icon trong nút và social icons đổi màu theo chữ (dùng currentColor) */\n.btn-m a svg, .btn-s a svg, .btn-l a svg { fill: currentColor !important; }\n.btn-m a svg path, .btn-s a svg path, .btn-l a svg path { fill: currentColor !important; }\n.btn-m a i, .btn-s a i, .btn-l a i { color: inherit !important; }\n.social-icons a, .social-icon a, [class*=\"social\"] a { color: var(--qr-text-on-primary, #141414) !important; }\n.social-icons a svg, [class*=\"social\"] a svg { fill: currentColor !important; }\n.social-icons a svg path, [class*=\"social\"] a svg path { fill: currentColor !important; }\n`;
+  // Nút: nền dùng --qr-primary-bg (giữ gradient), chữ/icon dùng --qr-text-on-primary.
+  // Secondary chỉ là viền trên template → không dùng on-secondary cho chữ nút.
+  const override =
+    `\n/* TOOL PATCH: nút có font-weight + màu chữ đúng contrast + nền primary-bg */\n` +
+    `.btn-m a, .btn-s a, .btn-l a, .btn-s .wpcf7-submit { font-weight: ${weight} !important; background: var(--qr-primary-bg, var(--qr-primary)) !important; background-color: transparent !important; }\n` +
+    `.btn-m a, .btn-s a, .btn-l a, .btn-s .wpcf7-submit, .elementor-button-link { color: var(--qr-text-on-primary, #141414) !important; }\n` +
+    `/* Icon trong nút và social icons đổi màu theo chữ (dùng currentColor) */\n` +
+    `.btn-m a svg, .btn-s a svg, .btn-l a svg { fill: currentColor !important; }\n` +
+    `.btn-m a svg path, .btn-s a svg path, .btn-l a svg path { fill: currentColor !important; }\n` +
+    `.btn-m a i, .btn-s a i, .btn-l a i { color: inherit !important; }\n` +
+    `.social-icons a, .social-icon a, [class*="social"] a { color: var(--qr-text-on-primary, #141414) !important; }\n` +
+    `.social-icons a svg, [class*="social"] a svg { fill: currentColor !important; }\n` +
+    `.social-icons a svg path, [class*="social"] a svg path { fill: currentColor !important; }\n`;
+  const stripOldPatch = (html) => html
+    .replace(/\/\* TOOL PATCH: nút có font-weight[^*]*\*\/[\s\S]*?(?=\/\*|<\/style>)/g, '');
   walkElements(elements, (el) => {
     if (patched) return;
     const wt = String(el.widgetType || '').toLowerCase();
@@ -247,8 +258,8 @@ export function patchButtonWeight(elements, weight = 600) {
       for (const key of ['html', 'custom_html']) {
         const val = s[key];
         if (typeof val === 'string' && val.includes('.btn-m a') && val.includes('</style>')) {
-          // Nếu đã có patch màu chữ mới → chỉ update font-weight nếu khác
-          if (val.includes('--qr-text-on-primary')) {
+          // Đã có patch đầy đủ (chữ + primary-bg) → chỉ sync font-weight
+          if (val.includes('--qr-text-on-primary') && val.includes('--qr-primary-bg')) {
             const weightRe = /(\.btn-m a, \.btn-s a, \.btn-l a, \.btn-s \.wpcf7-submit\s*\{\s*font-weight:\s*)(\d+)/;
             const m = val.match(weightRe);
             if (m && Number(m[2]) !== weight) {
@@ -256,10 +267,9 @@ export function patchButtonWeight(elements, weight = 600) {
             }
             patched = true;
           } else {
-            // Xóa patch cũ (nếu có) rồi thêm patch mới
-            let newVal = val.replace(/\/\* TOOL PATCH: nút có font-weight \*\/[\s\S]*?\.btn-s \.wpcf7-submit \{[^}]+\}\n/, '');
-            newVal = newVal.replace('</style>', `${override}</style>`);
-            s[key] = newVal;
+            // Patch cũ / thiếu primary-bg → thay bằng bản mới
+            const cleaned = stripOldPatch(val);
+            s[key] = cleaned.replace('</style>', `${override}</style>`);
             patched = true;
           }
           break;

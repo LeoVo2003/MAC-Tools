@@ -221,8 +221,8 @@ function applyRoleUi(user) {
   document.querySelectorAll('[data-admin-only]').forEach((el) => {
     el.hidden = !isAdmin;
   });
-  // Admin vào Dashboard, user thường vào User Guide
-  switchSection(isAdmin ? 'dashboard' : 'run');
+  // Admin vào Dashboard, user thường vào Review Link (dùng nhiều nhất)
+  switchSection(isAdmin ? 'dashboard' : 'reviewlink');
   if (!isAdmin) {
     const mainRadio = form?.querySelector('input[name="webTargetMode"][value="main"]');
     if (mainRadio) mainRadio.checked = true;
@@ -1430,7 +1430,8 @@ function renderPalettePreview(palette) {
     el.style.background = bg;
     el.style.color = fg;
   };
-  setBg('ppBtnPrimary', vars['--qr-primary'], vars['--qr-text-on-primary']);
+  // Nền nút = --qr-primary-bg (giữ gradient); --qr-primary chỉ là màu đặc cho chữ/viền
+  setBg('ppBtnPrimary', vars['--qr-primary-bg'] || vars['--qr-primary'], vars['--qr-text-on-primary']);
   setBg('ppBtnSecondary', vars['--qr-secondary'], vars['--qr-text-on-secondary']);
   const soft = document.getElementById('ppSoftBox');
   if (soft) {
@@ -1689,7 +1690,7 @@ function renderQrResult(data) {
   if (cf7.id) chips.push(`<span class="qr-chip">CF7 #${escapeHtml(String(cf7.id))} → ${escapeHtml(cf7.mailTo || data.email || '')}</span>`);
   const palette = qrLastPalette?.vars;
   const paletteHtml = palette
-    ? `<div class="qr-palette-applied">${['--qr-primary', '--qr-secondary', '--qr-primary-soft', '--qr-bg'].map((k) => `<span title="${k}: ${palette[k]}" style="background:${palette[k]}"></span>`).join('')}</div>`
+    ? `<div class="qr-palette-applied">${['--qr-primary-bg', '--qr-secondary', '--qr-primary-soft', '--qr-bg'].map((k) => `<span title="${k}: ${palette[k]}" style="background:${palette[k]}"></span>`).join('')}</div>`
     : '';
   card.innerHTML = `
     <a class="qr-result-url" href="${escapeHtml(pageUrl)}" target="_blank" rel="noopener">${escapeHtml(pageUrl)}</a>
