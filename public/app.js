@@ -1458,9 +1458,14 @@ function renderPalettePreview(palette) {
   }
 }
 
-function fetchPalettePreview() {
+// Màu phụ tự nhảy theo màu chính, cho tới khi user tự nhập màu phụ khác (ô trống = lại tự động)
+let qrSecAuto = !(document.getElementById('qrSecondary')?.value.trim());
+let qrSecLastAuto = '';
+let qrFillPending = false;
+
+function fetchPalettePreview(fromPrimary = false) {
+  if (fromPrimary === true) qrFillPending = true;
   const primary = document.getElementById('qrPrimary')?.value.trim() || '';
-  const secondary = document.getElementById('qrSecondary')?.value.trim() || '';
   const previewEl = document.getElementById('qrPalettePreview');
   // Chưa chọn màu chính → ẩn luôn bảng preview
   if (!primary) {
@@ -1470,32 +1475,46 @@ function fetchPalettePreview() {
   if (previewEl) previewEl.hidden = false;
   clearTimeout(qrPaletteTimer);
   qrPaletteTimer = setTimeout(async () => {
+    const fill = qrFillPending && qrSecAuto;
+    qrFillPending = false;
+    const secInput = document.getElementById('qrSecondary');
+    // Đang auto: hỏi backend với màu phụ trống để lấy màu phụ gợi ý
+    const secondary = fill ? '' : (secInput?.value.trim() || '');
     try {
       const r = await fetch(`/api/qr/palette?primary=${encodeURIComponent(primary)}&secondary=${encodeURIComponent(secondary)}`, { credentials: 'same-origin' });
       const d = await r.json();
-      if (d.ok) {
-        renderPalettePreview(d);
-        // Điền màu phụ tự sinh vào placeholder để user thấy
-        const secInput = document.getElementById('qrSecondary');
-        if (secInput && !secInput.value.trim()) secInput.placeholder = `Tự động: ${d.vars['--qr-secondary']}`;
+      if (!d.ok) return;
+      renderPalettePreview(d);
+      const auto = d.vars['--qr-secondary'];
+      if (fill && qrSecAuto && secInput && auto) {
+        qrSecLastAuto = auto;
+        if (qrSecondaryPicker) qrSecondaryPicker.set(auto); else secInput.value = auto;
+      } else if (secInput && !secInput.value.trim()) {
+        secInput.placeholder = `Tự động: ${auto}`;
       }
     } catch { /* bỏ qua, không chặn user */ }
   }, 150);
+}
+// User sửa màu phụ: trống → tự động; khác màu auto vừa điền → thủ công (ngừng tự nhảy)
+function onSecondaryEdited() {
+  const v = document.getElementById('qrSecondary')?.value.trim() || '';
+  qrSecAuto = !v || v === qrSecLastAuto;
+  fetchPalettePreview(false);
 }
 // Khởi tạo QR color picker (Untitled UI style: Solid + Gradient)
 qrPrimaryPicker = window.QrColorPicker?.attach(
   'qrPrimary',
   'qrPrimarySwatch',
-  { onChange: () => fetchPalettePreview() }
+  { onChange: () => fetchPalettePreview(true) }
 );
 qrSecondaryPicker = window.QrColorPicker?.attach(
   'qrSecondary',
   'qrSecondarySwatch',
-  { onChange: () => fetchPalettePreview() }
+  { onChange: () => onSecondaryEdited() }
 );
-document.getElementById('qrPrimary')?.addEventListener('input', fetchPalettePreview);
-document.getElementById('qrSecondary')?.addEventListener('input', fetchPalettePreview);
-fetchPalettePreview();
+document.getElementById('qrPrimary')?.addEventListener('input', () => fetchPalettePreview(true));
+document.getElementById('qrSecondary')?.addEventListener('input', onSecondaryEdited);
+fetchPalettePreview(qrSecAuto);
 
 qrForm?.addEventListener('submit', async (e) => {
   e.preventDefault();

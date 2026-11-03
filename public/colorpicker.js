@@ -763,7 +763,7 @@
   }));
 
   // Tabs (đổi tab chỉ xem; áp dụng khi chỉnh)
-  pop.querySelectorAll('.cp-tab').forEach((b) => b.addEventListener('click', () => { S.mode = b.dataset.mode; render(); }));
+  pop.querySelectorAll('.cp-tab').forEach((b) => b.addEventListener('click', () => { S.mode = b.dataset.mode; render(); place(); }));
   $('cp-done').addEventListener('click', () => close());
   $('cp-clear').addEventListener('click', () => { writeValue(''); close(); });
 
@@ -792,29 +792,24 @@
     builtFormat = '';
     render();
     pop.hidden = false;
+    place();
   }
-  async function close() {
+  // Giữ popup trong khung nhìn: lật lên trên / dịch sang trái nếu bị tràn
+  function place() {
+    pop.style.top = ''; pop.style.bottom = ''; pop.style.left = ''; pop.style.right = '';
+    const r = pop.getBoundingClientRect();
+    const wrap = pop.parentElement.getBoundingClientRect();
+    if (r.bottom > window.innerHeight - 8 && wrap.top > window.innerHeight - wrap.bottom) {
+      pop.style.top = 'auto'; pop.style.bottom = 'calc(100% + 8px)';
+    }
+    if (r.right > window.innerWidth - 8) { pop.style.left = 'auto'; pop.style.right = '0'; }
+  }
+  function close() {
     const t = S.target, dirty = S.dirty;
     pop.hidden = true;
     S.target = null; S.dirty = false;
     if (!t) return;
     if (typeof t.onChange === 'function' && dirty) { try { t.onChange(t.input.value); } catch { /* ignore */ } }
-    // Chọn màu chính xong mà màu phụ trống → gợi ý màu phụ
-    if (dirty && t.input.id === 'qrPrimary' && t.input.value) {
-      const sec = document.getElementById('qrSecondary');
-      if (sec && !sec.value.trim()) {
-        try {
-          const r = await fetch(`/api/qr/palette?primary=${encodeURIComponent(t.input.value)}`, { credentials: 'same-origin' });
-          const d = await r.json();
-          const sug = d && d.ok && d.vars && d.vars['--qr-secondary'];
-          if (sug) {
-            sec.value = sug;
-            paintSwatch(document.getElementById('qrSecondarySwatch'), sug);
-            sec.dispatchEvent(new Event('input', { bubbles: true }));
-          }
-        } catch { /* bỏ qua */ }
-      }
-    }
   }
 
   document.addEventListener('mousedown', (e) => {
