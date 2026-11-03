@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/style.css?v=20261016b" />
+  <link rel="stylesheet" href="/style.css?v=20261103a" />
 </head>
 <body>
   <a class="skip-link" href="#content">Bỏ qua điều hướng</a>
@@ -273,7 +273,7 @@
 
               <div class="section">
                 <h2>Bước chạy</h2>
-                <p class="muted small">Login WPM + Quick Login luôn chạy. Tối đa 4 job Chrome cùng lúc.</p>
+                <p id="concurrentHint" class="muted small">Login WPM + Quick Login luôn chạy. Mỗi người một job.</p>
                 <div class="row mb">
                   <button type="button" id="stepsAllBtn" class="btn btn-ghost btn-sm">Chọn hết</button>
                   <button type="button" id="stepsNoneBtn" class="btn btn-ghost btn-sm">Bỏ hết</button>
@@ -472,7 +472,7 @@
             <p class="muted">Paste Google Maps hoặc Yelp link để lấy direct review link — khách bấm vào đi thẳng tới form đánh giá.</p>
             <div class="rl-input-row">
               <label class="field grow">
-                <span>Google Maps / Yelp URLs <em class="muted">(mỗi dòng 1 link)</em></span>
+                <span>Google Maps / Yelp URLs <em class="muted">(mỗi dòng 1 link, Ctrl+Enter để tạo)</em></span>
                 <textarea id="rlUrl" rows="3" placeholder="https://maps.google.com/...&#10;https://www.yelp.com/biz/..." autocomplete="off"></textarea>
               </label>
               <button type="button" id="rlBtn" class="btn btn-primary btn-lg self-end">Generate</button>
@@ -506,6 +506,6 @@
   </div>
   <script src="/socket.io/socket.io.js"></script>
   <script src="/colorpicker.js?v=20261016a"></script>
-  <script src="/app.js?v=20261016b"></script>
+  <script src="/app.js?v=20261103a"></script>
 </body>
 </html>

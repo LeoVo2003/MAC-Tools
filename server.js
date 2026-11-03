@@ -31,6 +31,7 @@ import {
 import { pruneRuns } from './src/db.js';
 import {
   ensureKnownUsers,
+  findUserById,
   loginWithWpm,
   toPublicUser,
   getUserWpmCredentials,
@@ -98,7 +99,7 @@ export function createApp() {
   app.use(express.json({ limit: '1mb' }));
   app.use(sharedSession);
 
-  app.get('/api/health', requireAuth, (req, res) => {
+  app.get('/api/health', (req, res) => {
     const snap = queue.snapshot();
     const report = buildHealthReport({
       queueSnapshot: snap,
@@ -109,6 +110,13 @@ export function createApp() {
       queue.listActiveJobs(),
       Number(process.env.JOB_STALE_MINUTES) || 45
     );
+    const ok = report.chrome.ok && !report.alerts.some((a) => a.level === 'error');
+    // Probe công khai cho Docker/nginx: chỉ ok + version, không lộ job, path, disk.
+    const user = req.session?.userId ? findUserById(req.session.userId) : null;
+    if (!user) {
+      return res.status(ok ? 200 : 503).json({ ok, version: VERSION });
+    }
+    req.user = user;
     // C5: chỉ admin xem chi tiết job, user thường chỉ thấy số lượng
     if (req.user.role === 'admin') {
       for (const s of staleJobs) {
@@ -126,10 +134,15 @@ export function createApp() {
       report.staleJobs = [];
       // Ẩn queue snapshot chi tiết
       if (report.queue) {
-        report.queue = { running: report.queue.running?.length || 0, waiting: report.queue.waiting?.length || 0 };
+        report.queue = {
+          runningCount: report.queue.runningCount || 0,
+          pendingCount: report.queue.pendingCount || 0,
+          maxConcurrent: report.queue.maxConcurrent || 0,
+        };
       }
+      if (report.chrome) report.chrome = { ok: Boolean(report.chrome.ok) };
+      if (report.disk) report.disk = { mb: report.disk.mb ?? null };
     }
-    const ok = report.chrome.ok && !report.alerts.some((a) => a.level === 'error');
     res.status(ok ? 200 : 503).json({ ok, version: VERSION, ...report });
   });
 
@@ -176,13 +189,20 @@ export function createApp() {
   const LOGIN_MAX_ATTEMPTS = 5;
   const loginHitsByIp = new Map();    // ip -> number[] (timestamps)
   const loginHitsByEmail = new Map(); // email (lowercase) -> number[] (timestamps)
-  function loginHitAllowed(map, key) {
+  function recentLoginHits(map, key) {
     const now = Date.now();
     const recent = (map.get(key) || []).filter((t) => now - t < LOGIN_WINDOW_MS);
-    if (recent.length >= LOGIN_MAX_ATTEMPTS) return false;
-    recent.push(now);
+    if (recent.length) map.set(key, recent);
+    else map.delete(key);
+    return recent;
+  }
+  function loginBlocked(map, key) {
+    return recentLoginHits(map, key).length >= LOGIN_MAX_ATTEMPTS;
+  }
+  function recordLoginFailure(map, key) {
+    const recent = recentLoginHits(map, key);
+    recent.push(Date.now());
     map.set(key, recent);
-    return true;
   }
   // Dọn các key hết hạn mỗi 5 phút để Map không phình vô hạn
   const loginRateCleanup = setInterval(() => {
@@ -197,9 +217,8 @@ export function createApp() {
 
   function loginRateLimit(req, res, next) {
     const email = String(req.body?.username || '').trim().toLowerCase();
-    const ipOk = loginHitAllowed(loginHitsByIp, req.ip || 'unknown');
-    const emailOk = email ? loginHitAllowed(loginHitsByEmail, email) : true;
-    if (!ipOk || !emailOk) {
+    const ip = req.ip || 'unknown';
+    if (loginBlocked(loginHitsByIp, ip) || (email && loginBlocked(loginHitsByEmail, email))) {
       return res.status(429).json({ error: 'Đăng nhập thử quá nhiều lần. Vui lòng đợi 15 phút rồi thử lại.' });
     }
     next();
@@ -224,6 +243,8 @@ export function createApp() {
     try {
       const user = await loginWithWpm(username, password);
       if (!user) {
+        recordLoginFailure(loginHitsByIp, req.ip || 'unknown');
+        recordLoginFailure(loginHitsByEmail, username.trim().toLowerCase());
         return res.status(401).json({
           error: 'Sai password. Đúng email đã từng login thì nhập đúng password đã lưu (hoặc liên hệ admin reset).',
         });
@@ -260,6 +281,15 @@ export function createApp() {
   app.get('/api/review-link', requireAuth, async (req, res) => {
     const url = String(req.query.url || '').trim();
     if (!url) return res.status(400).json({ ok: false, error: 'Thiếu URL.' });
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(url);
+    } catch {
+      return res.status(400).json({ ok: false, error: 'URL không hợp lệ.' });
+    }
+    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+      return res.status(400).json({ ok: false, error: 'Chỉ nhận link http hoặc https.' });
+    }
     const rlRunId = startRun({
       tool: 'review-link',
       userId: req.user.id,
@@ -274,15 +304,20 @@ export function createApp() {
       const r = await fetch(`${workerBase}/api/convert?url=${encodeURIComponent(url)}`, { signal: ctrl.signal });
       clearTimeout(timeout);
       const data = await r.json();
-      if (r.ok && data?.ok) {
+      const reviewUrl = String(data?.reviewUrl || '');
+      const reviewOk = /^https?:\/\//i.test(reviewUrl);
+      if (r.ok && data?.ok && reviewOk) {
         finishRun(rlRunId, {
           status: 'success',
-          result: { project: data.platform || '', loginUrl: data.reviewUrl || '' },
+          result: { project: data.platform || '', loginUrl: reviewUrl },
         });
-      } else {
-        finishRun(rlRunId, { status: 'error', error: data?.error || 'Convert thất bại.' });
+        return res.json(data);
       }
-      res.status(r.ok ? 200 : 400).json(data);
+      const error = data?.ok && !reviewOk
+        ? 'Review link trả về không phải http hoặc https.'
+        : (data?.error || 'Convert thất bại.');
+      finishRun(rlRunId, { status: 'error', error });
+      res.status(400).json({ ok: false, error });
     } catch (err) {
       finishRun(rlRunId, { status: 'error', error: err?.message || String(err) });
       res.status(502).json({ ok: false, error: 'Không gọi được review-link worker: ' + (err?.message || err) });
@@ -451,7 +486,9 @@ export function createApp() {
       };
       const missing = Object.entries(required).filter(([_, v]) => !String(v || '').trim()).map(([k]) => k);
       if (missing.length) {
-        return res.status(400).json({ error: `Thiếu field bắt buộc: ${missing.join(', ')}` });
+        const message = `Thiếu field bắt buộc: ${missing.join(', ')}`;
+        finishRun(runId, { status: 'error', error: message });
+        return res.status(400).json({ ok: false, error: message });
       }
 
       // Credentials từ form chỉ dùng khi .env chưa có
@@ -817,7 +854,7 @@ export function createApp() {
 
   /** Lịch sử chạy: mọi user đăng nhập đều xem được (để biết queue). Xóa/dọn vẫn admin-only. */
   app.get('/api/runs', requireAuth, requireAdmin, (req, res) => {
-    const limit = Math.min(500, Number(req.query.limit) || 100);
+    const limit = Math.min(2000, Number(req.query.limit) || 100);
     const user = String(req.query.user || '').trim();
     const from = String(req.query.from || '').trim();
     const to = String(req.query.to || '').trim();
@@ -852,6 +889,12 @@ export function createApp() {
     res.json(out);
   });
 
+  /** Lỗi gần đây. Đặt trước /:id để "errors" không bị coi là id. */
+  app.get('/api/runs/errors', requireAuth, requireAdmin, (req, res) => {
+    const top = Math.min(20, Math.max(1, Number(req.query.top) || 10));
+    res.json({ errors: recentErrors({ top }) });
+  });
+
   /** Chi tiết 1 run (cho drawer) */
   app.get('/api/runs/:id', requireAuth, requireAdmin, (req, res) => {
     const id = String(req.params.id || '').trim();
@@ -859,12 +902,6 @@ export function createApp() {
     const run = runs.find((r) => String(r.id) === id);
     if (!run) return res.status(404).json({ error: 'Không tìm thấy.' });
     res.json({ run });
-  });
-
-  /** Lỗi gần đây gom theo nội dung. */
-  app.get('/api/runs/errors', requireAuth, requireAdmin, (req, res) => {
-    const top = Math.min(20, Math.max(1, Number(req.query.top) || 10));
-    res.json({ errors: recentErrors({ top }) });
   });
 
   app.delete('/api/runs', requireAuth, requireAdmin, (_req, res) => {

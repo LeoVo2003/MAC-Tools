@@ -961,17 +961,6 @@ document.getElementById('accountsTable')?.addEventListener('click', async (e) =>
   }
 });
 
-function formatDuration(ms) {
-  if (ms == null || !Number.isFinite(ms) || ms < 0) return '—';
-  const totalSec = Math.round(ms / 1000);
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor((totalSec % 3600) / 60);
-  const s = totalSec % 60;
-  if (h > 0) return `${h}h ${m}m ${s}s`;
-  if (m > 0) return `${m}m ${s}s`;
-  return `${s}s`;
-}
-
 /** ISO UTC → `YYYY-MM-DD HH:mm:ss` theo giờ Việt Nam (UTC+7). */
 function formatVnDateTime(iso) {
   if (!iso) return '';
@@ -993,21 +982,19 @@ function formatVnDateTime(iso) {
   return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}:${get('second')}`;
 }
 
-function runDurationMs(r) {
-  if (r.durationMs != null && Number.isFinite(Number(r.durationMs))) return Number(r.durationMs);
-  if (!r.startedAt || !r.finishedAt) return null;
-  const a = Date.parse(r.startedAt);
-  const b = Date.parse(r.finishedAt);
-  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
-  return Math.max(0, b - a);
-}
-
 function renderQueue(q) {
   const max = Number(q?.maxConcurrent) || 0;
   const runningNow = Number(q?.runningCount) || 0;
   const waitingNow = Number(q?.pendingCount) || 0;
   setKpi(kpiRunning, runningNow, runningNow > 0);
   setKpi(kpiWaiting, waitingNow, waitingNow > 0);
+  const capHint = document.getElementById('concurrentHint');
+  if (capHint) {
+    const cap = max > 0
+      ? `Tối đa ${max} job Chrome cùng lúc.`
+      : 'Không giới hạn số job Chrome cùng lúc.';
+    capHint.textContent = `Login WPM + Quick Login luôn chạy. ${cap} Mỗi người một job.`;
+  }
   if (q?.runningCount > 0 || q?.pendingCount > 0) {
     queueHint.textContent = `Đang chạy ${q.runningCount || 0}${max > 0 ? `/${max}` : ' job'}${q.pendingCount ? ` · chờ ${q.pendingCount}` : ''}`;
   } else {
@@ -1083,125 +1070,6 @@ async function refreshQueue() {
   }
 }
 
-function reportQuery() {
-  const p = new URLSearchParams();
-  p.set('limit', '200');
-  const user = document.getElementById('filterUser')?.value?.trim();
-  const from = document.getElementById('filterFrom')?.value;
-  const to = document.getElementById('filterTo')?.value;
-  const status = document.getElementById('filterStatus')?.value;
-  if (user) p.set('user', user);
-  if (from) p.set('from', from);
-  if (to) p.set('to', to);
-  if (status) p.set('status', status);
-  return p;
-}
-
-function selectedRunIds() {
-  return [...document.querySelectorAll('#runsTable tbody .run-check:checked')]
-    .map((el) => el.value)
-    .filter(Boolean);
-}
-
-function syncRunsDeleteBtn() {
-  const btn = document.getElementById('deleteSelectedRunsBtn');
-  const all = document.getElementById('runsSelectAll');
-  const boxes = [...document.querySelectorAll('#runsTable tbody .run-check')];
-  const n = selectedRunIds().length;
-  if (btn) btn.disabled = n === 0;
-  if (all) {
-    all.checked = boxes.length > 0 && boxes.every((b) => b.checked);
-    all.indeterminate = n > 0 && n < boxes.length;
-  }
-}
-
-async function loadReports() {
-  const res = await fetch(`/api/runs?${reportQuery()}`);
-  if (!res.ok) return;
-  const data = await res.json();
-  document.getElementById('statTotal').textContent = data.stats?.total ?? 0;
-  document.getElementById('statOk').textContent = data.stats?.success ?? 0;
-  const avgEl = document.getElementById('statAvg');
-  if (avgEl) avgEl.textContent = formatDuration(data.stats?.avgDurationMs);
-  const tbody = document.querySelector('#runsTable tbody');
-  tbody.innerHTML = '';
-  const selectAll = document.getElementById('runsSelectAll');
-  if (selectAll) {
-    selectAll.checked = false;
-    selectAll.indeterminate = false;
-  }
-  for (const r of data.runs || []) {
-    const tr = document.createElement('tr');
-    const noteRaw =
-      r.error ||
-      r.resultSummary?.username ||
-      (r.resultSummary?.accountExists ? 'account exists' : '');
-    const note = String(noteRaw || '—').replace(/\s+/g, ' ').trim();
-    const dur = formatDuration(runDurationMs(r));
-    const started = formatVnDateTime(r.startedAt);
-    const [datePart, timePart] = started.includes(' ')
-      ? started.split(' ')
-      : [started, ''];
-    const url = r.websiteUrl || '—';
-    const user = r.toolUser || r.username || '—';
-    const statusClass =
-      r.status === 'success'
-        ? 'done'
-        : r.status === 'error'
-          ? 'error'
-          : r.status === 'cancelled'
-            ? 'cancelled'
-            : 'running';
-
-    const tdCheck = document.createElement('td');
-    tdCheck.className = 'col-check';
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.className = 'run-check';
-    cb.value = r.id || '';
-    cb.disabled = !r.id;
-    cb.addEventListener('change', syncRunsDeleteBtn);
-    tdCheck.appendChild(cb);
-
-    const tdTime = document.createElement('td');
-    tdTime.className = 'col-time';
-    tdTime.innerHTML = `${escapeHtml(datePart)}${timePart ? `<br><span class="muted">${escapeHtml(timePart)}</span>` : ''}`;
-
-    const tdUser = document.createElement('td');
-    tdUser.className = 'col-user';
-    tdUser.title = user;
-    tdUser.textContent = user;
-
-    const tdUrl = document.createElement('td');
-    tdUrl.className = 'col-url mono';
-    tdUrl.title = url;
-    tdUrl.textContent = url;
-
-    const tdDur = document.createElement('td');
-    tdDur.className = 'col-dur mono';
-    tdDur.textContent = dur;
-
-    const tdStatus = document.createElement('td');
-    tdStatus.className = 'col-status';
-    const badge = document.createElement('span');
-    badge.className = `badge ${statusClass}`;
-    badge.textContent = r.status || '—';
-    tdStatus.appendChild(badge);
-
-    const tdNote = document.createElement('td');
-    tdNote.className = 'col-note';
-    tdNote.title = note;
-    const noteSpan = document.createElement('span');
-    noteSpan.className = 'note-text';
-    noteSpan.textContent = note;
-    tdNote.appendChild(noteSpan);
-
-    tr.append(tdCheck, tdTime, tdUser, tdUrl, tdDur, tdStatus, tdNote);
-    tbody.appendChild(tr);
-  }
-  syncRunsDeleteBtn();
-}
-
 function escapeHtml(s) {
   return String(s)
     .replace(/&/g, '&amp;')
@@ -1209,88 +1077,6 @@ function escapeHtml(s) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 }
-
-async function loadHealth() {
-  const box = document.getElementById('healthBox');
-  if (!box) return;
-  try {
-    const res = await fetch('/api/health');
-    const data = await res.json();
-    const lines = [
-      `ok=${data.ok} · chrome=${data.chrome?.ok ? 'OK' : 'MISSING'} ${data.chrome?.path || data.chrome?.error || ''}`,
-      `downloads≈${data.disk?.mb ?? '?'} MB (${data.disk?.path || ''})`,
-      `queue running=${data.queue?.runningCount || 0} pending=${data.queue?.pendingCount || 0}`,
-    ];
-    for (const a of data.alerts || []) {
-      lines.push(`[${a.level}] ${a.message}`);
-    }
-    if (!(data.alerts || []).length) lines.push('Không có alert.');
-    box.textContent = lines.join('\n');
-  } catch (err) {
-    box.textContent = err.message;
-  }
-}
-
-document.getElementById('refreshReportsBtn')?.addEventListener('click', loadReports);
-document.getElementById('exportCsvBtn')?.addEventListener('click', () => {
-  window.location.href = `/api/runs.csv?${reportQuery()}`;
-});
-document.getElementById('runsSelectAll')?.addEventListener('change', (e) => {
-  const on = Boolean(e.target?.checked);
-  document.querySelectorAll('#runsTable tbody .run-check').forEach((cb) => {
-    if (!cb.disabled) cb.checked = on;
-  });
-  syncRunsDeleteBtn();
-});
-document.getElementById('deleteSelectedRunsBtn')?.addEventListener('click', async () => {
-  const ids = selectedRunIds();
-  if (!ids.length) return;
-  if (!confirm(`Xóa ${ids.length} bản ghi đã chọn? Không hoàn tác được.`)) return;
-  try {
-    const res = await fetch('/api/runs/delete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || res.statusText);
-    await loadReports();
-  } catch (err) {
-    alert(err?.message || 'Xóa bản ghi thất bại.');
-  }
-});
-document.getElementById('purgeFailedRunsBtn')?.addEventListener('click', async () => {
-  if (!confirm('Xóa khỏi lịch sử mọi bản ghi error + cancelled? Không hoàn tác được.')) return;
-  try {
-    const res = await fetch('/api/runs/delete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ statuses: ['error', 'cancelled'] }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || res.statusText);
-    await loadReports();
-    alert(`Đã dọn ${data.deleted ?? 0} bản ghi lỗi/hủy.`);
-  } catch (err) {
-    alert(err?.message || 'Dọn lỗi/hủy thất bại.');
-  }
-});
-document.getElementById('clearReportsBtn')?.addEventListener('click', async () => {
-  if (!confirm('Xóa toàn bộ lịch sử báo cáo? Không hoàn tác được.')) return;
-  try {
-    const res = await fetch('/api/runs', { method: 'DELETE' });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || res.statusText);
-    await loadReports();
-    alert(`Đã xóa ${data.cleared ?? 0} bản ghi.`);
-  } catch (err) {
-    alert(err?.message || 'Xóa báo cáo thất bại.');
-  }
-});
-document.getElementById('refreshHealthBtn')?.addEventListener('click', loadHealth);
-['filterUser', 'filterFrom', 'filterTo', 'filterStatus'].forEach((id) => {
-  document.getElementById(id)?.addEventListener('change', loadReports);
-});
 
 async function setupLiveChrome() {
   const panel = document.getElementById('liveChromePanel');
@@ -1535,8 +1321,20 @@ async function generateReviewLink() {
   rlBtn.disabled = false;
 }
 
+function safeHttpUrl(raw) {
+  try {
+    const u = new URL(String(raw || ''));
+    if (u.protocol === 'http:' || u.protocol === 'https:') return u.href;
+  } catch { /* bỏ */ }
+  return '';
+}
+
 function reviewLinkCard(data, srcUrl) {
-  const platform = data.platform === 'google' ? 'Google' : 'Yelp';
+  const reviewUrl = safeHttpUrl(data.reviewUrl);
+  if (!reviewUrl) {
+    return `<div class="rl-result rl-result--error"><p class="err-msg">Review link không phải http hoặc https.</p></div>`;
+  }
+  const platform = data.platform === 'google' ? 'Google' : data.platform === 'yelp' ? 'Yelp' : 'Review';
   const platClass = data.platform === 'yelp' ? ' rl-result--yelp' : '';
   const icon = data.platform === 'google'
     ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="24" height="24"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>'
@@ -1549,18 +1347,21 @@ function reviewLinkCard(data, srcUrl) {
         <p class="rl-platform">${platform}</p>
         <p class="muted small">Direct review link sẵn sàng</p>
       </div>
-      <a class="btn btn-primary" target="_blank" rel="noopener" href="${escapeHtml(data.reviewUrl)}">Mở review form</a>
+      <a class="btn btn-primary" target="_blank" rel="noopener" href="${escapeHtml(reviewUrl)}">Mở review form</a>
     </div>
     <dl class="kv">
       <dt>Place ID</dt><dd><code id="${uid}-id">${escapeHtml(data.id || '—')}</code> <button type="button" class="btn btn-light btn-sm" data-copy="${uid}-id">Copy</button></dd>
-      <dt>Review link</dt><dd class="rl-link"><a id="${uid}-link" href="${escapeHtml(data.reviewUrl)}" target="_blank" rel="noopener">${escapeHtml(data.reviewUrl)}</a> <button type="button" class="btn btn-light btn-sm" data-copy="${uid}-link">Copy</button></dd>
+      <dt>Review link</dt><dd class="rl-link"><a id="${uid}-link" href="${escapeHtml(reviewUrl)}" target="_blank" rel="noopener">${escapeHtml(reviewUrl)}</a> <button type="button" class="btn btn-light btn-sm" data-copy="${uid}-link">Copy</button></dd>
     </dl>
   </div>`;
 }
 
 rlBtn?.addEventListener('click', generateReviewLink);
 rlUrl?.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') generateReviewLink();
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    generateReviewLink();
+  }
 });
 
 /* ============ QR TOOL (shell — backend sau) ============ */
@@ -1983,8 +1784,9 @@ async function loadDashboard() {
 async function loadDashTable() {
   const tbody = document.querySelector('#dashTable tbody');
   tbody.innerHTML = '<tr><td colspan="8" class="empty">Đang tải…</td></tr>';
+  const { from, to } = dashRangeDates();
   const params = new URLSearchParams({
-    limit: 500, tool: dashState.tool, user: dashState.user, status: dashState.status,
+    limit: 2000, tool: dashState.tool, user: dashState.user, status: dashState.status, from, to,
   });
   try {
     const res = await fetch(`/api/runs?${params}`, { credentials: 'same-origin' });
@@ -2130,7 +1932,8 @@ document.getElementById('dashFilterUser')?.addEventListener('input', (e) => {
 document.getElementById('dashPrev')?.addEventListener('click', () => { if (dashState.page > 1) { dashState.page--; loadDashTable(); } });
 document.getElementById('dashNext')?.addEventListener('click', () => { if (dashState.page < dashState.totalPages) { dashState.page++; loadDashTable(); } });
 document.getElementById('dashExportCsv')?.addEventListener('click', () => {
-  const params = new URLSearchParams({ limit: 2000, tool: dashState.tool, user: dashState.user, status: dashState.status });
+  const { from, to } = dashRangeDates();
+  const params = new URLSearchParams({ limit: 2000, tool: dashState.tool, user: dashState.user, status: dashState.status, from, to });
   window.open(`/api/runs.csv?${params}`, '_blank');
 });
 document.getElementById('dashTable')?.addEventListener('click', (e) => {
@@ -2202,7 +2005,7 @@ document.getElementById('qrFillBtn')?.addEventListener('click', async () => {
       zip: data.zip || '',
       phone: data.phone || '',
       email: data.email || '',
-      websiteUrl: data.websiteUrl || '',
+      websiteUrl: data.websiteUrl || data.website || '',
       social: {
         facebook: data.social?.facebook || data.fields?.facebook || '',
         instagram: data.social?.instagram || data.fields?.instagram || '',
@@ -2247,9 +2050,10 @@ document.getElementById('qrFillBtn')?.addEventListener('click', async () => {
     }
     // (5.1#6) Prefill Homepage link từ websiteUrl của WPM
     const homeInput = document.getElementById('qrHomeLink');
-    if (homeInput && data.websiteUrl && !homeInput.value.trim()) {
-      homeInput.value = data.websiteUrl;
-      qrLog(`Homepage: tự điền từ WPM (${data.websiteUrl})`);
+    const siteUrl = data.websiteUrl || data.website || '';
+    if (homeInput && siteUrl && !homeInput.value.trim()) {
+      homeInput.value = siteUrl;
+      qrLog(`Homepage: tự điền từ WPM (${siteUrl})`);
     }
     // Cập nhật tóm tắt social
     const sumEl = document.getElementById('qrSocialSummary');

@@ -319,9 +319,11 @@ export async function fillCustomerDataFromUrls(
       };
       if (loc.google) log(`Google (Maps): ${loc.google}`);
       log('✓ Đủ data WPM cho QR — kiểm tra rồi Run.');
+      const websiteUrl = normalizeHttpUrl(loc.website || '');
       return {
         ok: true,
         shopName: loc.businessName || shopName,
+        websiteUrl,
         zip: (wpmZip || '').replace(/\D/g, '').slice(0, 5),
         email: loc.email || wpmEmail || '',
         phone: finalPhone,

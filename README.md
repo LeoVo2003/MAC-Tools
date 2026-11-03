@@ -17,7 +17,7 @@ npm start
 
 UI: http://localhost:3847 · Health: `GET /api/health`
 
-`MAX_CONCURRENT_JOBS=0` (mặc định) cho phép job chạy ngay, không chờ slot. Có thể đặt số nguyên dương để giới hạn theo tài nguyên máy. Nếu `.env` cũ có giá trị `1` hoặc `4`, đổi thành `0` để bỏ giới hạn.
+`MAX_CONCURRENT_JOBS=0` trong code và `.env.example` nghĩa là không chờ slot. Compose và CI trên VPS đang ghi `2`. UI User Guide đọc đúng số server đang chạy. Mỗi người vẫn chỉ có một job.
 
 Kiểm tra: `npm test`.
 
@@ -25,8 +25,8 @@ Kiểm tra: `npm test`.
 
 1. **Đăng nhập** bằng **email + password WPM** (cùng tk đăng nhập WPM).
 2. Lần đầu login → tool tự tạo user, lưu WPM (mã hóa) trên server (`data/users.json`).
-3. Vào **Run** — không cần nhập lại WPM; job dùng tk đang login.
-4. Tab **Báo cáo** chỉ hiện với admin.
+3. Vào **User Guide** — không cần nhập lại WPM; job dùng tk đang login.
+4. Tab **Dashboard** chỉ hiện với admin.
 
 **Admin:** cấu hình qua `ADMIN_EMAILS` trong `.env` (phân cách bằng dấu phẩy).
 

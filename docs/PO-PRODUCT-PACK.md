@@ -11,7 +11,7 @@
 
 Team Web trước đây làm tay ~15 phút/job (ít lỗi). Tool thay thế thao tác lặp để **tiết kiệm thời gian** và **chịu được volume task cao**: login WPM → Quick Login → Backup → tạo user Editor → sync WPM → Mac Role / F Package → Web Info → xuất Output (và điền Task nếu có).
 
-Sản phẩm đã **dùng production** trên VPS (FlashPanel/FlashVPS), deploy bằng **push `main` → GitHub Actions**. Từ `2.1.1`: bỏ quota CPU adaptive / giới hạn concurrent mặc định — VPS mới mạnh hơn chạy full; `MAX_CONCURRENT_JOBS=0` (không chờ slot).
+Sản phẩm đã **dùng production** trên VPS (FlashPanel/FlashVPS), deploy bằng **push `main` → GitHub Actions**. Từ `2.1.1`: bỏ quota CPU adaptive. Code mặc định `MAX_CONCURRENT_JOBS=0` (không chờ slot). Compose và CI trên VPS đang đặt `2`.
 
 ---
 
@@ -79,7 +79,7 @@ Copy Output → dán Task / gửi khách (hoặc AM tự lấy nếu Task không
 | Output | 4 ô + Copy; điền Task nếu có | Production |
 | Live Chrome | Snapshot (mặc định); noVNC legacy | Đủ dùng |
 | Hàng đợi | Queue + cancel | Production |
-| Báo cáo | Tab admin: runs / CSV / clear | Production |
+| Dashboard | Tab admin: runs / CSV / clear | Production |
 | Health | `/api/health` | Production |
 | HTTP hybrid 2.1 | createUser, Mac Core/Role, Web Info (+ fallback Chrome) | Production (theo dõi) |
 | Deploy | Docker + GH Actions → VPS | Production |
@@ -91,8 +91,8 @@ Copy Output → dán Task / gửi khách (hoặc AM tự lấy nếu Task không
 
 | Role | Gán | Quyền |
 |---|---|---|
-| **user** | Mọi email WPM login lần đầu (không nằm admin list) | Fill, Run/Resume/Hủy **job mình**, Log/Output/Live, queue mình. Target = Main Web. Không Báo cáo / không API admin. |
-| **admin** | `leo.vo@macusaone.com` + `ADMIN_EMAILS` | Thêm: Target web (Main / khớp Website), Báo cáo, thấy/hủy mọi job, API admin (runs, purge…). |
+| **user** | Mọi email WPM login lần đầu (không nằm admin list) | Fill, Run/Resume/Hủy **job mình**, Log/Output/Live, queue mình. Target = Main Web. Không Dashboard / không API admin. |
+| **admin** | `leo.vo@macusaone.com` + `ADMIN_EMAILS` | Thêm: Target web (Main / khớp Website), Dashboard, thấy/hủy mọi job, API admin (runs, purge…). |
 
 ---
 
@@ -121,7 +121,7 @@ Copy Output → dán Task / gửi khách (hoặc AM tự lấy nếu Task không
 - FR-R8: Output Login URL, Guide, User, Password; có Task URL thì điền field nếu tồn tại, không thì bỏ qua.
 
 ### FR-Admin
-- FR-AD1: Báo cáo runs, CSV, clear.  
+- FR-AD1: Dashboard runs, CSV, clear.  
 - FR-AD2: Target subdomain test.  
 - FR-AD3: Health / purge backup API.
 
@@ -159,7 +159,7 @@ Copy Output → dán Task / gửi khách (hoặc AM tự lấy nếu Task không
 | P0 | Tối ưu tốc độ job trên VPS + adaptive CPU/concurrent khi MME rảnh/bận | Pain vận hành #1 |
 | P0 | Regression backup (parse ngày `Jul …`) + xác nhận đã deploy | Mới fix local |
 | P0 | Email exists → skip tạo/sync — xác nhận đã lên `main` | Mới fix local |
-| P1 | Đồng bộ UI hint concurrent với env VPS thật | Tránh hiểu nhầm “tối đa 4” |
+| P1 | Hint concurrent đọc `maxConcurrent` từ queue | Đã bỏ chữ “tối đa 4” |
 | P1 | Sync WPM qua HTTP (bỏ Chrome bước này) | Còn Chrome |
 | P2 | Web Info HTTP ổn định (giữ fallback Chrome) | Đang hybrid |
 | P2 | Sửa README “SSE” → Socket.IO | Docs lệch code |

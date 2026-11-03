@@ -40,7 +40,7 @@ Admin: cấu hình qua `ADMIN_EMAILS` (thêm email: `ADMIN_EMAILS=a@x.com,b@y.co
 
 Từ `2.1.1`, Compose không đặt quota CPU, ứng dụng không tự hạ CPU và không cần mount `docker.sock`. Các biến `DOCKER_CPU_*` / `ADAPTIVE_*` cũ không còn sử dụng. Chrome không bị ép tắt GPU; khả năng tăng tốc phụ thuộc phần cứng, driver và quyền truy cập thiết bị trong container.
 
-CI chuyển `MAX_CONCURRENT_JOBS` sang `0`, xóa cấu hình CPU/adaptive cũ và recreate container để gỡ quota đang áp dụng. Deploy thủ công: cập nhật Compose, đặt `MAX_CONCURRENT_JOBS=0` trong `.env`, chạy `docker compose up -d --force-recreate`. Nhiều job đồng thời có thể tăng tải CPU/RAM; có thể đặt lại số job nếu host cần chia sẻ tài nguyên.
+CI ghi `MAX_CONCURRENT_JOBS=2` vào `.env` trên VPS, xóa cấu hình CPU/adaptive cũ và recreate container. Compose dùng giá trị đó, không có thì fallback `2`. `0` vẫn có nghĩa không giới hạn nếu tự đặt trong `.env` rồi deploy tay. Nhiều job đồng thời tăng tải CPU/RAM.
 
 ## Nginx mẫu (Socket.IO + Live Chrome WebSocket)
 
@@ -99,7 +99,7 @@ Nếu log/queue không realtime sau F5: thêm block `/socket.io/` như trên.
 cd /home/USER/mac-tools
 # 1) .env: CHROME_LIVE=true (hoặc false nếu team không cần Live), HEADLESS=false, secrets
 #    Live mặc định tắt trên UI — user bấm Mở Live mới start x11vnc; Đóng Live = tắt (tiết kiệm CPU)
-#    CPU không đặt quota; MAX_CONCURRENT_JOBS=0 để không chờ slot.
+#    CPU không đặt quota. CI đặt MAX_CONCURRENT_JOBS=2; giá trị 0 = không chờ slot.
 # 2) nginx có /socket.io/ + /chrome-live/ (WebSocket) + nginx -t && systemctl reload nginx
 # 3) recreate để nhận image + deps socket.io: docker compose up -d --force-recreate
 docker compose pull
