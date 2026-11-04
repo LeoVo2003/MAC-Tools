@@ -30,7 +30,8 @@ function authHeader() {
 }
 
 async function wpFetch(path, { method = 'GET', body = null, headers = {} } = {}) {
-  const url = `${getWpBase()}/wp-json${path}`;
+  const base = getWpBase();
+  const url = `${base}/wp-json${path}`;
   const ctrl = new AbortController();
   const timeout = setTimeout(() => ctrl.abort(), 30000);
   try {
@@ -48,7 +49,12 @@ async function wpFetch(path, { method = 'GET', body = null, headers = {} } = {})
     let data = null;
     try { data = text ? JSON.parse(text) : null; } catch { data = { _raw: text }; }
     if (!res.ok) {
-      const msg = data?.message || data?.code || `HTTP ${res.status}`;
+      // HTML 404 (sai host / permalinks tắt) → message rõ, đừng chỉ hiện "HTTP 404"
+      const looksHtml = typeof data?._raw === 'string' && /<!doctype html|<html/i.test(data._raw);
+      let msg = data?.message || data?.code || `HTTP ${res.status}`;
+      if (res.status === 404 && looksHtml) {
+        msg = `REST API không có tại ${base}/wp-json (HTTP 404 HTML). Kiểm tra QR_WP_BASE — QR landing phải là https://qr.macmarketing.us (không phải quan/tracker)`;
+      }
       const err = new Error(`WP API ${method} ${path}: ${msg}`);
       err.status = res.status;  // (2.5) để check status code thay vì regex message
       err.data = data;
@@ -187,9 +193,20 @@ export async function wpDeletePage(id) {
 
 /** Tìm page theo slug → page object hoặc null */
 export async function wpFindPageBySlug(slug) {
-  // Bao gồm draft/pending/private để phát hiện page dở dang từ lần chạy lỗi (2.1)
-  const pages = await wpFetch(`/wp/v2/pages?slug=${encodeURIComponent(slug)}&status=publish,draft,pending,private`);
-  return Array.isArray(pages) && pages.length ? pages[0] : null;
+  // Bao gồm draft/pending/private để phát hiện page dở dang từ lần chạy lỗi (2.1).
+  // Cần Application Password hợp lệ — không auth thì WP trả 400 Status is forbidden.
+  const q = `slug=${encodeURIComponent(slug)}&status=publish,draft,pending,private`;
+  try {
+    const pages = await wpFetch(`/wp/v2/pages?${q}`);
+    return Array.isArray(pages) && pages.length ? pages[0] : null;
+  } catch (err) {
+    // Auth yếu/hết hạn: fallback chỉ publish (public) thay vì chết cả job
+    if (err.status === 400 || err.status === 401 || err.status === 403) {
+      const pages = await wpFetch(`/wp/v2/pages?slug=${encodeURIComponent(slug)}&status=publish`);
+      return Array.isArray(pages) && pages.length ? pages[0] : null;
+    }
+    throw err;
+  }
 }
 
 /** Tạo page trống (draft, canvas) — chưa có Elementor data */
@@ -268,4 +285,30 @@ export function wpConfigOk() {
   const user = overrideUser || getWpUser();
   const pass = overridePass || getWpAppPassword();
   return Boolean(getWpBase() && user && pass);
+}
+
+/** Ping REST root — fail sớm nếu QR_WP_BASE sai host / permalinks tắt */
+export async function wpPing() {
+  const base = getWpBase();
+  const url = `${base}/wp-json/`;
+  const ctrl = new AbortController();
+  const timeout = setTimeout(() => ctrl.abort(), 15000);
+  try {
+    const res = await fetch(url, { signal: ctrl.signal, headers: { Accept: 'application/json' } });
+    const text = await res.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch { /* HTML */ }
+    if (!res.ok || !data?.namespaces) {
+      throw new Error(
+        `WP REST không trả lời tại ${url} (HTTP ${res.status}). ` +
+        `QR_WP_BASE phải là site QR landing (https://qr.macmarketing.us), không phải quan/tracker.`
+      );
+    }
+    if (!Array.isArray(data.namespaces) || !data.namespaces.includes('wp/v2')) {
+      throw new Error(`Site ${base} thiếu namespace wp/v2 — sai WordPress target cho QR Tool`);
+    }
+    return { name: data.name, url: data.url || base };
+  } finally {
+    clearTimeout(timeout);
+  }
 }

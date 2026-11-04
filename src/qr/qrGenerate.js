@@ -17,6 +17,7 @@ import {
   wpSetElementorData,
   wpPublishPage,
   wpConfigOk,
+  wpPing,
   wpClearErrorLog,
   wpGetErrorLog,
   getWpBase,
@@ -98,6 +99,9 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
   if (!wpConfigOk()) throw new Error('Chưa cấu hình QR_WP_* trong .env');
 
   const result = { steps: [] };
+  // Fail sớm nếu QR_WP_BASE trỏ nhầm host (vd. quan.macmarketing.us → /wp-json HTML 404)
+  const ping = await wpPing();
+  log(`WP OK — ${ping.name || ping.url}`);
   const step = (name, ok, detail = '') => {
     result.steps.push({ name, ok, detail });
     log(`${ok ? '✓' : '✗'} ${name}${detail ? ` — ${detail}` : ''}`);
