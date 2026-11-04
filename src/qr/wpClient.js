@@ -1,6 +1,7 @@
 /**
- * WordPress REST API client cho QR Tool → qr.macmarketing.us
+ * WordPress REST API client cho QR Tool (QR_WP_BASE).
  * Auth: Application Password qua Basic Auth (từ env QR_WP_*).
+ * Hỗ trợ site tắt pretty /wp-json (vd. quan test) → fallback ?rest_route=.
  */
 
 // Đọc env lazy (dotenv.config chạy sau khi modules load)
@@ -19,6 +20,9 @@ export function setWpCredentials(user, pass) {
 }
 export function clearWpCredentials() { overrideUser = ''; overridePass = ''; }
 
+/** 'pretty' = /wp-json/... | 'query' = /?rest_route=/... | null = chưa biết */
+let restStyle = null;
+
 function authHeader() {
   const user = overrideUser || getWpUser();
   const pass = overridePass || getWpAppPassword();
@@ -29,11 +33,27 @@ function authHeader() {
   return `Basic ${token}`;
 }
 
-async function wpFetch(path, { method = 'GET', body = null, headers = {} } = {}) {
+/** path: /wp/v2/pages?slug=x hoặc /qr/v1/template/1 */
+function buildRestUrl(path, style) {
   const base = getWpBase();
-  const url = `${base}/wp-json${path}`;
+  const clean = path.startsWith('/') ? path : `/${path}`;
+  const qIdx = clean.indexOf('?');
+  const route = qIdx >= 0 ? clean.slice(0, qIdx) : clean;
+  const query = qIdx >= 0 ? clean.slice(qIdx + 1) : '';
+  if (style === 'query') {
+    // Quan / site permalinks lạ: /wp-json → HTML 404, nhưng ?rest_route= OK
+    return `${base}/?rest_route=${route}${query ? `&${query}` : ''}`;
+  }
+  return `${base}/wp-json${clean}`;
+}
+
+function isHtml404(status, data) {
+  return status === 404 && typeof data?._raw === 'string' && /<!doctype html|<html/i.test(data._raw);
+}
+
+async function rawFetch(url, { method = 'GET', body = null, headers = {}, timeoutMs = 30000 } = {}) {
   const ctrl = new AbortController();
-  const timeout = setTimeout(() => ctrl.abort(), 30000);
+  const timeout = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const res = await fetch(url, {
       method,
@@ -41,50 +61,82 @@ async function wpFetch(path, { method = 'GET', body = null, headers = {} } = {})
       headers: {
         Authorization: authHeader(),
         'Content-Type': 'application/json',
+        Accept: 'application/json',
         ...headers,
       },
-      body: body ? JSON.stringify(body) : null,
+      body: body ? (Buffer.isBuffer(body) || typeof body === 'string' || body instanceof Uint8Array ? body : JSON.stringify(body)) : null,
     });
     const text = await res.text();
     let data = null;
     try { data = text ? JSON.parse(text) : null; } catch { data = { _raw: text }; }
-    if (!res.ok) {
-      // HTML 404 (sai host / permalinks tắt) → message rõ, đừng chỉ hiện "HTTP 404"
-      const looksHtml = typeof data?._raw === 'string' && /<!doctype html|<html/i.test(data._raw);
-      let msg = data?.message || data?.code || `HTTP ${res.status}`;
-      if (res.status === 404 && looksHtml) {
-        msg = `REST API không có tại ${base}/wp-json (HTTP 404 HTML). Kiểm tra QR_WP_BASE — QR landing phải là https://qr.macmarketing.us (không phải quan/tracker)`;
-      }
-      const err = new Error(`WP API ${method} ${path}: ${msg}`);
-      err.status = res.status;  // (2.5) để check status code thay vì regex message
-      err.data = data;
-      throw err;
-    }
-    return data;
+    return { res, data, text };
   } finally {
     clearTimeout(timeout);
   }
 }
 
+async function wpFetch(path, { method = 'GET', body = null, headers = {} } = {}) {
+  const tryStyle = restStyle || 'pretty';
+  let url = buildRestUrl(path, tryStyle);
+  let { res, data } = await rawFetch(url, { method, body, headers });
+
+  // Pretty /wp-json trả HTML 404 → chuyển sang ?rest_route= (một lần, cache cả process)
+  if (isHtml404(res.status, data) && tryStyle === 'pretty') {
+    restStyle = 'query';
+    url = buildRestUrl(path, 'query');
+    ({ res, data } = await rawFetch(url, { method, body, headers }));
+  } else if (res.ok && !restStyle) {
+    restStyle = tryStyle;
+  }
+
+  if (!res.ok) {
+    let msg = data?.message || data?.code || `HTTP ${res.status}`;
+    if (isHtml404(res.status, data)) {
+      msg = `REST API không trả JSON tại ${getWpBase()} (HTTP 404 HTML). Thử bật permalinks hoặc kiểm tra QR_WP_BASE=${getWpBase()}`;
+    }
+    const err = new Error(`WP API ${method} ${path}: ${msg}`);
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+  if (!restStyle) restStyle = tryStyle;
+  return data;
+}
+
 /** Upload 1 file lên WP Media → { id, url } */
 export async function wpUploadMedia(fileBuffer, filename, mimeType) {
-  const url = `${getWpBase()}/wp-json/wp/v2/media`;
+  // Đảm bảo đã detect restStyle (pretty vs query)
+  if (!restStyle) {
+    try { await wpPing(); } catch { /* wpFetch bên dưới sẽ tự fallback */ }
+  }
+  const url = buildRestUrl('/wp/v2/media', restStyle || 'pretty');
   const ctrl = new AbortController();
   const timeout = setTimeout(() => ctrl.abort(), 60000);
   try {
-    // Gửi raw binary với Content-Disposition (ổn định hơn FormData)
-    const res = await fetch(url, {
-      method: 'POST',
-      signal: ctrl.signal,
-      headers: {
-        Authorization: authHeader(),
-        'Content-Type': mimeType || 'application/octet-stream',
-        'Content-Disposition': `attachment; filename="${filename}"`,
-      },
-      body: fileBuffer,
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(`Upload ${filename}: ${data?.message || `HTTP ${res.status}`}`);
+    const doUpload = async (uploadUrl) => {
+      const res = await fetch(uploadUrl, {
+        method: 'POST',
+        signal: ctrl.signal,
+        headers: {
+          Authorization: authHeader(),
+          'Content-Type': mimeType || 'application/octet-stream',
+          'Content-Disposition': `attachment; filename="${filename}"`,
+          Accept: 'application/json',
+        },
+        body: fileBuffer,
+      });
+      const text = await res.text();
+      let data = null;
+      try { data = text ? JSON.parse(text) : {}; } catch { data = { _raw: text }; }
+      return { res, data };
+    };
+
+    let { res, data } = await doUpload(url);
+    if (isHtml404(res.status, data) && (restStyle || 'pretty') === 'pretty') {
+      restStyle = 'query';
+      ({ res, data } = await doUpload(buildRestUrl('/wp/v2/media', 'query')));
+    }
+    if (!res.ok) throw new Error(`Upload ${filename}: ${data?.message || data?.code || `HTTP ${res.status}`}`);
     return { id: data.id, url: data.source_url };
   } finally {
     clearTimeout(timeout);
@@ -287,28 +339,41 @@ export function wpConfigOk() {
   return Boolean(getWpBase() && user && pass);
 }
 
-/** Ping REST root — fail sớm nếu QR_WP_BASE sai host / permalinks tắt */
+/** Ping REST root — detect pretty /wp-json vs ?rest_route= (quan test thường cần query) */
 export async function wpPing() {
   const base = getWpBase();
-  const url = `${base}/wp-json/`;
-  const ctrl = new AbortController();
-  const timeout = setTimeout(() => ctrl.abort(), 15000);
-  try {
-    const res = await fetch(url, { signal: ctrl.signal, headers: { Accept: 'application/json' } });
-    const text = await res.text();
-    let data = null;
-    try { data = text ? JSON.parse(text) : null; } catch { /* HTML */ }
-    if (!res.ok || !data?.namespaces) {
-      throw new Error(
-        `WP REST không trả lời tại ${url} (HTTP ${res.status}). ` +
-        `QR_WP_BASE phải là site QR landing (https://qr.macmarketing.us), không phải quan/tracker.`
-      );
+  const tryOnce = async (style) => {
+    const url = style === 'query' ? `${base}/?rest_route=/` : `${base}/wp-json/`;
+    const ctrl = new AbortController();
+    const timeout = setTimeout(() => ctrl.abort(), 15000);
+    try {
+      const res = await fetch(url, { signal: ctrl.signal, headers: { Accept: 'application/json' } });
+      const text = await res.text();
+      let data = null;
+      try { data = text ? JSON.parse(text) : null; } catch { data = { _raw: text }; }
+      return { res, data, style, url };
+    } finally {
+      clearTimeout(timeout);
     }
-    if (!Array.isArray(data.namespaces) || !data.namespaces.includes('wp/v2')) {
-      throw new Error(`Site ${base} thiếu namespace wp/v2 — sai WordPress target cho QR Tool`);
-    }
-    return { name: data.name, url: data.url || base };
-  } finally {
-    clearTimeout(timeout);
+  };
+
+  let hit = await tryOnce(restStyle || 'pretty');
+  if ((!hit.res.ok || !hit.data?.namespaces) && hit.style === 'pretty') {
+    hit = await tryOnce('query');
   }
+  if (!hit.res.ok || !hit.data?.namespaces) {
+    throw new Error(
+      `WP REST không trả lời tại ${base} (thử /wp-json và ?rest_route=). Kiểm tra QR_WP_BASE=${base}`
+    );
+  }
+  if (!Array.isArray(hit.data.namespaces) || !hit.data.namespaces.includes('wp/v2')) {
+    throw new Error(`Site ${base} thiếu namespace wp/v2`);
+  }
+  restStyle = hit.style;
+  return {
+    name: hit.data.name,
+    url: hit.data.url || base,
+    restStyle: hit.style,
+    hasQr: hit.data.namespaces.includes('qr/v1'),
+  };
 }
