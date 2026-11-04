@@ -61,15 +61,42 @@ export function contrast(a, b) {
   const x = luminance(a), y = luminance(b);
   return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
 }
-/** Chọn màu chữ tốt nhất cho 1 hoặc nhiều nền (gradient → xét mọi stop, tối đa hoá contrast tệ nhất). */
-export function pickTextColor(bgs, { light = '#FFFFFF', dark = '#141414', pure = ['#000000'] } = {}) {
-  const list = Array.isArray(bgs) ? bgs : [bgs];
-  const worst = (t) => Math.min(...list.map((b) => contrast(b, t)));
-  let best = worst(light) >= worst(dark) ? light : dark;
-  if (worst(best) < 4.5) { // fallback đen/trắng tuyệt đối
-    for (const t of [light === best ? '#000000' : '#FFFFFF', ...pure]) if (worst(t) > worst(best)) best = t;
+/**
+ * Chọn màu chữ (trắng/đen) đạt contrast tốt nhất trên nền quyết định.
+ * Gradient lẫn sáng+tối: quyết định theo phần tối (stop L thấp) — nút nhìn “đậm”, chữ trắng;
+ * không maximize worst-stop (sẽ kẹt chữ đen vì 1 stop lime sáng).
+ * `ratio` = contrast trên nền quyết định; `worstRatio` = stop tệ nhất (cảnh báo).
+ */
+export function pickTextColor(bgs, { light = '#FFFFFF', dark = '#141414', prefer = null } = {}) {
+  const list = (Array.isArray(bgs) ? bgs : [bgs]).filter(Boolean);
+  if (!list.length) return { color: dark, ratio: 0, worstRatio: 0 };
+
+  let decide = prefer || list[0];
+  if (list.length > 1) {
+    const meta = list.map((hex) => {
+      const c = parseHex(hex);
+      return { hex, L: c ? rgbToOklch(c).L : 0.5 };
+    });
+    const Lmin = Math.min(...meta.map((m) => m.L));
+    const Lmax = Math.max(...meta.map((m) => m.L));
+    // Gradient tương phản mạnh + có vùng tối → chọn chữ theo vùng tối
+    if (Lmax - Lmin >= 0.22 && Lmin < 0.55) {
+      const darkish = meta.filter((m) => m.L <= (Lmin + Lmax) / 2);
+      const pool = darkish.length ? darkish : meta;
+      const avgL = pool.reduce((s, m) => s + m.L, 0) / pool.length;
+      // Dùng stop gần avgL của nửa tối (ổn định hơn stop tối nhất đơn lẻ)
+      decide = pool.reduce((best, m) => (Math.abs(m.L - avgL) < Math.abs(best.L - avgL) ? m : best)).hex;
+    }
   }
-  return { color: best, ratio: +worst(best).toFixed(2) };
+
+  const candidates = [light, dark, '#FFFFFF', '#000000'];
+  let best = candidates[0], bestR = 0;
+  for (const t of candidates) {
+    const r = contrast(decide, t);
+    if (r > bestR) { bestR = r; best = t; }
+  }
+  const worstRatio = Math.min(...list.map((b) => contrast(b, best)));
+  return { color: best, ratio: +bestR.toFixed(2), worstRatio: +worstRatio.toFixed(2) };
 }
 
 // ---------- input an toàn ----------
@@ -194,10 +221,16 @@ export function buildPalette(primaryRaw, secondaryRaw = '') {
     accentInk = oklchToHex({ L: l, C: p.C, h: p.h });
   }
 
-  const onPrimary = pickTextColor(primStops), onSecondary = pickTextColor(secStops), onSoft = pickTextColor(soft);
+  // Chữ trên nút: theo màu đại diện (OKLCH trung bình) — tự gen trắng/đen cho đúng contrast nhìn tổng thể
+  const primBase = oklchToHex({ L: p.L, C: p.C, h: p.h });
+  const secBase = isGradient(secondary)
+    ? oklchToHex(baseColor(secondary) || p)
+    : String(secondary).slice(0, 7);
+  const onPrimary = pickTextColor(primStops, { prefer: primBase });
+  const onSecondary = pickTextColor(secStops, { prefer: secBase });
+  const onSoft = pickTextColor(soft);
   // (1.5) --qr-primary-bg: gradient giữ nguyên, màu đặc dùng cho background-color
   // Template dùng background: var(--qr-primary-bg) thay vì background-color
-  const primBase = oklchToHex({ L: p.L, C: p.C, h: p.h });
   const vars = {
     '--qr-primary': grad ? primBase : primary,  // luôn là màu đặc (cho color, border)
     '--qr-primary-bg': primary,  // gradient hoặc màu đặc (cho background)
@@ -212,12 +245,19 @@ export function buildPalette(primaryRaw, secondaryRaw = '') {
   };
   const report = {
     onPrimary: onPrimary.ratio, onSecondary: onSecondary.ratio, onSoft: onSoft.ratio,
+    onPrimaryWorst: onPrimary.worstRatio, onSecondaryWorst: onSecondary.worstRatio,
     textOnBg: +contrast(bg, ink).toFixed(2), textOnSoft: +contrast(soft, ink).toFixed(2),
     primaryVsSecondary: +contrast(primStops[0], secStops[0]).toFixed(2),
     accentInkOnSoft: +contrast(accentInk, soft).toFixed(2),
     warnings: [],
   };
-  if (report.onPrimary < 4.5) report.warnings.push(`Chữ trên nút primary chỉ ${report.onPrimary}:1 (<4.5) — nên đổi màu chính.`);
+  if (report.onPrimary < 4.5) {
+    report.warnings.push(`Chữ trên nút primary chỉ ${report.onPrimary}:1 (<4.5) — nên đổi màu chính.`);
+  } else if (grad && report.onPrimaryWorst < 4.5) {
+    report.warnings.push(
+      `Gradient có stop contrast thấp (${report.onPrimaryWorst}:1) — chữ đã chọn theo màu trung bình nút (${report.onPrimary}:1).`
+    );
+  }
   if (report.onSecondary < 4.5) report.warnings.push(`Chữ trên nút secondary chỉ ${report.onSecondary}:1 (<4.5).`);
   if (report.primaryVsSecondary < 1.3) report.warnings.push('Primary và secondary quá giống nhau.');
   if (p.L > 0.93) report.warnings.push('Màu chính gần trắng — sẽ không nổi trên nền sáng.');

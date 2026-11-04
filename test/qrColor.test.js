@@ -45,6 +45,14 @@ test('--qr-primary-bg giữ gradient, --qr-primary luôn đặc', () => {
 test('contrast đen/trắng = 21', () => assert.equal(Math.round(contrast('#000000', '#FFFFFF')), 21));
 test('màu rác → throw', () => assert.throws(() => buildPalette('red')));
 
+test('gradient sáng→tối: chữ theo màu trung bình (không kẹt chữ đen trên nửa tối)', () => {
+  // Lime sáng + teal tối — worst-stop từng khiến pick đen (fail nửa tối). Kỳ vọng chữ trắng.
+  const g = 'linear-gradient(90deg,#C8F560,#0B4F4A)';
+  const { vars, report } = buildPalette(g);
+  assert.equal(vars['--qr-text-on-primary'].toUpperCase(), '#FFFFFF');
+  assert.ok(report.onPrimary >= 4.5, `onPrimary ${report.onPrimary}`);
+});
+
 test('sanitize: chuẩn hoá hex, chặn gradient chèn CSS', () => {
   assert.equal(sanitizeColorInput('e31e24'), '#E31E24');
   assert.equal(sanitizeColorInput('#e31'), '#EE3311');
