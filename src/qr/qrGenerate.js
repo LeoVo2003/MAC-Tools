@@ -32,6 +32,7 @@ import {
   buildCssVariablesBlock,
   replaceCssVariables,
   rebindCF7,
+  findCf7FormId,
   removeReviewCta,
   slugify,
   countElements,
@@ -155,12 +156,8 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
         // Tìm widget CF7 trong data cũ
         const findCf7 = (els) => {
           for (const el of els || []) {
-            const wt = String(el.widgetType || '').toLowerCase();
-            if (wt.includes('cf7') || wt.includes('contact')) {
-              const s = el.settings || {};
-              const fid = s.contact_form || s.form_id || s.id || s.selected_form;
-              if (fid) return parseInt(fid, 10) || null;
-            }
+            const fid = findCf7FormId(el);
+            if (fid) return fid;
             const found = findCf7(el.elements);
             if (found) return found;
           }
@@ -405,7 +402,7 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
 
   // 7d. Rebind CF7 (nếu có form)
   if (cf7Form) {
-    const cf7Count = rebindCF7(elements, cf7Form.id);
+    const cf7Count = rebindCF7(elements, cf7Form);
     step('rebind-cf7', true, `${cf7Count} widget`);
     // (2.2) KHÔNG xóa form cũ ở đây — dời xuống sau verify OK
   }
@@ -473,9 +470,12 @@ export async function generateQRPage({ wpmData, inputs, files, onLog = () => {},
       step('verify', false, reasons.join(', ') + ' (xem [php] log)');
       result.verified = false;  // (2.4)
       // (3.3 fix) Verify fail → ném lỗi để trigger rollback (không để page lỗi live)
-      throw new Error(`Verify thất bại: ${reasons.join(', ')}`);
+      const verifyErr = new Error(`Verify thất bại: ${reasons.join(', ')}`);
+      verifyErr.verifyFailed = true;
+      throw verifyErr;
     }
   } catch (err) {
+    if (err.verifyFailed) throw err;
     step('verify', false, err.message);
     result.verified = false;  // (2.4)
   }

@@ -81,7 +81,25 @@ export function replaceMedia(elements, mappings) {
  */
 function isDirectFormContainer(el) {
   if (!Array.isArray(el.elements)) return false;
-  return el.elements.some((sub) => String(sub.widgetType || '').includes('contact-form-7'));
+  return el.elements.some((sub) => isCf7Widget(sub));
+}
+
+const CF7_TAG_RE = /\[contact-form-7\b[^\]]*\]/;
+
+/** Widget CF7 của JetElements, hoặc shortcode widget đã được rebind trước đó. */
+function isCf7Widget(el) {
+  const wt = String(el.widgetType || '').toLowerCase();
+  if (wt === 'contact-form-7') return true;
+  return wt === 'shortcode' && CF7_TAG_RE.test(String(el.settings?.shortcode || ''));
+}
+
+/** Đọc form ID từ widget CF7 (JetElements cũ hoặc shortcode widget). */
+export function findCf7FormId(el) {
+  if (!isCf7Widget(el)) return null;
+  const s = el.settings || {};
+  const m = String(s.shortcode || '').match(/\[contact-form-7\b[^\]]*\bid="(\d+)"/);
+  const raw = m ? m[1] : (s.contact_form || s.form_id || s.selected_form);
+  return parseInt(raw, 10) || null;
 }
 
 /**
@@ -366,22 +384,99 @@ export function setCssVariables(elements, variables) {
   return css;
 }
 
+const cssBox = (b) => {
+  if (!b || typeof b !== 'object') return '';
+  const u = b.unit || 'px';
+  return ['top', 'right', 'bottom', 'left'].map((k) => `${b[k] === '' || b[k] == null ? 0 : b[k]}${u}`).join(' ');
+};
+const cssSize = (v) => {
+  if (v == null || v === '') return '';
+  if (typeof v === 'number' || typeof v === 'string') return `${v}px`;
+  return v.size === '' || v.size == null ? '' : `${v.size}${v.unit || 'px'}`;
+};
+const cssColor = (s, key) => {
+  const g = String(s.__globals__?.[key] || '');
+  const gid = g.split('id=')[1];
+  if (gid) return `var( --e-global-color-${gid} )`;
+  return s[key] || '';
+};
+
 /**
- * Rebind CF7 widget → form ID mới.
- * Tìm widget có setting chứa form ID cũ / contact_form.
+ * CSS tương đương style JetElements CF7 widget sinh ra (input, textarea, submit,
+ * thông báo lỗi), scope theo element id — để giữ giao diện khi đổi sang shortcode widget.
  */
-export function rebindCF7(elements, newFormId) {
+export function buildCf7WidgetCss(settings, elId) {
+  const s = settings || {};
+  const scope = `.elementor .elementor-element.elementor-element-${elId} .wpcf7`;
+  const field = ' .wpcf7-form-control:not(.wpcf7-submit):not(.wpcf7-checkbox):not(.wpcf7-radio):not(.wpcf7-acceptance):not(.wpcf7-file)';
+  const rules = [];
+  const add = (sel, decls) => {
+    const d = decls.filter(Boolean).join('');
+    if (d) rules.push(`${scope}${sel}{${d}}`);
+  };
+  const text = cssColor(s, 'text_color');
+  if (text) {
+    add(' *:not(.wpcf7-form-control):not(option):not(a)', [`color:${text};`]);
+    add(' .wpcf7-form-control.wpcf7-file', [`color:${text};`]);
+  }
+  const notice = cssBox(s.invalid_notice_margin);
+  add(' span.wpcf7-not-valid-tip', [notice && `margin:${notice};`, 'display:block;', 'text-align:left;']);
+  const sh = s.input_box_shadow_box_shadow_type === 'yes' ? s.input_box_shadow_box_shadow : null;
+  add(field, [
+    cssSize(s.input_typography_font_size) && `font-size:${cssSize(s.input_typography_font_size)};`,
+    cssBox(s.input_padding) && `padding:${cssBox(s.input_padding)};`,
+    cssBox(s.input_margin) && `margin:${cssBox(s.input_margin)};`,
+    cssBox(s.input_border_radius) && `border-radius:${cssBox(s.input_border_radius)};`,
+    s.input_border_border && `border-style:${s.input_border_border};`,
+    sh && `box-shadow:${sh.horizontal || 0}px ${sh.vertical || 0}px ${sh.blur || 0}px ${sh.spread || 0}px ${sh.color || 'rgba(0,0,0,0.5)'};`,
+  ]);
+  const ta = cssSize(s.textarea_min_height);
+  if (ta) add(' .wpcf7-form-control.wpcf7-textarea', [`height:${ta};`, `min-height:${ta};`]);
+  add(' input.wpcf7-submit', [
+    cssBox(s.submit_padding) && `padding:${cssBox(s.submit_padding)};`,
+    cssBox(s.submit_margin) && `margin:${cssBox(s.submit_margin)};`,
+    'display:block;',
+    'width:100%;',
+  ]);
+  add(' div.wpcf7-response-output', ['text-align:left;']);
+  for (const [suffix, max] of [['_tablet', 1024], ['_mobile', 767]]) {
+    const fs = cssSize(s[`input_typography_font_size${suffix}`]);
+    if (fs) rules.push(`@media(max-width:${max}px){${scope}${field}{font-size:${fs};}}`);
+  }
+  return rules.join('\n');
+}
+
+/**
+ * Rebind CF7 → form mới. Widget CF7 của JetElements bỏ qua mọi setting chọn form
+ * (luôn render form đầu tiên theo title), nên đổi sang Elementor shortcode widget
+ * với cùng element id, giữ class/advanced settings và CSS style cũ.
+ * @param {Array} elements
+ * @param {{id:number, title?:string}|number} form
+ */
+export function rebindCF7(elements, form) {
+  const id = typeof form === 'object' ? form.id : form;
+  const title = typeof form === 'object' ? String(form.title || '').replace(/["[\]]/g, '') : '';
+  const tag = `[contact-form-7 id="${id}"${title ? ` title="${title}"` : ''}]`;
   let count = 0;
   walkElements(elements, (el) => {
-    // (2.11) Chỉ match widgetType === 'contact-form-7' chính xác
-    // (tránh nhầm với Elementor Form/Login widget)
-    const wt = String(el.widgetType || '').toLowerCase();
-    if (wt === 'contact-form-7') {
-      const s = el.settings || {};
-      // Chỉ set key contact_form (key chuẩn của CF7 widget)
-      s.contact_form = String(newFormId);
-      count++;
+    if (!isCf7Widget(el)) return;
+    const s = el.settings || {};
+    if (el.widgetType === 'shortcode') {
+      s.shortcode = String(s.shortcode).replace(CF7_TAG_RE, () => tag);
+    } else {
+      const css = buildCf7WidgetCss(s, el.id);
+      const keep = {};
+      for (const [k, v] of Object.entries(s)) {
+        if (k.startsWith('_') && k !== '__globals__') keep[k] = v;
+      }
+      const globals = Object.fromEntries(
+        Object.entries(s.__globals__ || {}).filter(([k, v]) => k.startsWith('_') && v),
+      );
+      if (Object.keys(globals).length) keep.__globals__ = globals;
+      el.widgetType = 'shortcode';
+      el.settings = { ...keep, shortcode: `${css ? `<style>${css}</style>\n` : ''}${tag}` };
     }
+    count++;
   });
   return count;
 }
